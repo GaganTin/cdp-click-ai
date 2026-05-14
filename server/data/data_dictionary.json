@@ -1,0 +1,1270 @@
+[
+  {
+    "table": "country_performance",
+    "use_case": "Daily traffic breakdown by country. Used for geographic audience analysis",
+    "granularity": "One row per unique combination of (date, country)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the sessions",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "User's country (GA4 country dimension)"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate"
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total number of sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "event_list",
+    "use_case": "Catalog of all GA4 events fired on a given day. Used to verify event coverage and identify which events are marked as key conversion events",
+    "granularity": "One row per unique combination of (date, event_name, is_key_event)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date the event was observed",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name (e.g. page_view, scroll, purchase, session_start)"
+      },
+      {
+        "name": "is_key_event",
+        "type": "string",
+        "description": "'true' if this event is marked as a key event (conversion) in GA4, otherwise 'false'"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "keyword_performance",
+    "use_case": "Organic search keyword rankings and click performance from Google Search Console. Used for SEO analysis",
+    "granularity": "One row per search query keyword per day",
+    "fields": [
+      {
+        "name": "query",
+        "type": "string",
+        "description": "The search query keyword typed by the user"
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the search impressions and clicks",
+        "format": "YYYY-MM-DD"
+      },
+      {
+        "name": "clicks",
+        "type": "float",
+        "description": "Number of clicks from search results"
+      },
+      {
+        "name": "impressions",
+        "type": "float",
+        "description": "Number of times the URL appeared in search results"
+      },
+      {
+        "name": "ctr",
+        "type": "float",
+        "description": "Click-through rate (clicks / impressions)"
+      },
+      {
+        "name": "position",
+        "type": "float",
+        "description": "Average ranking position in search results (lower is better)"
+      },
+      {
+        "name": "rank_by_impressions",
+        "type": "int",
+        "description": "Rank of this keyword by impression volume on this date (1 = highest impressions)",
+        "is_derived": true,
+        "formula": null
+      },
+      {
+        "name": "rank_by_clicks",
+        "type": "int",
+        "description": "Rank of this keyword by click volume on this date (1 = highest clicks)",
+        "is_derived": true,
+        "formula": null
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      }
+    ]
+  },
+  {
+    "table": "membership",
+    "use_case": "Canonical member profile table used for audience segmentation, identity resolution, consent analysis, and downstream mapping joins.",
+    "granularity": "One row per primary_email after consolidation of prelanding mem files; latest profile fields with first-join identity anchors retained.",
+    "fields": [
+      {
+        "name": "primary_email",
+        "type": "string",
+        "description": "Primary email from LinkedU submission (lead_email); used as the consolidation key when deduplicating member profiles across files."
+      },
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "Canonical membership identifier generated as linkedu_mem_{lead_id}."
+      },
+      {
+        "name": "member_no",
+        "type": "string",
+        "description": "Raw LinkedU lead ID persisted as string."
+      },
+      {
+        "name": "member_join_date",
+        "type": "datetime",
+        "description": "Member join timestamp parsed from submission create_date and normalized to Asia/Hong_Kong timezone in ETL preprocessing."
+      },
+      {
+        "name": "member_last_update",
+        "type": "datetime",
+        "description": "Latest update timestamp carried in the consolidated profile record for the member."
+      },
+      {
+        "name": "member_reg_location",
+        "type": "string",
+        "description": "Registration location field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "member_reg_channel",
+        "type": "string",
+        "description": "Registration acquisition channel from source field how_did_they_hear_about_us."
+      },
+      {
+        "name": "member_type",
+        "type": "string",
+        "description": "Member type classification field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "is_company",
+        "type": "string",
+        "description": "Boolean-style company-account indicator; pipeline currently sets this to false for LinkedU records."
+      },
+      {
+        "name": "has_email",
+        "type": "string",
+        "description": "Boolean-style email availability indicator; pipeline currently sets this to true for LinkedU submissions."
+      },
+      {
+        "name": "secondary_email",
+        "type": "string",
+        "description": "Secondary email field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "has_phone",
+        "type": "string",
+        "description": "Boolean-style phone availability indicator; schema field is present but currently set as false in pipeline output."
+      },
+      {
+        "name": "primary_phone",
+        "type": "string",
+        "description": "Primary phone normalized from phone_sanitized (plus signs removed) when present."
+      },
+      {
+        "name": "secondary_phone",
+        "type": "string",
+        "description": "Secondary phone field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "gender",
+        "type": "string",
+        "description": "Gender field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "nationality",
+        "type": "string",
+        "description": "Nationality field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "age",
+        "type": "string",
+        "description": "Age field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "age_group",
+        "type": "string",
+        "description": "Age group field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "birthday_year",
+        "type": "string",
+        "description": "Birth year field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "birthday_month",
+        "type": "string",
+        "description": "Birth month field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "birthday_day",
+        "type": "string",
+        "description": "Birth day field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "marital_status",
+        "type": "string",
+        "description": "Marital status field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "education_level",
+        "type": "string",
+        "description": "Education/year-group value mapped from source field student_current_year_group."
+      },
+      {
+        "name": "income_level",
+        "type": "string",
+        "description": "Income level field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "employment_status",
+        "type": "string",
+        "description": "Employment status field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "description": "Honorific/title field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "eng_first_name",
+        "type": "string",
+        "description": "English first name from lead_first_name after right-trim cleanup."
+      },
+      {
+        "name": "eng_last_name",
+        "type": "string",
+        "description": "English last name from lead_last_name when provided."
+      },
+      {
+        "name": "eng_full_name",
+        "type": "string",
+        "description": "Display-ready full English name built from first and last name when last name exists."
+      },
+      {
+        "name": "chi_first_name",
+        "type": "string",
+        "description": "Chinese first name field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "chi_last_name",
+        "type": "string",
+        "description": "Chinese last name field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "chi_full_name",
+        "type": "string",
+        "description": "Chinese full name field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "display_name",
+        "type": "string",
+        "description": "Preferred display name; pipeline currently mirrors eng_full_name."
+      },
+      {
+        "name": "is_subscriber_only",
+        "type": "string",
+        "description": "Boolean-style subscriber-only flag; pipeline currently sets this to false for LinkedU records."
+      },
+      {
+        "name": "is_opt_in_email",
+        "type": "string",
+        "description": "Email consent indicator derived from do_not_spam (true when do_not_spam is false)."
+      },
+      {
+        "name": "is_opt_in_call",
+        "type": "string",
+        "description": "Call consent field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "is_opt_in_dm",
+        "type": "string",
+        "description": "Direct-message consent field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "is_opt_in_sms",
+        "type": "string",
+        "description": "SMS consent field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "preferred_channel",
+        "type": "string",
+        "description": "Preferred contact channel; pipeline sets default value to email."
+      },
+      {
+        "name": "preferred_language",
+        "type": "string",
+        "description": "Preferred language locale; pipeline sets default value to en_US."
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Flexible tagging field reserved in schema; currently not populated by LinkedU ingestion."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
+      }
+    ]
+  },
+  {
+    "table": "membership_ap_mapping",
+    "use_case": "Bridges known members to anonymous web tracking IDs for stitching behavioral events to member profiles.",
+    "granularity": "One row per unique (capsuite_ref, membership_id, sid) mapping between member identity and anonymous tracking SID/APID.",
+    "fields": [
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
+      },
+      {
+        "name": "membership_id",
+        "type": "string",
+        "description": "Resolved membership ID looked up from memberships collection using lead_email."
+      },
+      {
+        "name": "sid",
+        "type": "string",
+        "description": "Anonymous SID sourced from tracking_id in prelanding tracking parquet files."
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Capsuite Anonymous ID; pipeline sets this equal to tracking_id/SID."
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Reserved alternate SID field in target schema; currently not populated by pipeline."
+      }
+    ]
+  },
+  {
+    "table": "membership_attributes",
+    "use_case": "Dictionary of normalized custom attribute values used to assign stable attribute IDs before member-level mapping.",
+    "granularity": "One row per unique custom attribute name/value pair available for the client.",
+    "fields": [
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
+      },
+      {
+        "name": "attribute_id",
+        "type": "string",
+        "description": "Deterministic attribute identifier generated from attribute_name::attribute_value during Neon normalization."
+      },
+      {
+        "name": "attribute_name",
+        "type": "string",
+        "description": "Custom attribute key from LinkedU set (e.g., intended_year_of_entry, intended_month_of_entry, intended_year_group, applicant_current_school)."
+      },
+      {
+        "name": "attribute_value",
+        "type": "string",
+        "description": "Custom attribute value retained from latest record per lead_email in prelanding custom_attributes files."
+      }
+    ]
+  },
+  {
+    "table": "membership_attributes_mapping",
+    "use_case": "Bridge table that links each member to resolved custom attribute IDs for many-to-many profiling and targeting use cases.",
+    "granularity": "One row per unique (capsuite_ref, membership_id, attribute_id) relationship.",
+    "fields": [
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
+      },
+      {
+        "name": "membership_id",
+        "type": "string",
+        "description": "Resolved membership ID associated with the member that owns the attribute value."
+      },
+      {
+        "name": "attribute_id",
+        "type": "string",
+        "description": "Attribute dictionary ID linked to membership_attributes.attribute_id for member-to-attribute bridging."
+      }
+    ]
+  },
+  {
+    "table": "membership_custom_activity",
+    "use_case": "Member event timeline table for registered-event submissions, used for engagement and conversion attribution analyses.",
+    "granularity": "One row per deduplicated member event action by date and event reference.",
+    "fields": [
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
+      },
+      {
+        "name": "membership_id",
+        "type": "string",
+        "description": "Membership identifier used as top-level key in processed custom_activity JSON output."
+      },
+      {
+        "name": "event_date",
+        "type": "datetime",
+        "description": "Event date bucket derived from submission filename_time date key during custom activity transformation."
+      },
+      {
+        "name": "event_ref_id",
+        "type": "string",
+        "description": "Event reference ID from registered_event_id (stored as refId in process JSON)."
+      },
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "Human-readable event name from registered_event (stored as name in process JSON)."
+      },
+      {
+        "name": "action",
+        "type": "string",
+        "description": "Event action verb from process JSON; LinkedU pipeline currently emits submit."
+      }
+    ]
+  },
+  {
+    "table": "outbound_links_attributes",
+    "use_case": "Outbound link click attributes for click-through analysis.",
+    "granularity": "One row per outbound link click event at minute precision",
+    "fields": [
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name, usually click/outbound click variants."
+      },
+      {
+        "name": "date_hour_minute",
+        "type": "datetime",
+        "description": "Timestamp of the event at minute precision."
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date partition key.",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_location",
+        "type": "string",
+        "description": "Full URL of the page where the outbound click happened."
+      },
+      {
+        "name": "link_url",
+        "type": "string",
+        "description": "Outbound URL clicked by the user."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "page_metrics",
+    "use_case": "Daily page-level performance metrics. Used for content performance analysis and identifying high/low engagement pages",
+    "granularity": "One row per unique combination of (date, page_path)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the page activity",
+        "format": "YYYY-MM-DD"
+      },
+      {
+        "name": "page_path",
+        "type": "string",
+        "description": "Page path (unified screen/page path from GA4, excludes hostname)"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users on this page"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users who visited this page"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Fraction of sessions that were engaged"
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Total page view count"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total sessions that included this page"
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Sessions that were classified as engaged"
+      },
+      {
+        "name": "bounced_sessions",
+        "type": "int",
+        "description": "Derived: sessions minus engaged_sessions",
+        "is_derived": true,
+        "formula": "sessions - engaged_sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "page_utm_metrics",
+    "use_case": "Page performance broken down by traffic source/medium. Used to attribute page views and users to specific channels",
+    "granularity": "One row per unique combination of (date, page_path, source, medium)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the page activity",
+        "format": "YYYY-MM-DD"
+      },
+      {
+        "name": "page_path",
+        "type": "string",
+        "description": "Page path (unified screen/page path from GA4)"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "UTM source of the session"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "UTM medium of the session"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Total page view count"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "path_exploration",
+    "use_case": "Tracks user navigation paths through the website including click events, referrers, and campaign context",
+    "granularity": "One row per event occurrence at minute precision",
+    "fields": [
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name (e.g. page_view, click)"
+      },
+      {
+        "name": "date_hour_minute",
+        "type": "datetime",
+        "description": "Timestamp of the event at minute precision, naive (no timezone), in GA4 property timezone"
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date portion of date_hour_minute, used as partition key",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_referrer",
+        "type": "string",
+        "description": "Full URL of the referring page; empty string if direct traffic"
+      },
+      {
+        "name": "page_location",
+        "type": "string",
+        "description": "Full URL of the page where the event occurred"
+      },
+      {
+        "name": "link_url",
+        "type": "string",
+        "description": "URL of the link that was clicked; empty string if not a click event"
+      },
+      {
+        "name": "session_source_medium",
+        "type": "string",
+        "description": "Combined source/medium (e.g. google / cpc); '(direct) / (none)' for direct traffic"
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "UTM campaign name; '(not set)' if not tagged"
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Capsuite session ID (custom GA4 dimension); empty string if not collected"
+      },
+      {
+        "name": "capsuite_uid",
+        "type": "string",
+        "description": "Capsuite user ID (custom GA4 dimension); empty string if not collected"
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Capsuite application/product ID (custom GA4 dimension); empty string if not collected"
+      },
+      {
+        "name": "capsuite_identifier",
+        "type": "string",
+        "description": "Capsuite identifier (custom GA4 dimension); empty string if not collected"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "path_exploration_duration",
+    "use_case": "Same as path_exploration but without link_url, and includes user engagement duration. Used for dwell-time and engagement analysis per page/session",
+    "granularity": "One row per event occurrence at minute precision",
+    "fields": [
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name"
+      },
+      {
+        "name": "date_hour_minute",
+        "type": "datetime",
+        "description": "Timestamp of the event at minute precision, naive (no timezone)"
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date partition key",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_referrer",
+        "type": "string",
+        "description": "Full URL of the referring page; empty string if direct"
+      },
+      {
+        "name": "page_location",
+        "type": "string",
+        "description": "Full URL of the current page"
+      },
+      {
+        "name": "session_source_medium",
+        "type": "string",
+        "description": "Combined source/medium"
+      },
+      {
+        "name": "user_engagement_duration",
+        "type": "int",
+        "description": "Total user engagement duration in seconds for this row"
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Capsuite session ID; empty string if not collected"
+      },
+      {
+        "name": "capsuite_uid",
+        "type": "string",
+        "description": "Capsuite user ID; empty string if not collected"
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Capsuite application/product ID; empty string if not collected"
+      },
+      {
+        "name": "capsuite_identifier",
+        "type": "string",
+        "description": "Capsuite identifier; empty string if not collected"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "utm_ad_performance",
+    "use_case": "Paid ad cost and impression data imported from linked Google Ads. Used for ROI and CPC analysis",
+    "granularity": "One row per unique combination of (date, source, medium, campaign, utm_id)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the ad activity",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "UTM source"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "UTM medium"
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "UTM campaign name"
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM ID"
+      },
+      {
+        "name": "advertiser_ad_impressions",
+        "type": "int",
+        "description": "Number of ad impressions"
+      },
+      {
+        "name": "advertiser_ad_clicks",
+        "type": "int",
+        "description": "Number of ad clicks"
+      },
+      {
+        "name": "advertiser_ad_cost",
+        "type": "float",
+        "description": "Total ad cost in the Google Ads account currency"
+      },
+      {
+        "name": "advertiser_ad_cost_per_click",
+        "type": "float",
+        "description": "Cost per click (CPC)"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "utm_daily_full_param_performance",
+    "use_case": "Same as utm_daily_performance but includes all UTM parameters. Used for detailed attribution where utm_content, utm_term, and utm_id are needed",
+    "granularity": "One row per unique combination of (date, source, medium, campaign, content, term, utm_id, country, device)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the sessions",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "UTM source"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "UTM medium"
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "UTM campaign name"
+      },
+      {
+        "name": "session_content",
+        "type": "string",
+        "description": "UTM content parameter (utm_content)"
+      },
+      {
+        "name": "session_term",
+        "type": "string",
+        "description": "UTM term parameter (utm_term)"
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM ID parameter (utm_id)"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "User's country"
+      },
+      {
+        "name": "device",
+        "type": "string",
+        "description": "Device category: desktop, mobile, or tablet"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate"
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total number of sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "utm_daily_performance",
+    "use_case": "Day-level campaign performance without content/term/utm_id. Primary report for daily campaign comparison",
+    "granularity": "One row per unique combination of (date, source, medium, campaign, country, device)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the sessions",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "UTM source"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "UTM medium"
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "UTM campaign name"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "User's country"
+      },
+      {
+        "name": "device",
+        "type": "string",
+        "description": "Device category: desktop, mobile, or tablet"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate"
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total number of sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "utm_performance",
+    "use_case": "Hourly/minute-level campaign performance with full UTM parameters. Use for intraday campaign monitoring",
+    "granularity": "One row per unique combination of (minute, source, medium, campaign, content, term, utm_id, country, device)",
+    "fields": [
+      {
+        "name": "date_hour_minute",
+        "type": "datetime",
+        "description": "Timezone-aware timestamp in Asia/Hong_Kong (HKT)"
+      },
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date partition key derived from date_hour_minute",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "UTM source (e.g. google, facebook)"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "UTM medium (e.g. cpc, email)"
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "UTM campaign name"
+      },
+      {
+        "name": "session_content",
+        "type": "string",
+        "description": "UTM content parameter (utm_content)"
+      },
+      {
+        "name": "session_term",
+        "type": "string",
+        "description": "UTM term parameter (utm_term)"
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM ID parameter (utm_id)"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "User's country"
+      },
+      {
+        "name": "device",
+        "type": "string",
+        "description": "Device category: desktop, mobile, or tablet"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Fraction of sessions with no engagement"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Fraction of sessions that were engaged"
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total number of sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
+    "table": "website_metrics",
+    "use_case": "Top-level daily website health metrics. Primary KPI summary for overall site performance",
+    "granularity": "One row per date (site-wide daily totals)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the metrics",
+        "format": "YYYY-MM-DD"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Total distinct active users site-wide"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Total first-time users site-wide"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total sessions site-wide"
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Sessions classified as engaged"
+      },
+      {
+        "name": "user_engagement_duration",
+        "type": "int",
+        "description": "Total user engagement time in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Total page views site-wide"
+      },
+      {
+        "name": "engaged_sessions_per_active_user",
+        "type": "float",
+        "description": "Average number of engaged sessions per active user",
+        "is_derived": true,
+        "formula": "engaged_sessions / active_users (0 when active_users = 0)"
+      },
+      {
+        "name": "average_engagement_time_per_session",
+        "type": "float",
+        "description": "Average engagement time per session in seconds",
+        "unit": "seconds",
+        "is_derived": true,
+        "formula": "user_engagement_duration / sessions (0 when sessions = 0)"
+      },
+      {
+        "name": "average_engagement_time_per_user",
+        "type": "float",
+        "description": "Average engagement time per active user in seconds",
+        "unit": "seconds",
+        "is_derived": true,
+        "formula": "user_engagement_duration / active_users (0 when active_users = 0)"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  }
+]
