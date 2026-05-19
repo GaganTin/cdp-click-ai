@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { appClient } from "@/api/appClient";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   UserCheck, Ghost, Search, ChevronLeft, ChevronRight,
   Mail, Phone, Calendar, MapPin, Globe, BookOpen,
@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
 import { format, parseISO, isValid } from "date-fns";
 
 const TABS = [

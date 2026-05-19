@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, BookOpen, ChevronDown, ChevronRight, MoreHorizontal, Trash2, Database } from "lucide-react";
+import { Plus, ChevronDown, ChevronRight, MoreHorizontal, Trash2, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

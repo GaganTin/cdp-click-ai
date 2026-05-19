@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
 export default function KPICard({ title, value, change, changeLabel, icon: Icon }) {
   const isPositive = change > 0;

@@ -3,7 +3,6 @@ import ReactMarkdown from "react-markdown";
 import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 import MiniChart from "../dashboard/MiniChart";
 
 const FunctionDisplay = ({ toolCall }) => {

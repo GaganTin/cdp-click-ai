@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { appClient } from "@/api/appClient";
-import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  FileText, MoreHorizontal, Trash2, Download, Pencil, Clock, Plus, Sparkles, Loader2
+  FileText, MoreHorizontal, Trash2, Download, Clock, Plus, Sparkles, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

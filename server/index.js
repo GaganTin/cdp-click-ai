@@ -7,6 +7,7 @@ import multer from "multer";
 import { Pool } from "pg";
 import { fileURLToPath } from "url";
 import OpenAI from "openai";
+import { createAnalystMCPClient, toOpenAITools } from "./mcp/server.js";
 
 dotenv.config();
 
@@ -48,6 +49,9 @@ try {
 } catch {
   console.warn("Warning: server/data/data_dictionary.json not found.");
 }
+
+// Initialized in start() once the DB pool is ready
+let mcpClient = null;
 
 const TABLE_SCHEMA_MAP = {
   country_performance: "ga_landing",
@@ -381,7 +385,12 @@ Then for context:
 
 **Related insight:** [Something they didn't ask for but should know — query the DB to get the real number]
 
-When you spot a campaign opportunity, suggest a ready-to-use UTM link:
+When you spot a campaign opportunity, suggest a ready-to-use UTM link.
+
+BEFORE suggesting a UTM link:
+1. Call \`list_campaigns\` to check if a similar campaign already exists — avoid duplicates.
+2. Call \`analyze_utm_performance\` to understand what's already working and justify why this new link fills a gap.
+
 \`\`\`utm_link
 {
   "name": "Descriptive campaign name",
@@ -394,8 +403,14 @@ When you spot a campaign opportunity, suggest a ready-to-use UTM link:
   "status": "draft"
 }
 \`\`\`
+NOTE: You are only recommending this UTM link. The user must click "Add" in the UI to save it — you do NOT save it automatically.
 
-When you identify a targetable audience, suggest a segment. Use segment_type "customer" for known members (public.membership), or "anonymous_profile" for anonymous GA visitors. Always query the DB to estimate the size:
+When you identify a targetable audience, suggest a segment. Use segment_type "customer" for known members (public.membership), or "anonymous_profile" for anonymous GA visitors.
+
+BEFORE suggesting a segment:
+1. Call \`list_segments\` to check if a similar segment already exists — avoid duplicates.
+2. Call \`preview_segment_size\` with the filter criteria to get a real count — use that number as estimated_size.
+
 \`\`\`segment
 {
   "name": "Segment Name",
@@ -405,9 +420,8 @@ When you identify a targetable audience, suggest a segment. Use segment_type "cu
   "status": "draft"
 }
 \`\`\`
-For customer segments, try to COUNT from public.membership with the relevant WHERE filters before suggesting.
-For anonymous segments, COUNT from ga_landing.path_exploration grouped by capsuite_apid with relevant conditions.
 The description should explicitly state the criteria (e.g. reg_channel, education_level, source_medium, event types) so users can reproduce the filter on the Profiles page.
+NOTE: You are only recommending this segment. The user must click "Add" in the UI to save it — you do NOT save it automatically.
 
 When presenting raw data the user may want to export:
 \`\`\`csv
@@ -483,35 +497,23 @@ EXAMPLE QUERIES:
 8. For member analysis: use the JOIN PATH above, remember only ~51 members have GA data (logged-in sessions); use membership_custom_activity for offline events
 9. For "what should I do?" questions: lead with the highest-impact action, back every recommendation with real data
 10. Keep responses focused — one big insight beats five mediocre ones
-11. If the user has existing campaigns or segments (shown in context), reference them when relevant`;
+11. If the user has existing campaigns or segments (shown in context), reference them when relevant
+12. Use \`list_tables\` / \`describe_table\` when you're unsure about a table's structure — never guess column names
+13. For UTM optimisation questions: always call \`analyze_utm_performance\` first, identify top AND bottom performers, then suggest specific improvements
+14. For segment suggestions: always call \`preview_segment_size\` to get a real count before outputting the segment block — never invent the estimated_size
+15. NEVER save segments or UTM links autonomously — only recommend them via the markdown blocks; the user approves via the UI`;
 }
 
-// ── AI tools ──────────────────────────────────────────────────────────────────
-const ANALYST_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "queryPostgres",
-      description:
-        "Execute a read-only SELECT query against the PostgreSQL database. Use this whenever you need actual data to answer the user's question.",
-      parameters: {
-        type: "object",
-        properties: {
-          sql: {
-            type: "string",
-            description:
-              "A valid SELECT SQL statement. Must start with SELECT. No semicolons. Always prefix table names with schema (e.g. ga_landing.website_metrics).",
-          },
-        },
-        required: ["sql"],
-      },
-    },
-  },
-];
-
-// ── AI agent loop ─────────────────────────────────────────────────────────────
+// ── AI agent loop (MCP-based) ─────────────────────────────────────────────────
+// Tools are served by the MCP server (server/mcp/server.js).
+// Tool groups: DB Connector, Segments, UTM — all read-only; no writes without user approval.
 async function runAnalystAgent(messages) {
   if (!aiClient) throw new Error("Azure OpenAI is not configured.");
+  if (!mcpClient) throw new Error("MCP analyst server is not initialized.");
+
+  // Discover tools from MCP server and convert to OpenAI function format
+  const { tools: mcpTools } = await mcpClient.listTools();
+  const aiTools = toOpenAITools(mcpTools);
 
   const aiMessages = [
     { role: "system", content: buildSystemPrompt() },
@@ -524,7 +526,7 @@ async function runAnalystAgent(messages) {
     const response = await aiClient.chat.completions.create({
       model: azureDeployment,
       messages: aiMessages,
-      tools: ANALYST_TOOLS,
+      tools: aiTools,
       tool_choice: "auto",
       max_completion_tokens: 8192,
       temperature: 0.3,
@@ -540,12 +542,8 @@ async function runAnalystAgent(messages) {
         let toolResult;
         try {
           const args = JSON.parse(tc.function.arguments);
-          if (tc.function.name === "queryPostgres") {
-            const qr = await runReadOnlyQuery(args.sql);
-            toolResult = JSON.stringify({ rows: qr.rows, rowCount: qr.rowCount });
-          } else {
-            toolResult = JSON.stringify({ error: `Unknown function: ${tc.function.name}` });
-          }
+          const result = await mcpClient.callTool({ name: tc.function.name, arguments: args });
+          toolResult = result.content?.[0]?.text ?? JSON.stringify(result);
         } catch (err) {
           toolResult = JSON.stringify({ error: String(err.message || err) });
         }
@@ -1028,6 +1026,17 @@ if (process.env.NODE_ENV === "production") {
 // ── Start ─────────────────────────────────────────────────────────────────────
 async function start() {
   await initDb();
+
+  if (pool) {
+    try {
+      mcpClient = await createAnalystMCPClient(pool, dataDictionary);
+      const { tools } = await mcpClient.listTools();
+      console.log(`  MCP: Analyst server ready (${tools.length} tools: ${tools.map((t) => t.name).join(", ")})`);
+    } catch (err) {
+      console.error("  MCP: Failed to initialize —", err.message);
+    }
+  }
+
   app.listen(port, () => {
     console.log(`cdp-click-ai server running on http://localhost:${port}`);
     console.log(`  AI: ${aiClient ? `Azure OpenAI (${azureDeployment})` : "NOT CONFIGURED"}`);

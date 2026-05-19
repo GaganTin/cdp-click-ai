@@ -13,6 +13,10 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  test: {
+    environment: "node",
+    include: ["tests/**/*.test.js"],
+  },
   server: {
     port: 5173,
     proxy: {
