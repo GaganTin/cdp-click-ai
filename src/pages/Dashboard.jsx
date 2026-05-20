@@ -196,7 +196,7 @@ export default function Dashboard() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
-        {/* Tab management — assign charts to tab */}
+        {/* Tab management - assign charts to tab */}
         {!isAllTab && pinnedCharts.length > 0 && (
           <div className="mb-4 p-3 bg-secondary/40 rounded-lg">
             <p className="text-xs font-medium mb-2 text-muted-foreground">Add charts to this tab:</p>

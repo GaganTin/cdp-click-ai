@@ -193,14 +193,87 @@ function ChartEditDialog({ chart, onSave, onClose }) {
   );
 }
 
+// ── GA UTM Links Table (used in the UTM Links tab) ───────────────────────────
+export function GAUtmLinksSection() {
+  const [utmLinks, setUtmLinks] = useState([]);
+  const [utmSearch, setUtmSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    runQuery("utm_links").then(rows => { setUtmLinks(rows); setLoading(false); });
+  }, []);
+
+  const filteredUtmLinks = utmSearch
+    ? utmLinks.filter(row =>
+        ["session_source", "session_medium", "session_campaign_name", "session_content", "session_term", "session_utm_id"]
+          .some(col => String(row[col] || "").toLowerCase().includes(utmSearch.toLowerCase()))
+      )
+    : utmLinks;
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+        <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
+        Loading GA UTM data…
+      </div>
+    );
+  }
+
+  if (utmLinks.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Distinct UTM Links from GA (last 30d) - {filteredUtmLinks.length} of {utmLinks.length} combinations
+        </h3>
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            value={utmSearch}
+            onChange={e => setUtmSearch(e.target.value)}
+            placeholder="Filter by source, medium, campaign…"
+            className="pl-8 pr-3 py-1.5 text-xs border border-input rounded-md bg-transparent outline-none focus:ring-1 focus:ring-ring w-64"
+          />
+        </div>
+      </div>
+      <div className="border border-border rounded-lg overflow-auto max-h-64">
+        <table className="w-full text-xs">
+          <thead className="bg-secondary/50 sticky top-0">
+            <tr>
+              {["Source", "Medium", "Campaign", "Content", "Term", "UTM ID"].map(h => (
+                <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredUtmLinks.length === 0
+              ? <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No results match your filter.</td></tr>
+              : filteredUtmLinks.map((row, i) => (
+                <tr key={i} className="border-t border-border hover:bg-secondary/30">
+                  <td className="px-3 py-1.5 whitespace-nowrap">{row.session_source || "-"}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap">{row.session_medium || "-"}</td>
+                  <td className="px-3 py-1.5 max-w-[160px] truncate">{row.session_campaign_name || "-"}</td>
+                  <td className="px-3 py-1.5 max-w-[120px] truncate">{row.session_content || "-"}</td>
+                  <td className="px-3 py-1.5 max-w-[120px] truncate">{row.session_term || "-"}</td>
+                  <td className="px-3 py-1.5 whitespace-nowrap">{row.session_utm_id || "-"}</td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export default function UTMAnalyticsPanel() {
   const [charts, setCharts] = useState(DEFAULT_CHARTS);
   const [addingNew, setAddingNew] = useState(false);
   const [chartData, setChartData] = useState({});
   const [kpis, setKpis] = useState(null);
-  const [utmLinks, setUtmLinks] = useState([]);
   const [loadingKeys, setLoadingKeys] = useState(new Set());
-  const [utmSearch, setUtmSearch] = useState("");
 
   const loadData = async (key) => {
     if (loadingKeys.has(key)) return;
@@ -212,7 +285,6 @@ export default function UTMAnalyticsPanel() {
 
   useEffect(() => {
     runQuery("kpis").then(rows => setKpis(rows[0] || null));
-    runQuery("utm_links").then(rows => setUtmLinks(rows));
     DEFAULT_CHARTS.forEach(c => loadData(c.dataKey));
   }, []);
 
@@ -230,15 +302,8 @@ export default function UTMAnalyticsPanel() {
   const handleDelete = (id) => setCharts(prev => prev.filter(c => c.id !== id));
   const toggleSize = (id) => setCharts(prev => prev.map(c => c.id === id ? { ...c, size: c.size === "wide" ? "normal" : "wide" } : c));
 
-  const filteredUtmLinks = utmSearch
-    ? utmLinks.filter(row =>
-        ["session_source", "session_medium", "session_campaign_name", "session_content", "session_term", "session_utm_id"]
-          .some(col => String(row[col] || "").toLowerCase().includes(utmSearch.toLowerCase()))
-      )
-    : utmLinks;
-
-  const fmt = (v) => v != null ? Number(v).toLocaleString() : "—";
-  const fmtPct = (v) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : "—";
+  const fmt = (v) => v != null ? Number(v).toLocaleString() : "-";
+  const fmtPct = (v) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : "-";
 
   return (
     <div className="overflow-auto h-full px-6 py-6 space-y-6">
@@ -296,53 +361,6 @@ export default function UTMAnalyticsPanel() {
           <span className="text-xs font-medium">Add Chart</span>
         </button>
       </div>
-
-      {/* Distinct UTM Links Table */}
-      {utmLinks.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Distinct UTM Links from GA (last 30d) — {filteredUtmLinks.length} of {utmLinks.length} combinations
-            </h3>
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                value={utmSearch}
-                onChange={e => setUtmSearch(e.target.value)}
-                placeholder="Filter by source, medium, campaign…"
-                className="pl-8 pr-3 py-1.5 text-xs border border-input rounded-md bg-transparent outline-none focus:ring-1 focus:ring-ring w-64"
-              />
-            </div>
-          </div>
-          <div className="border border-border rounded-lg overflow-auto max-h-64">
-            <table className="w-full text-xs">
-              <thead className="bg-secondary/50 sticky top-0">
-                <tr>
-                  {["Source", "Medium", "Campaign", "Content", "Term", "UTM ID"].map(h => (
-                    <th key={h} className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredUtmLinks.length === 0
-                  ? <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">No results match your filter.</td></tr>
-                  : filteredUtmLinks.map((row, i) => (
-                    <tr key={i} className="border-t border-border hover:bg-secondary/30">
-                      <td className="px-3 py-1.5 whitespace-nowrap">{row.session_source || "—"}</td>
-                      <td className="px-3 py-1.5 whitespace-nowrap">{row.session_medium || "—"}</td>
-                      <td className="px-3 py-1.5 max-w-[160px] truncate">{row.session_campaign_name || "—"}</td>
-                      <td className="px-3 py-1.5 max-w-[120px] truncate">{row.session_content || "—"}</td>
-                      <td className="px-3 py-1.5 max-w-[120px] truncate">{row.session_term || "—"}</td>
-                      <td className="px-3 py-1.5 whitespace-nowrap">{row.session_utm_id || "—"}</td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {addingNew && <ChartEditDialog chart={null} onSave={handleAddNew} onClose={() => setAddingNew(false)} />}
     </div>

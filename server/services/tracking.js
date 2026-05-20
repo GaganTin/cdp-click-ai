@@ -7,7 +7,7 @@ const TRACKING_BASE = (process.env.EDM_TRACKING_BASE_URL || "http://localhost:30
 export function injectTracking(html, sendId) {
   if (!html) return html;
 
-  // Wrap every http(s) link — skip mailto: and tracking redirects already applied
+  // Wrap every http(s) link - skip mailto: and tracking redirects already applied
   const clickTracked = html.replace(
     /href="(https?:\/\/[^"]+)"/gi,
     (_, url) => {

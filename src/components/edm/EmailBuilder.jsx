@@ -65,7 +65,7 @@ const TEMPLATES = [
   {
     id: "promo", name: "Promotion", description: "Special offer / sale", accent: "#dc2626",
     blocks: [
-      { id: "tp1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "Special Offer Just for You", subtitle: "Limited time — don't miss out", bgColor: "#fef2f2", color: "#991b1b", align: "center" } },
+      { id: "tp1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "Special Offer Just for You", subtitle: "Limited time - don't miss out", bgColor: "#fef2f2", color: "#991b1b", align: "center" } },
       { id: "tp2", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "As a valued member, you get exclusive access to our biggest offer. Use your member benefits today." } },
       { id: "tp3", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Claim Your Offer", align: "center", bgColor: "#dc2626", paddingH: 36, paddingV: 14 } },
       { id: "tp4", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "Offer expires soon. Terms apply.", color: "#9ca3af", fontSize: 12 } },
@@ -74,7 +74,7 @@ const TEMPLATES = [
   {
     id: "reengagement", name: "Re-engagement", description: "Win back inactive members", accent: "#059669",
     blocks: [
-      { id: "tr1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "We miss you, {{first_name}}", subtitle: "It's been a while — here's what's new", bgColor: "#f0fdf4", color: "#065f46", align: "center" } },
+      { id: "tr1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "We miss you, {{first_name}}", subtitle: "It's been a while - here's what's new", bgColor: "#f0fdf4", color: "#065f46", align: "center" } },
       { id: "tr2", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "We noticed you haven't visited us recently. A lot has changed! Here's what's new since your last visit..." } },
       { id: "tr3", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Come Back & Explore", align: "center", bgColor: "#059669" } },
       { id: "tr4", type: "divider", config: { ...BLOCK_DEFS.divider.defaults } },

@@ -1,5 +1,5 @@
 -- ============================================================
---  CDP Click AI — app schema
+--  CDP Click AI - app schema
 --  All user-generated data lives in the "app" schema,
 --  completely separate from ga_landing / public / metadata.
 -- ============================================================
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS app.anonymous_profiles (
 );
 
 -- ══════════════════════════════════════════════════════════════
---  EDM (Email Direct Marketing) — Klaviyo-like email platform
+--  EDM (Email Direct Marketing) - Klaviyo-like email platform
 -- ══════════════════════════════════════════════════════════════
 
 -- ── EDM Templates ────────────────────────────────────────────
@@ -346,6 +346,103 @@ CREATE TABLE IF NOT EXISTS app.edm_automation_enrollments (
 CREATE INDEX IF NOT EXISTS edm_enrollments_automation_idx ON app.edm_automation_enrollments(automation_id);
 CREATE INDEX IF NOT EXISTS edm_enrollments_next_run_idx   ON app.edm_automation_enrollments(next_run_at) WHERE status = 'active';
 
+-- ── Company Report Config (replaces companyreportconfig MongoDB collection) ───
+CREATE TABLE IF NOT EXISTS app.company_report_config (
+  id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_date              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_date              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  capsuite_ref              TEXT        NOT NULL DEFAULT '',
+  is_trial                  BOOLEAN     NOT NULL DEFAULT false,
+  url_domain                TEXT        NOT NULL DEFAULT '',
+  supporting_capsuite_param TEXT[]      NOT NULL DEFAULT '{"capsuite_sid","capsuite_apid"}',
+  cdp_reports               JSONB       NOT NULL DEFAULT '{
+    "popup_tracking":          {"debugStartDate":"2025-01-01","isDebugging":false},
+    "blast_tracking":          {"debugStartDate":"2025-01-01","isDebugging":false},
+    "utm_summary":             {"debugStartDate":"2025-01-01","isDebugging":false},
+    "activity_log":            {"source":["custom_activity"],"debugStartDate":"2025-01-01","isDebugging":false},
+    "web_content_attributes":  {"isDebugging":false,"isInterest":true,"isReference":false},
+    "ap_session_log":          {"debugStartDate":"2025-01-01","isDebugging":false},
+    "ap_anonymous_profile":    {"debugStartDate":"2025-01-01","isDebugging":false},
+    "ap_segment_filter":       {"debugStartDate":"2025-01-01","isDebugging":false},
+    "mem_segment_filter":      {"debugStartDate":"2025-01-01","isDebugging":false},
+    "ap_membership_profiles":  {"debugStartDate":"2025-01-01","isDebugging":false},
+    "outbound_links_attributes":{"isDebugging":false,"debugStartDate":"2025-07-30"}
+  }',
+  ga_reports                JSONB       NOT NULL DEFAULT '{
+    "path_exploration":                    {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "path_exploration_duration":           {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_performance":                     {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_daily_performance":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_daily_full_param_performance":    {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_ad_performance":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "country_performance":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_metrics":                        {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_utm_metrics":                    {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "website_metrics":                     {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "keyword_performance":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "event_list":                          {"isDebugging":false,"debugStartDate":"2025-07-30"}
+  }'
+);
+
+CREATE OR REPLACE TRIGGER company_report_config_updated_date
+  BEFORE UPDATE ON app.company_report_config
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- Seed one default row if empty (single-tenant model)
+INSERT INTO app.company_report_config (capsuite_ref) VALUES ('')
+  ON CONFLICT DO NOTHING;
+
+-- ── Web Content HTML Elements (replaces webcontenthtmlelements MongoDB collection) ─
+CREATE TABLE IF NOT EXISTS app.web_content_html_elements (
+  id                       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_date             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_date             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  capsuite_ref             TEXT        NOT NULL DEFAULT '',
+  cut_off_point_after      TEXT,
+  cut_off_point_before     TEXT,
+  update_time_elements     TEXT        NOT NULL DEFAULT 'og:updated_time',
+  error_strings            TEXT[]      NOT NULL DEFAULT '{"Error 404","ERROR 403","seem to exist","頁面可能已被刪除","找不到頁面"}',
+  valid_content_min_length INTEGER     NOT NULL DEFAULT 60,
+  url_pattern              TEXT        NOT NULL DEFAULT ''
+);
+
+CREATE OR REPLACE TRIGGER web_content_html_elements_updated_date
+  BEFORE UPDATE ON app.web_content_html_elements
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- Seed one default row if empty
+INSERT INTO app.web_content_html_elements (capsuite_ref) VALUES ('')
+  ON CONFLICT DO NOTHING;
+
+-- ── Data Integrations ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app.data_integrations (
+  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_date          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_date          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  integration_type      TEXT        NOT NULL UNIQUE,
+  config                JSONB       NOT NULL DEFAULT '{}',
+  is_connected          BOOLEAN     NOT NULL DEFAULT false,
+  last_connected_date   TIMESTAMPTZ,
+  is_connection_error   BOOLEAN     NOT NULL DEFAULT false,
+  connection_error      TEXT,
+  is_synced             BOOLEAN     NOT NULL DEFAULT false,
+  last_synced_date      TIMESTAMPTZ,
+  is_sync_error         BOOLEAN     NOT NULL DEFAULT false,
+  sync_error            TEXT
+);
+
+CREATE OR REPLACE TRIGGER data_integrations_updated_date
+  BEFORE UPDATE ON app.data_integrations
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- ── App Settings (key-value store) ─────────────────────────
+CREATE TABLE IF NOT EXISTS app.settings (
+  key          TEXT        PRIMARY KEY,
+  value        TEXT,
+  label        TEXT,
+  updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── AI Conversations ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS app.conversations (
   id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -361,3 +458,56 @@ CREATE TABLE IF NOT EXISTS app.conversations (
 CREATE OR REPLACE TRIGGER conversations_updated_date
   BEFORE UPDATE ON app.conversations
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- ── Imported Profile Tracking ────────────────────────────────
+-- app.customer_profiles (the denormalized view)
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS is_imported BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS imported_at TIMESTAMPTZ;
+
+-- public.membership (the authoritative source - must match so segmentation/EDM queries work)
+ALTER TABLE public.membership ADD COLUMN IF NOT EXISTS is_imported BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE public.membership ADD COLUMN IF NOT EXISTS imported_at TIMESTAMPTZ;
+
+-- ── Pop Ups (Interaction Service) ────────────────────────────
+CREATE TABLE IF NOT EXISTS app.popups (
+  id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_date            TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  updated_date            TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  company_id              UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  created_by              UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  name                    TEXT        NOT NULL DEFAULT '',
+  interaction_service_id  UUID,
+  interaction_type        TEXT        NOT NULL DEFAULT 'banner',
+  cdp_reference_id        TEXT        NOT NULL DEFAULT '',
+  rules                   JSONB       NOT NULL DEFAULT '{}',
+  content                 TEXT        NOT NULL DEFAULT '',
+  default_recommendation  JSONB       NOT NULL DEFAULT '{}',
+  is_active               BOOLEAN     NOT NULL DEFAULT false,
+  is_default              BOOLEAN     NOT NULL DEFAULT false,
+  start_time              TIMESTAMPTZ,
+  end_time                TIMESTAMPTZ,
+  status                  TEXT        NOT NULL DEFAULT 'draft'
+);
+
+CREATE OR REPLACE TRIGGER popups_updated_date
+  BEFORE UPDATE ON app.popups
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+CREATE INDEX IF NOT EXISTS popups_company_idx ON app.popups(company_id);
+
+-- ── Popup Templates ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app.popup_templates (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_date TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  updated_date TIMESTAMPTZ NOT NULL    DEFAULT NOW(),
+  company_id   UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  created_by   UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  name         TEXT        NOT NULL DEFAULT '',
+  category     TEXT        NOT NULL DEFAULT 'Custom',
+  description  TEXT        NOT NULL DEFAULT '',
+  content      TEXT        NOT NULL DEFAULT ''
+);
+CREATE OR REPLACE TRIGGER popup_templates_updated_date
+  BEFORE UPDATE ON app.popup_templates
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+CREATE INDEX IF NOT EXISTS popup_templates_company_idx ON app.popup_templates(company_id);

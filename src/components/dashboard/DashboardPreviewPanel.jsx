@@ -52,7 +52,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
     const chartId = pinnedChart.id;
     setTabAssignments(prev => {
       const current = prev[activeTab];
-      if (current === null) return prev; // "all" tab — already shown
+      if (current === null) return prev; // "all" tab - already shown
       if (current.includes(chartId)) return prev;
       return { ...prev, [activeTab]: [...current, chartId] };
     });

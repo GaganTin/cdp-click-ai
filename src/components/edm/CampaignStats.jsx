@@ -31,9 +31,9 @@ export default function CampaignStats({ campaignId, open, onClose }) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BarChart2 className="w-4 h-4" />
-            Campaign Performance
+            Email Performance
             {data?.campaign?.name && (
-              <span className="font-normal text-muted-foreground">— {data.campaign.name}</span>
+              <span className="font-normal text-muted-foreground">- {data.campaign.name}</span>
             )}
           </DialogTitle>
         </DialogHeader>
@@ -67,21 +67,21 @@ export default function CampaignStats({ campaignId, open, onClose }) {
               />
               <StatTile
                 label="Unique Opens"
-                value={data.rates?.open_rate || "—"}
+                value={data.rates?.open_rate || "-"}
                 sub={`${data.events?.open?.unique || 0} unique openers`}
                 icon={Mail}
                 color="text-blue-600"
               />
               <StatTile
                 label="Unique Clicks"
-                value={data.rates?.click_rate || "—"}
-                sub={`CTOR ${data.rates?.click_to_open || "—"}`}
+                value={data.rates?.click_rate || "-"}
+                sub={`CTOR ${data.rates?.click_to_open || "-"}`}
                 icon={MousePointerClick}
                 color="text-green-600"
               />
               <StatTile
                 label="Unsubscribes"
-                value={data.rates?.unsubscribe_rate || "—"}
+                value={data.rates?.unsubscribe_rate || "-"}
                 sub={`${data.events?.unsubscribe?.unique || 0} total`}
                 icon={UserMinus}
                 color={Number((data.rates?.unsubscribe_rate || "0%").replace("%","")) > 0.5 ? "text-amber-600" : "text-foreground"}

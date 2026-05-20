@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -6,7 +6,8 @@ import {
   Mail, Phone, Calendar, MapPin, Globe, BookOpen,
   Activity, ExternalLink, Filter, X,
   Star, MousePointer, Clock, MessageCircle,
-  TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users
+  TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users,
+  Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,8 +54,9 @@ function Pill({ children, active }) {
   );
 }
 
-function CustomerCard({ profile }) {
+function CustomerCard({ profile, onDelete }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const hasGa = Number(profile.ga_sessions) > 0;
   const hasSeminars = Number(profile.seminar_count) > 0;
   const hasAttributes = Number(profile.attribute_count) > 0;
@@ -88,15 +90,45 @@ function CustomerCard({ profile }) {
               {profile.is_opt_in_email && (
                 <Badge variant="outline" className="text-[10px] h-4 px-1.5">Email opt-in</Badge>
               )}
+              {profile.is_imported && (
+                <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-0.5">
+                  <Upload className="w-2.5 h-2.5" /> Imported
+                </Badge>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">{profile.primary_email}</p>
           </div>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 mt-0.5"
-          >
-            {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
+          <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+            {profile.is_imported && (
+              confirmDelete ? (
+                <>
+                  <span className="text-[11px] text-muted-foreground">Delete?</span>
+                  <button
+                    onClick={() => { onDelete(profile.member_id); setConfirmDelete(false); }}
+                    className="text-[11px] text-destructive hover:underline font-medium"
+                  >Yes</button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >No</button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                  title="Delete imported profile"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )
+            )}
+            <button
+              onClick={() => setExpanded(e => !e)}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
 
         {/* Quick facts */}
@@ -471,9 +503,14 @@ export default function Profiles() {
     reg_channel: "", education_level: "", age_group: "", gender: "", nationality: "", preferred_language: "",
     employment_status: "", income_level: "", member_type: "", preferred_channel: "",
     has_ga: "", min_ga_sessions: "", has_seminars: "", has_attributes: "",
-    opt_in_email: "", opt_in_sms: "", is_subscriber: "",
+    opt_in_email: "", opt_in_sms: "", is_subscriber: "", is_imported: "",
   });
   const [anonFilters, setAnonFilters] = useState({ source_medium: "", has_form_complete: "" });
+  // Import dialog state
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importResults, setImportResults] = useState(null);
+  const fileInputRef = useRef(null);
   const queryClient = useQueryClient();
   const LIMIT = 20;
 
@@ -487,6 +524,25 @@ export default function Profiles() {
       toast.success("Segment saved");
     },
     onError: (err) => toast.error(err.message || "Failed to save segment"),
+  });
+
+  const deleteProfileMutation = useMutation({
+    mutationFn: (memberId) => appClient.profiles.deleteProfile(memberId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profiles-customers"] });
+      toast.success("Profile deleted");
+    },
+    onError: (err) => toast.error(err.message || "Failed to delete profile"),
+  });
+
+  const importMutation = useMutation({
+    mutationFn: (file) => appClient.profiles.importProfiles(file),
+    onSuccess: (data) => {
+      setImportResults(data);
+      setImportFile(null);
+      queryClient.invalidateQueries({ queryKey: ["profiles-customers"] });
+    },
+    onError: (err) => toast.error(err.message || "Import failed"),
   });
 
   const handleSaveSegment = () => {
@@ -555,6 +611,18 @@ export default function Profiles() {
               Known customers and anonymous visitors built from your data.
             </p>
           </div>
+          {activeTab === "customer" && (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="h-9 gap-1.5"
+                onClick={() => appClient.profiles.downloadTemplate()}>
+                <Download className="w-3.5 h-3.5" /> Template
+              </Button>
+              <Button size="sm" className="h-9 gap-1.5"
+                onClick={() => { setImportOpen(true); setImportResults(null); setImportFile(null); }}>
+                <Upload className="w-3.5 h-3.5" /> Import Profiles
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
@@ -721,6 +789,14 @@ export default function Profiles() {
                           <option value="true">Has study intentions</option>
                         </select>
                       </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Source</p>
+                        <select value={custFilters.is_imported} onChange={e => setCustFilter("is_imported", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Imported only</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -754,7 +830,7 @@ export default function Profiles() {
                 income_level: "Income", member_type: "Member type", preferred_channel: "Pref. channel",
                 has_ga: "Web data", min_ga_sessions: "Min sessions", has_seminars: "Seminars",
                 has_attributes: "Attributes", opt_in_email: "Email opt-in", opt_in_sms: "SMS opt-in",
-                is_subscriber: "Subscriber",
+                is_subscriber: "Subscriber", is_imported: "Source",
               }} onRemove={k => setCustFilter(k, "")} />
             : <ActiveFilters filters={anonFilters} labels={{ source_medium: "Source/Medium", has_form_complete: "Form completed" }} onRemove={k => setAnonFilter(k, "")} />
           }
@@ -778,7 +854,7 @@ export default function Profiles() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {profiles.map(p => isCustomer
-              ? <CustomerCard key={p.member_id} profile={p} />
+              ? <CustomerCard key={p.member_id} profile={p} onDelete={deleteProfileMutation.mutate} />
               : <AnonymousCard key={p.visitor_id} profile={p} />
             )}
           </div>
@@ -802,6 +878,98 @@ export default function Profiles() {
           </div>
         )}
       </div>
+
+      {/* Import Profiles dialog */}
+      <Dialog open={importOpen} onOpenChange={v => { setImportOpen(v); if (!v) { setImportResults(null); setImportFile(null); } }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Import Customer Profiles</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {!importResults ? (
+              <>
+                <div className="rounded-md border border-border bg-secondary/20 p-4 space-y-2">
+                  <p className="text-xs font-semibold flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Step 1 - Download the template</p>
+                  <p className="text-[11px] text-muted-foreground">Fill in your profile data using the template. The <strong>primary_email</strong> column is required. Leave <strong>member_id</strong> blank to auto-generate one.</p>
+                  <Button variant="outline" size="sm" className="gap-1.5"
+                    onClick={() => appClient.profiles.downloadTemplate()}>
+                    <Download className="w-3.5 h-3.5" /> Download Template CSV
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Step 2 - Upload your filled template</p>
+                  <div
+                    className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-foreground/40 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setImportFile(f); }}
+                  >
+                    <input
+                      ref={fileInputRef} type="file" accept=".csv" className="hidden"
+                      onChange={e => setImportFile(e.target.files[0] || null)}
+                    />
+                    {importFile ? (
+                      <div className="flex items-center justify-center gap-2 text-sm">
+                        <FileText className="w-4 h-4 text-foreground" />
+                        <span className="font-medium">{importFile.name}</span>
+                        <button onClick={e => { e.stopPropagation(); setImportFile(null); }} className="text-muted-foreground hover:text-foreground">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-muted-foreground text-xs">
+                        <Upload className="w-5 h-5 mx-auto mb-1 opacity-40" />
+                        Click to select CSV or drag and drop
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  Profiles with the same email, member ID, or phone as existing profiles will be skipped.
+                </div>
+
+                <Button
+                  className="w-full gap-1.5"
+                  disabled={!importFile || importMutation.isPending}
+                  onClick={() => importMutation.mutate(importFile)}
+                >
+                  {importMutation.isPending ? "Importing…" : <><Upload className="w-3.5 h-3.5" /> Import Profiles</>}
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                  <span className="font-medium text-sm">Import complete</span>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
+                    <p className="text-2xl font-bold">{importResults.imported}</p>
+                    <p className="text-[11px] text-muted-foreground">Profiles imported</p>
+                  </div>
+                  <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
+                    <p className="text-2xl font-bold">{importResults.skipped}</p>
+                    <p className="text-[11px] text-muted-foreground">Skipped</p>
+                  </div>
+                </div>
+                {importResults.errors?.length > 0 && (
+                  <div className="rounded-md border border-border bg-secondary/20 p-3 space-y-1 max-h-40 overflow-auto">
+                    <p className="text-[11px] font-semibold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Skipped rows</p>
+                    {importResults.errors.map((e, i) => (
+                      <p key={i} className="text-[11px] text-muted-foreground">Row {e.row}: {e.error}</p>
+                    ))}
+                  </div>
+                )}
+                <Button className="w-full" onClick={() => { setImportOpen(false); setImportResults(null); }}>
+                  Done
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Save as Segment dialog */}
       <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>

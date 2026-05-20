@@ -15,7 +15,7 @@ const DEFAULT_FROM_NAME  = process.env.EDM_FROM_NAME  || "Click AI";
  */
 export async function sendEmail({ to, subject, html, text, fromEmail, fromName, replyTo, headers = {} }) {
   if (!process.env.RESEND_API_KEY) {
-    console.warn("[EDM] RESEND_API_KEY not set — email simulated, not sent.");
+    console.warn("[EDM] RESEND_API_KEY not set - email simulated, not sent.");
     return { id: `sim_${Date.now()}`, simulated: true };
   }
 

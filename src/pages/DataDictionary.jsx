@@ -147,7 +147,7 @@ export default function DataDictionary() {
                                 </td>
                                 <td className="py-2 pr-4 text-muted-foreground font-mono">{col.data_type}</td>
                                 <td className="py-2 pr-4 text-muted-foreground">{col.is_nullable ? "Yes" : "No"}</td>
-                                <td className="py-2 text-muted-foreground">{col.description || "—"}</td>
+                                <td className="py-2 text-muted-foreground">{col.description || "-"}</td>
                               </tr>
                             ))}
                           </tbody>

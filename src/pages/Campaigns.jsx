@@ -3,13 +3,14 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Copy, MoreHorizontal, Trash2, Link as LinkIcon, BarChart2, Pencil, Copy as CloneIcon, Archive, Lock, Search, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { usePlan } from "@/lib/usePlan";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import UTMForm, { buildUTMUrl } from "../components/campaigns/UTMForm";
-import UTMAnalyticsPanel from "../components/campaigns/UTMAnalyticsPanel";
+import UTMAnalyticsPanel, { GAUtmLinksSection } from "../components/campaigns/UTMAnalyticsPanel";
 
 const statusStyles = {
   draft: "bg-secondary text-secondary-foreground",
@@ -111,6 +112,8 @@ export default function Campaigns() {
     { key: "analytics", label: "Analytics", icon: <BarChart2 className="w-3.5 h-3.5" /> },
   ];
 
+  const { canUseFeatures } = usePlan();
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -120,7 +123,7 @@ export default function Campaigns() {
             <h1 className="font-heading text-3xl font-semibold tracking-tight">UTM</h1>
             <p className="text-sm text-muted-foreground mt-1">Create, manage, and analyse your UTM tracking links.</p>
           </div>
-          {tab === "utm" && (
+          {tab === "utm" && canUseFeatures && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}>
               <Plus className="w-3.5 h-3.5" /> New UTM
             </Button>
@@ -146,7 +149,7 @@ export default function Campaigns() {
 
         {/* UTM Links Tab */}
         {tab === "utm" && (
-          <div className="px-8 py-6 max-w-5xl space-y-8">
+          <div className="px-8 py-6 space-y-8">
             {/* Search + Filter */}
             <div>
               <div className="flex items-center gap-3">
@@ -250,7 +253,7 @@ export default function Campaigns() {
                                   </span>
                                 )}
                               </div>
-                              {c.full_utm_url && <p className="text-xs text-muted-foreground font-mono truncate max-w-lg">{c.full_utm_url}</p>}
+                              {c.full_utm_url && <p className="text-xs text-muted-foreground font-mono truncate">{c.full_utm_url}</p>}
                               <div className="flex items-center gap-4 mt-2 text-[10px] text-muted-foreground">
                                 {c.utm_source && <span>Source: {c.utm_source}</span>}
                                 {c.utm_medium && <span>Medium: {c.utm_medium}</span>}
@@ -299,6 +302,7 @@ export default function Campaigns() {
                 );
               })
             )}
+            <GAUtmLinksSection />
           </div>
         )}
 

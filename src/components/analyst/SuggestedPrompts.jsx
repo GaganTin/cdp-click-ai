@@ -1,10 +1,10 @@
 import { TrendingUp, Users, Globe, MousePointer, Target, BarChart3, Link, Lightbulb, Mail, Zap, PieChart, Activity } from "lucide-react";
 
 const PROMPT_SETS = [
-  // Set 0 — Traffic & growth
+  // Set 0 - Traffic & growth
   [
     { icon: TrendingUp, category: "Traffic", text: "What's driving the most traffic to our website this month? Show trends and highlight any surprises." },
-    { icon: BarChart3, category: "Campaigns", text: "Which UTM campaigns are performing best and worst? Compare sessions, bounce rate, and engagement — then suggest improvements." },
+    { icon: BarChart3, category: "Campaigns", text: "Which UTM campaigns are performing best and worst? Compare sessions, bounce rate, and engagement - then suggest improvements." },
     { icon: MousePointer, category: "Content", text: "Which pages get the most views and which have the worst drop-off? What should we prioritise?" },
     { icon: Globe, category: "Geo & Device", text: "Where are our visitors coming from by country and device? Are there markets we should invest more in?" },
     { icon: Users, category: "Segments", text: "Build me a high-value customer segment based on engagement and membership data with an estimated audience size." },
@@ -12,18 +12,18 @@ const PROMPT_SETS = [
     { icon: Target, category: "SEO", text: "What are our top organic search keywords and how do they compare to paid traffic performance?" },
     { icon: Lightbulb, category: "Opportunities", text: "What's one growth opportunity hiding in our data that we might be overlooking? Show me the numbers." },
   ],
-  // Set 1 — Email & EDM
+  // Set 1 - Email & EDM
   [
     { icon: Mail, category: "Email Ideas", text: "What email campaigns should I be running right now? Check my member base and suggest the highest-impact ones." },
     { icon: Zap, category: "Automation", text: "Which member lifecycle events aren't being captured by email automations? Suggest trigger-based campaigns I'm missing." },
     { icon: Users, category: "Re-engagement", text: "How many members have gone inactive? Suggest a re-engagement email campaign with a compelling subject and content." },
-    { icon: Mail, category: "Welcome Flow", text: "Draft me a welcome email campaign for new members that joined in the last 30 days — include personalisation and a clear CTA." },
+    { icon: Mail, category: "Welcome Flow", text: "Draft me a welcome email campaign for new members that joined in the last 30 days - include personalisation and a clear CTA." },
     { icon: TrendingUp, category: "Email Performance", text: "How are my past email campaigns performing? Show open rates, click rates, and what's working best." },
     { icon: Target, category: "Segment + Email", text: "Find me a member segment that's never been emailed and suggest a campaign tailored to their profile." },
     { icon: BarChart3, category: "Seminar Follow-up", text: "Which seminar attendees haven't been followed up with? Create an email campaign to re-engage them." },
     { icon: Lightbulb, category: "EDM Strategy", text: "What's the best email I could send this week based on current member activity and upcoming events?" },
   ],
-  // Set 2 — Members & audience
+  // Set 2 - Members & audience
   [
     { icon: Users, category: "Member Analysis", text: "Break down our member base by type and activity level. Who are our most engaged members?" },
     { icon: PieChart, category: "Demographics", text: "What does our membership look like by age group, education, and employment status? Any patterns we should act on?" },
@@ -31,15 +31,15 @@ const PROMPT_SETS = [
     { icon: TrendingUp, category: "Member Growth", text: "How has our member count grown over the last 6 months? What's driving new joins?" },
     { icon: Target, category: "High-Value Segment", text: "Who are our top 10% most engaged members? Build a segment and tell me what makes them different." },
     { icon: Users, category: "Seminar Attendees", text: "How many unique members have attended seminars? How does seminar attendance correlate with membership renewals?" },
-    { icon: Globe, category: "New Joiners", text: "Analyse our new member cohort from the last 3 months — where are they coming from and what are they doing?" },
+    { icon: Globe, category: "New Joiners", text: "Analyse our new member cohort from the last 3 months - where are they coming from and what are they doing?" },
     { icon: Lightbulb, category: "Retention Tip", text: "What's the single biggest retention opportunity in our membership data right now?" },
   ],
-  // Set 3 — UTM & campaign performance
+  // Set 3 - UTM & campaign performance
   [
-    { icon: BarChart3, category: "UTM Overview", text: "Give me a full breakdown of UTM campaign performance this month — which sources and mediums are winning?" },
+    { icon: BarChart3, category: "UTM Overview", text: "Give me a full breakdown of UTM campaign performance this month - which sources and mediums are winning?" },
     { icon: Link, category: "UTM Builder", text: "I'm launching a new LinkedIn campaign. Create a UTM link with proper tracking and suggest the best campaign name structure." },
     { icon: TrendingUp, category: "Top Channels", text: "Which acquisition channel (organic, paid, email, social, referral) is bringing in the most engaged visitors?" },
-    { icon: MousePointer, category: "Paid vs Organic", text: "Compare paid traffic vs organic traffic quality — sessions, time on site, bounce rate, and conversion signals." },
+    { icon: MousePointer, category: "Paid vs Organic", text: "Compare paid traffic vs organic traffic quality - sessions, time on site, bounce rate, and conversion signals." },
     { icon: Target, category: "Underperforming", text: "Which UTM campaigns are underperforming? Find the lowest ROI efforts and suggest what to cut or change." },
     { icon: Globe, category: "Source Gaps", text: "Are there traffic sources or markets we're not tracking properly? Find UTM gaps in my data." },
     { icon: Activity, category: "Campaign ROI", text: "Which campaigns are driving the most member sign-ups? Show me cost-per-acquisition by source if possible." },

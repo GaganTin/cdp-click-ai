@@ -5,7 +5,7 @@ function makePool(rows = []) {
   return { query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }) };
 }
 
-describe("UTM — tool registration", () => {
+describe("UTM - tool registration", () => {
   it("exports list_campaigns and analyze_utm_performance", () => {
     const names = utmTools.map((t) => t.name);
     expect(names).toContain("list_campaigns");
@@ -30,7 +30,7 @@ describe("UTM — tool registration", () => {
   });
 });
 
-describe("UTM — list_campaigns", () => {
+describe("UTM - list_campaigns", () => {
   it("returns campaigns with no filter", async () => {
     const rows = [
       { id: 1, name: "Google CPC Q1", utm_source: "google", utm_medium: "cpc" },
@@ -72,7 +72,7 @@ describe("UTM — list_campaigns", () => {
   });
 });
 
-describe("UTM — analyze_utm_performance", () => {
+describe("UTM - analyze_utm_performance", () => {
   it("queries utm_daily_performance with default 30 days", async () => {
     const rows = [{ utm_source: "google", utm_medium: "cpc", total_sessions: 500 }];
     const pool = makePool(rows);
@@ -137,7 +137,7 @@ describe("UTM — analyze_utm_performance", () => {
   });
 });
 
-describe("UTM — unknown tool", () => {
+describe("UTM - unknown tool", () => {
   it("returns error for unrecognised tool name", async () => {
     const result = await handleUtmTool("nuke_campaigns", {}, makePool());
     const data = JSON.parse(result.content[0].text);

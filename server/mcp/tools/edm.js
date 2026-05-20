@@ -1,5 +1,5 @@
 // MCP Tool Group 4: EDM (Email Direct Marketing)
-// Read-only + draft tools — AI suggests content and previews recipients.
+// Read-only + draft tools - AI suggests content and previews recipients.
 // The AI never sends or saves campaigns autonomously; the user approves via the UI.
 
 export const edmTools = [
@@ -82,7 +82,7 @@ export const edmTools = [
   {
     name: "analyze_edm_performance",
     description:
-      "Analyze sent EDM campaign performance — open rates, click rates, unsubscribe rates, and bounces. " +
+      "Analyze sent EDM campaign performance - open rates, click rates, unsubscribe rates, and bounces. " +
       "Use this to identify what content and segments perform best, and justify future campaign recommendations.",
     inputSchema: {
       type: "object",
@@ -188,7 +188,7 @@ export async function handleEdmTool(name, args, pool) {
           campaign_type: "Welcome Series",
           trigger: "new_member",
           eligible_recipients: Number(newJoiners[0].cnt),
-          description: "Members who joined in the last 30 days — high engagement window, best time to introduce your brand.",
+          description: "Members who joined in the last 30 days - high engagement window, best time to introduce your brand.",
           suggested_subject: "Welcome to the family, {{first_name}}!",
           priority: Number(newJoiners[0].cnt) > 0 ? "high" : "low",
         },
@@ -197,8 +197,8 @@ export async function handleEdmTool(name, args, pool) {
           campaign_type: "90-Day Win-Back",
           trigger: "inactivity_90d",
           eligible_recipients: Number(inactive90[0].cnt),
-          description: "Members who haven't engaged in 90+ days — re-engage before they lapse completely.",
-          suggested_subject: "We miss you, {{first_name}} — here's what's new",
+          description: "Members who haven't engaged in 90+ days - re-engage before they lapse completely.",
+          suggested_subject: "We miss you, {{first_name}} - here's what's new",
           priority: Number(inactive90[0].cnt) > 50 ? "high" : "medium",
         },
         {
@@ -206,7 +206,7 @@ export async function handleEdmTool(name, args, pool) {
           campaign_type: "30-Day Nudge",
           trigger: "inactivity_30d",
           eligible_recipients: Number(inactive30[0].cnt),
-          description: "Members who went quiet in the last month — a light nudge before deeper inactivity sets in.",
+          description: "Members who went quiet in the last month - a light nudge before deeper inactivity sets in.",
           suggested_subject: "Thought you'd want to know, {{first_name}}",
           priority: "medium",
         },
@@ -215,7 +215,7 @@ export async function handleEdmTool(name, args, pool) {
           campaign_type: "Seminar Follow-up",
           trigger: "seminar_attended",
           eligible_recipients: Number(seminarAttendees[0].cnt),
-          description: "Members who attended seminars — high-intent audience, receptive to follow-up content and offers.",
+          description: "Members who attended seminars - high-intent audience, receptive to follow-up content and offers.",
           suggested_subject: "Following up on your seminar attendance, {{first_name}}",
           priority: Number(seminarAttendees[0].cnt) > 0 ? "high" : "low",
         },
@@ -224,7 +224,7 @@ export async function handleEdmTool(name, args, pool) {
           campaign_type: "Full Member Broadcast",
           trigger: "manual",
           eligible_recipients: Number(total[0].cnt),
-          description: "All opted-in members — use for newsletters, announcements, or promotions reaching your entire list.",
+          description: "All opted-in members - use for newsletters, announcements, or promotions reaching your entire list.",
           suggested_subject: "Here's what's new this month, {{first_name}}",
           priority: "medium",
         },
@@ -235,7 +235,7 @@ export async function handleEdmTool(name, args, pool) {
             avg_open_rate: `${(Number(recentPerf[0].avg_open_rate) || 0).toFixed(1)}%`,
             campaigns_sent_last_180d: Number(recentPerf[0].campaigns_sent),
           }
-        : { note: "No sent campaigns yet — no historical benchmarks available." };
+        : { note: "No sent campaigns yet - no historical benchmarks available." };
 
       return {
         content: [{
@@ -434,7 +434,7 @@ export async function handleEdmTool(name, args, pool) {
             top_send_windows: enriched,
             recommendation: enriched.length
               ? `Best window: ${enriched[0].day} at ${enriched[0].hour} (${enriched[0].open_count} historical opens)`
-              : "Not enough send history yet — default to Tuesday or Thursday 9–11am.",
+              : "Not enough send history yet - default to Tuesday or Thursday 9–11am.",
             note: "Based on last 180 days of open events across all campaigns.",
           }),
         }],

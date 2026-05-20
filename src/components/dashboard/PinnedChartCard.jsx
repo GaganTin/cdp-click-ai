@@ -35,7 +35,7 @@ function applyDateFilter(data, xKey, filterKey) {
       const d = parseISO(String(val));
       return isAfter(d, cutoff);
     } catch {
-      return true; // non-date x-axis — keep all
+      return true; // non-date x-axis - keep all
     }
   });
 }

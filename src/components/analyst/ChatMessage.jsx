@@ -99,7 +99,7 @@ function UTMLinkCard({ data, onAdd }) {
     <div className="my-3 border border-border rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
         <LinkIcon className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-        <span className="text-xs font-semibold flex-1">Suggested UTM Link — {data.name}</span>
+        <span className="text-xs font-semibold flex-1">Suggested UTM Link - {data.name}</span>
         <Button size="sm" variant={added ? "secondary" : "default"} className="h-7 text-xs gap-1.5" onClick={handleAdd} disabled={added}>
           {added ? <><Check className="w-3 h-3" /> Added</> : <><PlusCircle className="w-3 h-3" /> Add to UTM</>}
         </Button>
@@ -181,7 +181,7 @@ function SegmentCard({ data, onAdd }) {
       {/* Footer */}
       <div className="px-4 py-2 border-t border-violet-100 dark:border-violet-800/50 bg-violet-50/30 dark:bg-violet-950/10">
         <p className="text-[10px] text-muted-foreground">
-          Click "Save Segment" to add this to your Segments page — it can then be linked to email campaigns
+          Click "Save Segment" to add this to your Segments page - it can then be linked to email campaigns
         </p>
       </div>
     </div>
@@ -335,7 +335,7 @@ function UTMPanel({ utm, choice, onChoice }) {
           "text-[11px] font-semibold flex-1",
           isPending && !isDecided ? "text-amber-900 dark:text-amber-200" : "text-blue-900 dark:text-blue-200"
         )}>
-          {isExisting ? "Existing UTM Link" : isPending && !isDecided ? "UTM Tracking — Your choice" : "Recommended UTM Tracking"}
+          {isExisting ? "Existing UTM Link" : isPending && !isDecided ? "UTM Tracking - Your choice" : "Recommended UTM Tracking"}
         </span>
         {isPending && !isDecided && (
           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700">

@@ -15,9 +15,9 @@ const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...edmTools];
  * Returns a Client that the agent loop can call.
  *
  * Tool groups:
- *   DB Connector  — query_data, list_tables, describe_table
- *   Segments      — list_segments, preview_segment_size
- *   UTM           — list_campaigns, analyze_utm_performance
+ *   DB Connector  - query_data, list_tables, describe_table
+ *   Segments      - list_segments, preview_segment_size
+ *   UTM           - list_campaigns, analyze_utm_performance
  *
  * The AI NEVER writes to the DB (no create tools). Users approve all saves via UI.
  */

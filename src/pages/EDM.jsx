@@ -1,23 +1,17 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
+import { usePlan } from "@/lib/usePlan";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
-  Plus, BarChart2, Send, Pencil, Trash2, MoreHorizontal,
+  Plus, BarChart2, Send, Pencil, Trash2,
   Mail, Clock, CheckCircle2, XCircle, RefreshCw,
-  ShieldOff, Search, Filter, Zap, Play, Pause, Layout,
+  ShieldOff, Search, Filter, Layout, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
@@ -28,10 +22,10 @@ import CampaignStats from "@/components/edm/CampaignStats";
 import TemplateEditor from "@/components/edm/TemplateEditor";
 
 const TABS = [
-  { key: "campaigns",    label: "Campaigns",    icon: Mail },
-  { key: "templates",    label: "Templates",    icon: Layout },
-  { key: "automations",  label: "Automations",  icon: Zap },
-  { key: "suppression",  label: "Suppression",  icon: ShieldOff },
+  { key: "emails",      label: "Emails",      icon: Mail },
+  { key: "templates",   label: "Templates",   icon: Layout },
+  { key: "analytics",   label: "Analytics",   icon: BarChart2 },
+  { key: "suppression", label: "Suppression", icon: ShieldOff },
 ];
 
 const STATUS_STYLES = {
@@ -57,7 +51,6 @@ const REASON_STYLES = {
   manual:       "bg-secondary text-muted-foreground",
 };
 
-// ── Campaign card ─────────────────────────────────────────────────────────────
 const STATUS_ACCENT = {
   draft:     "#94a3b8",
   scheduled: "#3b82f6",
@@ -66,21 +59,21 @@ const STATUS_ACCENT = {
   cancelled: "#d1d5db",
 };
 
-function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
+// ── Email card ─────────────────────────────────────────────────────────────────
+function EmailCard({ campaign, onEdit, onStats, onSend, onDelete }) {
   const [confirmSend, setConfirmSend] = useState(false);
+  const { canUseFeatures } = usePlan();
   const Icon = STATUS_ICONS[campaign.status] || Clock;
-  const canSend = ["draft", "scheduled"].includes(campaign.status);
+  const canSend = ["draft", "scheduled"].includes(campaign.status) && canUseFeatures;
   const canEdit = ["draft", "scheduled"].includes(campaign.status);
   const accent = STATUS_ACCENT[campaign.status] || "#94a3b8";
 
   return (
     <>
       <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all group flex flex-col">
-        {/* Color accent bar */}
         <div className="h-1 flex-shrink-0" style={{ background: accent }} />
 
         <div className="p-4 flex flex-col gap-3 flex-1">
-          {/* Header row */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-sm leading-snug truncate">{campaign.name}</p>
@@ -92,7 +85,6 @@ function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
             </Badge>
           </div>
 
-          {/* Meta info */}
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
             {campaign.segment_name && (
               <span className="flex items-center gap-1">
@@ -109,7 +101,6 @@ function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
             <span className="ml-auto">{format(new Date(campaign.created_date), "MMM d, yyyy")}</span>
           </div>
 
-          {/* Sent stats */}
           {campaign.status === "sent" && (campaign.open_count > 0 || campaign.click_count > 0) && (
             <div className="flex items-center gap-4 pt-1 border-t border-border">
               {campaign.total_recipients > 0 && campaign.open_count > 0 && (
@@ -128,7 +119,6 @@ function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
           )}
         </div>
 
-        {/* Action bar */}
         <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-1">
           {canEdit && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
@@ -154,7 +144,7 @@ function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
       <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send campaign now?</AlertDialogTitle>
+            <AlertDialogTitle>Send email now?</AlertDialogTitle>
             <AlertDialogDescription>
               This will send <strong>"{campaign.name}"</strong> to all opted-in recipients in the
               selected segment. Suppressed emails are automatically excluded. This cannot be undone.
@@ -172,8 +162,8 @@ function CampaignCard({ campaign, onEdit, onStats, onSend, onDelete }) {
   );
 }
 
-// ── Campaigns tab ─────────────────────────────────────────────────────────────
-function CampaignsTab({ onCreate, onEdit, onStats }) {
+// ── Emails tab ─────────────────────────────────────────────────────────────────
+function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -186,7 +176,7 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.edm.deleteCampaign(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success("Campaign deleted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success("Email deleted"); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -206,6 +196,8 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
     return matchSearch && matchStatus;
   });
 
+  const hasActiveFilters = !!statusFilter;
+
   const GROUPS = [
     { key: "sending",  label: "Sending",  filter: c => c.status === "sending" },
     { key: "draft",    label: "Drafts",   filter: c => ["draft","scheduled"].includes(c.status) },
@@ -214,7 +206,7 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
   ].filter(g => filtered.some(g.filter));
 
   return (
-    <div className="px-8 py-6 max-w-5xl">
+    <div className="px-8 py-6">
       {/* Search + filter row */}
       <div className="mb-6">
         <div className="flex items-center gap-3">
@@ -223,13 +215,13 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search campaigns…"
+              placeholder="Search emails…"
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
             <Filter className="w-3.5 h-3.5" /> Filters
-            {statusFilter && <span className="w-1.5 h-1.5 rounded-full bg-foreground" />}
+            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground" />}
           </Button>
         </div>
         {showFilters && (
@@ -249,6 +241,18 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
             </div>
           </div>
         )}
+        {hasActiveFilters && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {statusFilter && (
+              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+                Status: <strong>{statusFilter}</strong>
+                <button onClick={() => setStatusFilter("")} className="hover:text-foreground text-muted-foreground ml-0.5">
+                  <XCircle className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {isLoading && (
@@ -260,11 +264,16 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
       {!isLoading && filtered.length === 0 && (
         <div className="text-center py-20 text-sm text-muted-foreground">
           <Mail className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-foreground mb-1">No campaigns yet</p>
-          <p className="text-xs mb-4">Create your first campaign, or ask the AI Analyst to draft one for you.</p>
-          <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
-            <Plus className="w-3.5 h-3.5" /> New Campaign
-          </Button>
+          <p className="font-medium text-foreground mb-1">No emails yet</p>
+          <p className="text-xs mb-4">Create your first email, or start from a template.</p>
+          <div className="flex items-center justify-center gap-2">
+            <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
+              <Plus className="w-3.5 h-3.5" /> New Email
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={onBrowseTemplates}>
+              <Layout className="w-3.5 h-3.5" /> Browse Templates
+            </Button>
+          </div>
         </div>
       )}
 
@@ -275,7 +284,7 @@ function CampaignsTab({ onCreate, onEdit, onStats }) {
           </p>
           <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
             {filtered.filter(group.filter).map(c => (
-              <CampaignCard
+              <EmailCard
                 key={c.id}
                 campaign={c}
                 onEdit={onEdit}
@@ -324,8 +333,9 @@ function TemplateCard({ template, onEdit, onDelete }) {
   );
 }
 
-function TemplatesTab({ onCreate, onEdit }) {
+function TemplatesTab({ onCreate, onEdit, onImport }) {
   const qc = useQueryClient();
+  const fileInputRef = useRef(null);
 
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ["edm-templates"],
@@ -338,8 +348,29 @@ function TemplatesTab({ onCreate, onEdit }) {
     onError: (e) => toast.error(e.message),
   });
 
+  const handleImportFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      onImport({ name: file.name.replace(/\.html?$/, ""), html_body: ev.target.result, variables: { _html_mode: true } });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   return (
-    <div className="px-8 py-6 max-w-5xl">
+    <div className="px-8 py-6">
+      {/* Toolbar — only shown when templates exist */}
+      {!isLoading && templates.length > 0 && (
+        <div className="flex items-center gap-3 mb-6">
+          <Button variant="outline" size="sm" className="h-9 gap-1.5 ml-auto" onClick={() => fileInputRef.current?.click()}>
+            <Upload className="w-3.5 h-3.5" /> Import HTML
+          </Button>
+          <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
+        </div>
+      )}
+
       {isLoading && (
         <div className="flex items-center justify-center py-20">
           <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin" />
@@ -350,10 +381,16 @@ function TemplatesTab({ onCreate, onEdit }) {
         <div className="text-center py-20 text-sm text-muted-foreground">
           <Layout className="w-10 h-10 mx-auto mb-3 opacity-20" />
           <p className="font-medium text-foreground mb-1">No templates yet</p>
-          <p className="text-xs mb-4">Create reusable email templates to quickly start new campaigns.</p>
-          <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
-            <Plus className="w-3.5 h-3.5" /> New Template
-          </Button>
+          <p className="text-xs mb-4">Create reusable email templates to quickly start new emails.</p>
+          <div className="flex items-center justify-center gap-2">
+            <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
+              <Plus className="w-3.5 h-3.5" /> New Template
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => fileInputRef.current?.click()}>
+              <Upload className="w-3.5 h-3.5" /> Import HTML
+            </Button>
+          </div>
+          <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
         </div>
       )}
 
@@ -367,6 +404,99 @@ function TemplatesTab({ onCreate, onEdit }) {
               onDelete={(id) => deleteMutation.mutate(id)}
             />
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Analytics tab ─────────────────────────────────────────────────────────────
+function AnalyticsTab() {
+  const { data: campaigns = [], isLoading } = useQuery({
+    queryKey: ["edm-campaigns"],
+    queryFn: () => appClient.edm.listCampaigns(),
+  });
+
+  const sent = campaigns.filter(c => c.status === "sent");
+  const totalSent = sent.reduce((s, c) => s + (c.total_recipients || 0), 0);
+  const totalOpens = sent.reduce((s, c) => s + (c.open_count || 0), 0);
+  const totalClicks = sent.reduce((s, c) => s + (c.click_count || 0), 0);
+  const avgOpenRate = totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0;
+  const avgClickRate = totalSent > 0 ? Math.round((totalClicks / totalSent) * 100) : 0;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-8 py-6 space-y-8">
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: "Emails Sent", value: sent.length, sub: "campaigns" },
+          { label: "Total Recipients", value: totalSent.toLocaleString(), sub: "across all sends" },
+          { label: "Avg Open Rate", value: `${avgOpenRate}%`, sub: `${totalOpens.toLocaleString()} opens` },
+          { label: "Avg Click Rate", value: `${avgClickRate}%`, sub: `${totalClicks.toLocaleString()} clicks` },
+        ].map(tile => (
+          <div key={tile.label} className="border border-border rounded-lg p-4 space-y-1">
+            <p className="text-xs text-muted-foreground">{tile.label}</p>
+            <p className="text-2xl font-bold">{tile.value}</p>
+            <p className="text-[11px] text-muted-foreground">{tile.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-email breakdown */}
+      {sent.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+            Sent Emails - Performance
+          </p>
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-secondary/20">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">Email</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Recipients</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Open Rate</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Click Rate</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Sent</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sent.map(c => {
+                  const openRate = c.total_recipients > 0 ? Math.round((c.open_count / c.total_recipients) * 100) : 0;
+                  const clickRate = c.total_recipients > 0 ? Math.round((c.click_count / c.total_recipients) * 100) : 0;
+                  return (
+                    <tr key={c.id} className="border-b border-border last:border-0 hover:bg-secondary/10">
+                      <td className="px-4 py-3">
+                        <p className="font-medium truncate max-w-[200px]">{c.name}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[200px]">{c.subject}</p>
+                      </td>
+                      <td className="px-4 py-3 text-right text-muted-foreground">{(c.total_recipients || 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{openRate}%</td>
+                      <td className="px-4 py-3 text-right font-semibold">{clickRate}%</td>
+                      <td className="px-4 py-3 text-right text-muted-foreground text-xs">
+                        {c.sent_at ? format(new Date(c.sent_at), "MMM d, yyyy") : "-"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {sent.length === 0 && (
+        <div className="text-center py-16 text-sm text-muted-foreground">
+          <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="font-medium text-foreground mb-1">No data yet</p>
+          <p className="text-xs">Send your first email to start seeing analytics.</p>
         </div>
       )}
     </div>
@@ -407,8 +537,7 @@ function SuppressionTab() {
   );
 
   return (
-    <div className="px-8 py-6 max-w-5xl">
-      {/* Actions row */}
+    <div className="px-8 py-6">
       <div className="flex items-center gap-3 mb-6">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -438,7 +567,7 @@ function SuppressionTab() {
       </div>
 
       <p className="text-xs text-muted-foreground mb-4">
-        {suppressed.length.toLocaleString()} suppressed emails — bounces, unsubscribes, and complaints are added automatically.
+        {suppressed.length.toLocaleString()} suppressed emails - bounces, unsubscribes, and complaints are added automatically.
       </p>
 
       <div className="border border-border rounded-lg overflow-hidden">
@@ -475,232 +604,13 @@ function SuppressionTab() {
   );
 }
 
-// ── Automations tab ───────────────────────────────────────────────────────────
-const TRIGGER_LABELS = {
-  manual:             "Manual",
-  scheduled:          "Scheduled",
-  // Member Lifecycle
-  new_member:         "New Member Joins",
-  member_upgraded:    "Member Upgraded",
-  member_expired:     "Membership Expired",
-  member_anniversary: "Membership Anniversary",
-  // Offline Engagement
-  seminar_attended:   "Seminar Attended",
-  webinar_attended:   "Webinar Attended",
-  form_submitted:     "Form Submitted",
-  event_registered:   "Event Registered",
-  // Web Activity
-  high_activity:      "Highly Active",
-  page_viewed:        "Page Viewed",
-  file_downloaded:    "File Downloaded",
-  whatsapp_clicked:   "WhatsApp Clicked",
-  // Re-engagement
-  inactivity_30d:     "30-day Inactive",
-  inactivity_60d:     "60-day Inactive",
-  inactivity_90d:     "90-day Inactive",
-  inactivity_180d:    "6-month Inactive",
-  // Date-based
-  birthday:           "Birthday",
-  join_anniversary:   "Join Anniversary",
-};
-
-function AutomationFormDialog({ open, onClose, onSave, initial = null }) {
-  const [name, setName] = useState(initial?.name || "");
-  const [triggerType, setTriggerType] = useState(initial?.trigger_type || "new_member");
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    if (!name.trim()) return toast.error("Automation name is required");
-    setSaving(true);
-    try {
-      await onSave({ name: name.trim(), trigger_type: triggerType, trigger_config: {}, status: "draft" });
-      onClose();
-    } catch (e) {
-      toast.error(e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{initial ? "Edit Automation" : "New Automation"}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 pt-1">
-          <div>
-            <Label className="text-xs mb-1.5 block">Automation Name</Label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Welcome series" autoFocus />
-          </div>
-          <div>
-            <Label className="text-xs mb-1.5 block">Trigger</Label>
-            <Select value={triggerType} onValueChange={setTriggerType}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent position="popper" className="max-h-[280px] overflow-y-auto w-[var(--radix-select-trigger-width)]">
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] font-semibold text-muted-foreground">Member Lifecycle</SelectLabel>
-                  <SelectItem value="new_member">New Member Joins</SelectItem>
-                  <SelectItem value="member_upgraded">Member Type Upgraded</SelectItem>
-                  <SelectItem value="member_expired">Membership Expired</SelectItem>
-                  <SelectItem value="member_anniversary">Membership Anniversary</SelectItem>
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] font-semibold text-muted-foreground">Offline Engagement</SelectLabel>
-                  <SelectItem value="seminar_attended">Attends a Seminar</SelectItem>
-                  <SelectItem value="webinar_attended">Attends a Webinar</SelectItem>
-                  <SelectItem value="form_submitted">Submits a Form</SelectItem>
-                  <SelectItem value="event_registered">Registers for an Event</SelectItem>
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] font-semibold text-muted-foreground">Web Activity</SelectLabel>
-                  <SelectItem value="high_activity">Highly Active (5+ sessions)</SelectItem>
-                  <SelectItem value="page_viewed">Views a Specific Page</SelectItem>
-                  <SelectItem value="file_downloaded">Downloads a File</SelectItem>
-                  <SelectItem value="whatsapp_clicked">Clicks WhatsApp</SelectItem>
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] font-semibold text-muted-foreground">Re-engagement</SelectLabel>
-                  <SelectItem value="inactivity_30d">30 Days Inactive</SelectItem>
-                  <SelectItem value="inactivity_60d">60 Days Inactive</SelectItem>
-                  <SelectItem value="inactivity_90d">90 Days Inactive</SelectItem>
-                  <SelectItem value="inactivity_180d">6 Months Inactive</SelectItem>
-                </SelectGroup>
-                <SelectGroup>
-                  <SelectLabel className="text-[11px] font-semibold text-muted-foreground">Date-based</SelectLabel>
-                  <SelectItem value="birthday">Member Birthday</SelectItem>
-                  <SelectItem value="join_anniversary">Join Date Anniversary</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            After creating, add email steps from the automation detail view. Link them to saved draft campaigns.
-          </p>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={save} disabled={saving}>
-              {saving ? "Saving..." : initial ? "Update" : "Create"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function AutomationsTab({ onCreate, createOpen, onCreateClose }) {
-  const qc = useQueryClient();
-
-  // createOpen/onCreateClose controlled from parent (header button); fallback to local state
-  const formOpen = createOpen ?? false;
-  const closeForm = onCreateClose ?? (() => {});
-
-  const { data: automations = [], isLoading } = useQuery({
-    queryKey: ["edm-automations"],
-    queryFn: () => appClient.edm.listAutomations(),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data) => appClient.edm.createAutomation(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-automations"] }); toast.success("Automation created"); },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const toggleMutation = useMutation({
-    mutationFn: ({ id, status }) => appClient.edm.updateAutomation(id, { status }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-automations"] }); },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => appClient.edm.deleteAutomation(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-automations"] }); toast.success("Automation deleted"); },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const openForm = onCreate ?? (() => {});
-
-  return (
-    <div className="px-8 py-6 max-w-5xl">
-      {isLoading && (
-        <div className="flex items-center justify-center py-20">
-          <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin" />
-        </div>
-      )}
-
-      {!isLoading && automations.length === 0 && (
-        <div className="text-center py-20 text-sm text-muted-foreground">
-          <Zap className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-foreground mb-1">No automations yet</p>
-          <p className="text-xs mb-4">Create an automation to send emails based on member actions like joining or going inactive.</p>
-          <Button size="sm" className="gap-1.5 h-9" onClick={openForm}>
-            <Plus className="w-3.5 h-3.5" /> New Automation
-          </Button>
-        </div>
-      )}
-
-      {!isLoading && automations.length > 0 && (
-        <div className="border border-border rounded-lg overflow-hidden">
-          {automations.map(a => (
-            <div key={a.id} className="flex items-center gap-4 px-4 py-3 border-b border-border last:border-0 hover:bg-secondary/20 transition-colors">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-medium text-sm truncate">{a.name}</p>
-                  <Badge
-                    className={`text-[10px] h-4 px-1.5 ${a.status === "active" ? "bg-green-100 text-green-800" : "bg-secondary text-secondary-foreground"}`}
-                  >
-                    {a.status}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Trigger: {TRIGGER_LABELS[a.trigger_type] || a.trigger_type}
-                </p>
-              </div>
-              <span className="text-xs text-muted-foreground hidden md:block">
-                {format(new Date(a.created_date), "MMM d, yyyy")}
-              </span>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost" size="sm" className="h-8 text-xs gap-1.5"
-                  onClick={() => toggleMutation.mutate({ id: a.id, status: a.status === "active" ? "draft" : "active" })}
-                >
-                  {a.status === "active"
-                    ? <><Pause className="w-3 h-3" /> Pause</>
-                    : <><Play className="w-3 h-3" /> Activate</>
-                  }
-                </Button>
-                <Button
-                  variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                  onClick={() => deleteMutation.mutate(a.id)}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <AutomationFormDialog
-        open={formOpen}
-        onClose={closeForm}
-        onSave={(data) => createMutation.mutateAsync(data)}
-      />
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function EDM() {
   const qc = useQueryClient();
-  const [tab, setTab] = useState("campaigns");
+  const [tab, setTab] = useState("emails");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [statsTarget, setStatsTarget] = useState(null);
-  const [automationFormOpen, setAutomationFormOpen] = useState(false);
   const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
   const [templateEditTarget, setTemplateEditTarget] = useState(null);
 
@@ -709,7 +619,7 @@ export default function EDM() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["edm-campaigns"] });
       setEditorOpen(false);
-      toast.success("Campaign saved as draft");
+      toast.success("Email saved as draft");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -720,7 +630,7 @@ export default function EDM() {
       qc.invalidateQueries({ queryKey: ["edm-campaigns"] });
       setEditTarget(null);
       setEditorOpen(false);
-      toast.success("Campaign updated");
+      toast.success("Email updated");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -753,7 +663,7 @@ export default function EDM() {
   });
 
   const handleTemplateSave = (data) => {
-    if (templateEditTarget) templateUpdateMutation.mutate({ id: templateEditTarget.id, data });
+    if (templateEditTarget?.id) templateUpdateMutation.mutate({ id: templateEditTarget.id, data });
     else templateCreateMutation.mutate(data);
   };
 
@@ -761,34 +671,25 @@ export default function EDM() {
   const openEdit   = (c)  => { setEditTarget(c);    setEditorOpen(true); };
   const openTemplateCreate = () => { setTemplateEditTarget(null); setTemplateEditorOpen(true); };
   const openTemplateEdit   = (t)  => { setTemplateEditTarget(t);    setTemplateEditorOpen(true); };
+  const openTemplateImport = (initialData) => { setTemplateEditTarget(initialData); setTemplateEditorOpen(true); };
+
+  const { canUseFeatures } = usePlan();
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header — matches Campaigns / Segments pattern */}
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
             <h1 className="font-heading text-3xl font-semibold tracking-tight">Email</h1>
-            <p className="text-sm text-muted-foreground mt-1">Build, send, and track email marketing campaigns.</p>
+            <p className="text-sm text-muted-foreground mt-1">Build, send, and track marketing emails.</p>
           </div>
-          {tab === "campaigns" && (
+          {tab === "emails" && canUseFeatures && (
             <Button size="sm" className="gap-1.5 h-9" onClick={openCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Campaign
-            </Button>
-          )}
-          {tab === "templates" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={openTemplateCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Template
-            </Button>
-          )}
-          {tab === "automations" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => setAutomationFormOpen(true)}>
-              <Plus className="w-3.5 h-3.5" /> New Automation
+              <Plus className="w-3.5 h-3.5" /> New Email
             </Button>
           )}
         </div>
 
-        {/* Tabs — identical markup to Campaigns / Segments */}
         <div className="flex border-b border-border gap-6">
           {TABS.map(t => {
             const Icon = t.icon;
@@ -810,29 +711,24 @@ export default function EDM() {
         </div>
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 overflow-auto min-h-0">
-        {tab === "campaigns" && (
-          <CampaignsTab
+        {tab === "emails" && (
+          <EmailsTab
             onCreate={openCreate}
             onEdit={openEdit}
             onStats={setStatsTarget}
+            onBrowseTemplates={() => setTab("templates")}
           />
         )}
         {tab === "templates" && (
           <TemplatesTab
             onCreate={openTemplateCreate}
             onEdit={openTemplateEdit}
+            onImport={openTemplateImport}
           />
         )}
-        {tab === "automations" && (
-          <AutomationsTab
-            onCreate={() => setAutomationFormOpen(true)}
-            createOpen={automationFormOpen}
-            onCreateClose={() => setAutomationFormOpen(false)}
-          />
-        )}
-        {tab === "suppression"  && <SuppressionTab />}
+        {tab === "analytics"  && <AnalyticsTab />}
+        {tab === "suppression" && <SuppressionTab />}
       </div>
 
       <CampaignEditor

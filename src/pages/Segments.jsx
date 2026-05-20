@@ -347,7 +347,7 @@ export default function Segments() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-8 py-6 max-w-5xl">
+      <div className="flex-1 overflow-auto px-8 py-6">
         {/* Search + Filter */}
         <div className="mb-6">
           <div className="flex items-center gap-3">
@@ -409,7 +409,7 @@ export default function Segments() {
             return (
               <div key={group.key}>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{group.label} · {items.length}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {items.map(seg => (
                     <div key={seg.id} className={`border border-border rounded-lg p-5 transition-shadow ${seg.status === "archived" ? "opacity-60" : "hover:shadow-sm"}`}>
                       <div className="flex items-start justify-between">

@@ -1,6 +1,6 @@
 // MCP Tool Group 3: UTM Campaigns
 // Read-only tools for researching campaign performance and checking existing campaigns.
-// The AI never saves a UTM link directly — the user approves via the UI.
+// The AI never saves a UTM link directly - the user approves via the UI.
 
 export const utmTools = [
   {

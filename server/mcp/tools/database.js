@@ -45,7 +45,7 @@ export const databaseTools = [
         },
         schema_name: {
           type: "string",
-          description: "The schema name (ga_landing, public, app, metadata). Optional — if omitted, searches all schemas.",
+          description: "The schema name (ga_landing, public, app, metadata). Optional - if omitted, searches all schemas.",
         },
       },
       required: ["table_name"],

@@ -1,6 +1,6 @@
 // MCP Tool Group 2: Audience Segments
 // Read-only tools for researching and sizing segments before recommending them to the user.
-// The AI never saves a segment directly — the user approves via the UI.
+// The AI never saves a segment directly - the user approves via the UI.
 
 export const segmentTools = [
   {

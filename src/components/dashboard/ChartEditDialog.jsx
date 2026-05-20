@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
-// Plain edit dialog — lets user rename title/description
+// Plain edit dialog - lets user rename title/description
 export function ChartEditBasicDialog({ chart, onSave, onClose }) {
   const [title, setTitle] = useState(chart.title || "");
   const [description, setDescription] = useState(chart.description || "");
@@ -36,7 +36,7 @@ export function ChartEditBasicDialog({ chart, onSave, onClose }) {
   );
 }
 
-// AI edit dialog — user describes what they want changed, AI rewrites the config
+// AI edit dialog - user describes what they want changed, AI rewrites the config
 export function ChartEditAIDialog({ chart, onSave, onClose }) {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);

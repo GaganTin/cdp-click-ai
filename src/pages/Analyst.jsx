@@ -1,8 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { appClient } from "@/api/appClient";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LayoutDashboard } from "lucide-react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { LayoutDashboard, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import PlanGate from "@/components/PlanGate";
+import { usePlan } from "@/lib/usePlan";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import ChatMessage from "../components/analyst/ChatMessage";
 import ChatInput from "../components/analyst/ChatInput";
@@ -19,6 +24,8 @@ export default function Analyst() {
   const [lastPinnedChart, setLastPinnedChart] = useState(null);
   const [campaignEditorOpen, setCampaignEditorOpen] = useState(false);
   const [campaignEditorInitial, setCampaignEditorInitial] = useState(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [draftPrompt, setDraftPrompt] = useState("");
   // Track whether the current conversation has had its context injected
   const contextInjectedRef = useRef(false);
   const scrollRef = useRef(null);
@@ -47,9 +54,25 @@ export default function Analyst() {
     queryFn: () => appClient.edm.listCampaigns({ limit: 10, offset: 0 }).then(r => r.results || r),
   });
 
+  const { data: allSettings = {} } = useQuery({
+    queryKey: ["app-settings"],
+    queryFn: () => appClient.settings.getAll(),
+  });
+  const savedPrompt = allSettings?.analyst_system_prompt?.value ?? "";
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: (value) => appClient.settings.set("analyst_system_prompt", value, "AI Analyst - Company Context"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["app-settings"] });
+      toast.success("Company context saved - will apply to new messages");
+      setSettingsOpen(false);
+    },
+    onError: (err) => toast.error(err.message || "Failed to save"),
+  });
+
   const stripContextPrefix = (text) => {
     if (typeof text !== "string") return text;
-    const marker = "[END APP CONTEXT — user question follows:]\n";
+    const marker = "[END APP CONTEXT - user question follows:]\n";
     const idx = text.indexOf(marker);
     return idx !== -1 ? text.slice(idx + marker.length) : text;
   };
@@ -57,7 +80,7 @@ export default function Analyst() {
   const cleanMessages = (msgs) =>
     (msgs || []).map(m => m.role === "user" ? { ...m, content: stripContextPrefix(m.content) } : m);
 
-  // Subscribe to active conversation — poll until AI finishes (status: "idle")
+  // Subscribe to active conversation - poll until AI finishes (status: "idle")
   useEffect(() => {
     if (!conversationId) return;
     const unsubscribe = appClient.agents.subscribeToConversation(conversationId, (data) => {
@@ -81,7 +104,7 @@ export default function Analyst() {
 
   // Build context summary to inject into first message of a new conversation
   const buildContextPrefix = () => {
-    const lines = ["[APP CONTEXT — available data across pages:]\n"];
+    const lines = ["[APP CONTEXT - available data across pages:]\n"];
     if (pinnedCharts.length > 0) {
       lines.push(`DASHBOARD CHARTS (${pinnedCharts.length}):`);
       pinnedCharts.slice(0, 8).forEach(c => {
@@ -112,7 +135,7 @@ export default function Analyst() {
         lines.push(`  - "${c.name}" [${c.status}] subject="${c.subject || ""}" sent=${c.sent_count ?? 0} opened=${c.opened_count ?? 0}`);
       });
     }
-    lines.push("\n[END APP CONTEXT — user question follows:]\n");
+    lines.push("\n[END APP CONTEXT - user question follows:]\n");
     return lines.join("\n");
   };
 
@@ -144,7 +167,10 @@ export default function Analyst() {
     setIsStreaming(false);
   };
 
+  const { canUseFeatures } = usePlan();
+
   const handleSend = async (text, fileUrls) => {
+    if (!canUseFeatures) return;
     isNearBottom.current = true;
     let conv;
     const isNewConv = !conversationId;
@@ -185,7 +211,7 @@ export default function Analyst() {
       last_refreshed: new Date().toISOString(),
     });
     queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
-    toast.success("Chart pinned — dashboard preview opened");
+    toast.success("Chart pinned - dashboard preview opened");
     setLastPinnedChart({ ...created, chart_config: JSON.stringify(chartConfig) });
     setShowDashboard(true);
   };
@@ -281,7 +307,7 @@ export default function Analyst() {
         status: "draft",
       });
       queryClient.invalidateQueries({ queryKey: ["edm-campaigns"] });
-      toast.success(`Email campaign "${data.name}" saved as draft — go to Email page to review and send`);
+      toast.success(`Email campaign "${data.name}" saved as draft - go to Email page to review and send`);
     } catch (err) {
       toast.error(err.message || "Failed to save email campaign");
     }
@@ -321,7 +347,7 @@ export default function Analyst() {
         utm_campaign_id: formData.utm_campaign_id || utmCampaignId || null,
       });
       queryClient.invalidateQueries({ queryKey: ["edm-campaigns"] });
-      toast.success(`Email campaign "${formData.name}" saved — go to Email page to send`);
+      toast.success(`Email campaign "${formData.name}" saved - go to Email page to send`);
       setCampaignEditorOpen(false);
       setCampaignEditorInitial(null);
     } catch (err) {
@@ -350,20 +376,40 @@ export default function Analyst() {
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
         {/* Header */}
         <div className="h-14 border-b border-border flex items-center justify-between px-6 flex-shrink-0">
-          <h1 className="text-sm font-semibold">AI Analyst</h1>
-          <Button
-            variant={showDashboard ? "default" : "ghost"}
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => setShowDashboard(v => !v)}
-          >
-            <LayoutDashboard className="w-3.5 h-3.5" />
-            Dashboard
-          </Button>
+          <div className="flex items-center gap-2">
+            <h1 className="text-sm font-semibold">AI Analyst</h1>
+            {savedPrompt && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
+                Company context active
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost" size="sm" className="h-8 text-xs gap-1.5"
+              onClick={() => { setDraftPrompt(savedPrompt); setSettingsOpen(true); }}
+            >
+              <Settings className="w-3.5 h-3.5" />
+              Context
+            </Button>
+            <Button
+              variant={showDashboard ? "default" : "ghost"}
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => setShowDashboard(v => !v)}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              Dashboard
+            </Button>
+          </div>
         </div>
 
-        {/* Messages */}
-        {messages.length === 0 ? (
+        {/* Messages / gate */}
+        {!canUseFeatures ? (
+          <div className="flex-1 overflow-auto">
+            <PlanGate feature="the AI Analyst" />
+          </div>
+        ) : messages.length === 0 ? (
           <SuggestedPrompts onSelect={handleSend} />
         ) : (
           <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto py-6">
@@ -398,11 +444,11 @@ export default function Analyst() {
           </div>
         )}
 
-        {/* Input */}
-        <ChatInput onSend={handleSend} disabled={isStreaming} />
+        {/* Input - hidden when trial expired */}
+        {canUseFeatures && <ChatInput onSend={handleSend} disabled={isStreaming} />}
       </div>
 
-      {/* Dashboard preview panel — right side */}
+      {/* Dashboard preview panel - right side */}
       {showDashboard && (
         <div className="w-[460px] flex-shrink-0 flex flex-col overflow-hidden">
           <DashboardPreviewPanel
@@ -421,6 +467,54 @@ export default function Analyst() {
         onSave={handleSaveEDMFromEditor}
         initial={campaignEditorInitial}
       />
+
+      {/* Company context settings dialog */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Company Context</DialogTitle>
+            <DialogDescription>
+              Tell the AI analyst about your company - industry, goals, audience, tone, or anything it should always keep in mind.
+              This context is injected into every conversation automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-1">
+            <div>
+              <Label className="text-xs">System prompt</Label>
+              <Textarea
+                value={draftPrompt}
+                onChange={e => setDraftPrompt(e.target.value)}
+                placeholder={`e.g. We are LinkedU, an education consultancy based in Hong Kong. Our members are mostly families exploring overseas study options for their children (ages 10–18). Our tone should be professional but warm. When suggesting campaigns, prioritise members registered via Seminar as they have the highest conversion rate. Our peak season is September–November.`}
+                className="mt-1 min-h-[180px] text-xs font-mono resize-y"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1.5">
+                Leave empty to use no company context. Changes apply to the next message sent - not to existing conversations.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              {savedPrompt && (
+                <Button
+                  variant="ghost" size="sm" className="text-xs text-muted-foreground h-8"
+                  onClick={() => { setDraftPrompt(""); saveSettingsMutation.mutate(""); }}
+                  disabled={saveSettingsMutation.isPending}
+                >
+                  Clear context
+                </Button>
+              )}
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setSettingsOpen(false)}>Cancel</Button>
+                <Button
+                  size="sm" className="h-8"
+                  disabled={saveSettingsMutation.isPending || draftPrompt === savedPrompt}
+                  onClick={() => saveSettingsMutation.mutate(draftPrompt)}
+                >
+                  {saveSettingsMutation.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

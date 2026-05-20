@@ -90,7 +90,7 @@ export default function ReportAIChat({ reports, campaigns, segments, onSaveRepor
           <div className="text-center mb-8">
             <h2 className="font-heading text-xl font-semibold tracking-tight mb-2">Report Assistant</h2>
             <p className="text-sm text-muted-foreground max-w-md">
-              I know your data — campaigns, segments, and existing reports. Ask me to generate any report, and save it directly to your reports folder.
+              I know your data - campaigns, segments, and existing reports. Ask me to generate any report, and save it directly to your reports folder.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-2 max-w-lg w-full">

@@ -1266,5 +1266,189 @@
         "description": "Google Analytics 4 property display name"
       }
     ]
+  },
+  {
+    "table": "data_integrations",
+    "schema": "app",
+    "use_case": "Stores the connection state and credentials config for each external data source integrated with the CDP. One row per integration type. Used to check whether a source is connected, when it was last synced, and whether errors occurred.",
+    "granularity": "One row per integration_type (googleAnalytics, googleSearchConsole, shopify, shopifyCustomApp, wordpress)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Primary key, auto-generated UUID"
+      },
+      {
+        "name": "created_date",
+        "type": "datetime",
+        "description": "Timestamp when this integration record was first created"
+      },
+      {
+        "name": "updated_date",
+        "type": "datetime",
+        "description": "Timestamp of the last update to this record, auto-maintained by trigger"
+      },
+      {
+        "name": "integration_type",
+        "type": "string",
+        "description": "Identifier for the integration. One of: googleAnalytics, googleSearchConsole, shopify, shopifyCustomApp, wordpress"
+      },
+      {
+        "name": "config",
+        "type": "jsonb",
+        "description": "Credential and configuration payload specific to the integration type. For googleAnalytics: {propertyId, propertyName}. For googleSearchConsole: {siteUrl}. For shopify: {storeName, accessToken}. For shopifyCustomApp: {storeName, scriptTagId, accessToken}."
+      },
+      {
+        "name": "is_connected",
+        "type": "boolean",
+        "description": "True when the integration has been successfully verified as connected"
+      },
+      {
+        "name": "last_connected_date",
+        "type": "datetime",
+        "description": "Timestamp of the most recent successful connection test"
+      },
+      {
+        "name": "is_connection_error",
+        "type": "boolean",
+        "description": "True when the last connection attempt failed"
+      },
+      {
+        "name": "connection_error",
+        "type": "string",
+        "description": "Error message from the last failed connection attempt, null if no error"
+      },
+      {
+        "name": "is_synced",
+        "type": "boolean",
+        "description": "True when a data sync has completed successfully at least once"
+      },
+      {
+        "name": "last_synced_date",
+        "type": "datetime",
+        "description": "Timestamp of the most recent successful data sync"
+      },
+      {
+        "name": "is_sync_error",
+        "type": "boolean",
+        "description": "True when the last sync attempt failed"
+      },
+      {
+        "name": "sync_error",
+        "type": "string",
+        "description": "Error message from the last failed sync, null if no error"
+      }
+    ]
+  },
+  {
+    "table": "company_report_config",
+    "schema": "app",
+    "use_case": "Single-row configuration table that controls which CDP and GA report pipelines are active and in debug mode. Also stores the GA property URL (url_domain) used to tie web content scraping to the correct domain. Updated automatically when Google Analytics is connected or disconnected.",
+    "granularity": "Single configuration row per tenant (single-tenant deployment)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Primary key, auto-generated UUID"
+      },
+      {
+        "name": "created_date",
+        "type": "datetime",
+        "description": "Timestamp when this config record was created"
+      },
+      {
+        "name": "updated_date",
+        "type": "datetime",
+        "description": "Timestamp of the last update, auto-maintained by trigger"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference slug used to namespace data across pipeline jobs"
+      },
+      {
+        "name": "is_trial",
+        "type": "boolean",
+        "description": "True when the client is on a trial plan; may affect data retention and pipeline limits"
+      },
+      {
+        "name": "url_domain",
+        "type": "string",
+        "description": "The GA4 property URL (propertyName) set when Google Analytics is connected. Used as the domain identifier for web content and report configuration. Cleared when GA is disconnected."
+      },
+      {
+        "name": "supporting_capsuite_param",
+        "type": "text[]",
+        "description": "List of Capsuite tracking parameter names injected into the site. Defaults to [capsuite_sid, capsuite_apid]."
+      },
+      {
+        "name": "cdp_reports",
+        "type": "jsonb",
+        "description": "Per-report debug and configuration flags for CDP pipeline reports. Keys: popup_tracking, blast_tracking, utm_summary, activity_log, web_content_attributes, ap_session_log, ap_anonymous_profile, ap_segment_filter, mem_segment_filter, ap_membership_profiles, outbound_links_attributes. Each entry has isDebugging (bool) and debugStartDate (YYYY-MM-DD)."
+      },
+      {
+        "name": "ga_reports",
+        "type": "jsonb",
+        "description": "Per-report debug and configuration flags for GA data pipeline reports. Keys: path_exploration, path_exploration_duration, utm_performance, utm_daily_performance, utm_daily_full_param_performance, utm_ad_performance, country_performance, page_metrics, page_utm_metrics, website_metrics, keyword_performance, event_list. Each entry has isDebugging (bool) and debugStartDate (YYYY-MM-DD)."
+      }
+    ]
+  },
+  {
+    "table": "web_content_html_elements",
+    "schema": "app",
+    "use_case": "Configuration for the web content scraper that crawls the client's website to extract page attributes. url_pattern is derived from the GA property URL and is used by the scraper to identify pages belonging to this client. Updated automatically when Google Analytics is connected or disconnected.",
+    "granularity": "Single configuration row per tenant (single-tenant deployment)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Primary key, auto-generated UUID"
+      },
+      {
+        "name": "created_date",
+        "type": "datetime",
+        "description": "Timestamp when this config record was created"
+      },
+      {
+        "name": "updated_date",
+        "type": "datetime",
+        "description": "Timestamp of the last update, auto-maintained by trigger"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client reference slug used to namespace data across pipeline jobs"
+      },
+      {
+        "name": "cut_off_point_after",
+        "type": "string",
+        "description": "HTML marker string; the scraper discards page content that appears after this string. Null means no upper cutoff."
+      },
+      {
+        "name": "cut_off_point_before",
+        "type": "string",
+        "description": "HTML marker string; the scraper discards page content that appears before this string. Null means no lower cutoff."
+      },
+      {
+        "name": "update_time_elements",
+        "type": "string",
+        "description": "Meta tag name used to extract page last-updated timestamps (e.g. og:updated_time)"
+      },
+      {
+        "name": "error_strings",
+        "type": "text[]",
+        "description": "List of strings that indicate a scraped page is an error page (404, 403, etc.). Pages containing any of these strings are discarded. Defaults include 'Error 404', 'ERROR 403', 'seem to exist', and CJK equivalents."
+      },
+      {
+        "name": "valid_content_min_length",
+        "type": "integer",
+        "description": "Minimum character length for extracted page content to be considered valid. Pages with fewer characters are discarded. Default is 60."
+      },
+      {
+        "name": "url_pattern",
+        "type": "string",
+        "description": "Subdomain slug extracted from the GA property URL, used to identify pages belonging to this client during scraping. For example, propertyName 'https://www.mrmiles.hk' produces url_pattern 'mrmiles'. Set automatically on GA connect, cleared on GA disconnect."
+      }
+    ]
   }
 ]

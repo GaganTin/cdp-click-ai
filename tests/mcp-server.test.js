@@ -21,7 +21,7 @@ function makeMockPool() {
   };
 }
 
-describe("MCP Server — tool discovery", () => {
+describe("MCP Server - tool discovery", () => {
   it("registers all 11 expected tools", async () => {
     const client = await createAnalystMCPClient(makeMockPool(), []);
     const { tools } = await client.listTools();
@@ -48,7 +48,7 @@ describe("MCP Server — tool discovery", () => {
   });
 });
 
-describe("MCP Server — tool calls via client", () => {
+describe("MCP Server - tool calls via client", () => {
   it("routes query_data to the DB connector and returns result", async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({ rows: [{ sessions: 999 }], rowCount: 1 }),
@@ -99,7 +99,7 @@ describe("MCP Server — tool calls via client", () => {
   });
 });
 
-describe("toOpenAITools — format conversion", () => {
+describe("toOpenAITools - format conversion", () => {
   it("converts MCP tools to OpenAI function format", async () => {
     const client = await createAnalystMCPClient(makeMockPool(), []);
     const { tools } = await client.listTools();

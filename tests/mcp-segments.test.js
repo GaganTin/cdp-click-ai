@@ -5,7 +5,7 @@ function makePool(rows = []) {
   return { query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }) };
 }
 
-describe("Segments — tool registration", () => {
+describe("Segments - tool registration", () => {
   it("exports list_segments and preview_segment_size", () => {
     const names = segmentTools.map((t) => t.name);
     expect(names).toContain("list_segments");
@@ -31,7 +31,7 @@ describe("Segments — tool registration", () => {
   });
 });
 
-describe("Segments — list_segments", () => {
+describe("Segments - list_segments", () => {
   it("returns all segments when no type filter", async () => {
     const rows = [
       { id: 1, name: "High-value members", segment_type: "customer" },
@@ -60,7 +60,7 @@ describe("Segments — list_segments", () => {
   });
 });
 
-describe("Segments — preview_segment_size", () => {
+describe("Segments - preview_segment_size", () => {
   it("queries public.membership for customer segments", async () => {
     const pool = makePool([{ count: "342" }]);
     const result = await handleSegmentTool(
@@ -114,7 +114,7 @@ describe("Segments — preview_segment_size", () => {
   });
 });
 
-describe("Segments — unknown tool", () => {
+describe("Segments - unknown tool", () => {
   it("returns an error for unrecognised tool name", async () => {
     const result = await handleSegmentTool("delete_all_segments", {}, makePool());
     const data = JSON.parse(result.content[0].text);

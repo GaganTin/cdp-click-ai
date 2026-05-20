@@ -14,7 +14,7 @@ function makePool(rows = []) {
 
 // ── Tool registration ─────────────────────────────────────────────────────────
 
-describe("EDM — tool registration", () => {
+describe("EDM - tool registration", () => {
   it("exports exactly the expected 4 tools", () => {
     expect(edmTools.map((t) => t.name)).toEqual(EXPECTED_TOOLS);
   });
@@ -35,7 +35,7 @@ describe("EDM — tool registration", () => {
 
 // ── list_edm_campaigns ────────────────────────────────────────────────────────
 
-describe("EDM — list_edm_campaigns", () => {
+describe("EDM - list_edm_campaigns", () => {
   it("returns campaigns with no filter", async () => {
     const rows = [
       { id: "1", name: "Q1 Newsletter", status: "sent", segment_name: "All members" },
@@ -78,7 +78,7 @@ describe("EDM — list_edm_campaigns", () => {
 
 // ── preview_edm_recipients ────────────────────────────────────────────────────
 
-describe("EDM — preview_edm_recipients", () => {
+describe("EDM - preview_edm_recipients", () => {
   function triplePool(countRow, sampleRows, suppressedRow) {
     return {
       query: vi
@@ -139,7 +139,7 @@ describe("EDM — preview_edm_recipients", () => {
 
 // ── analyze_edm_performance ───────────────────────────────────────────────────
 
-describe("EDM — analyze_edm_performance", () => {
+describe("EDM - analyze_edm_performance", () => {
   it("returns enriched rows with rate percentages", async () => {
     const rows = [{
       id: "abc", name: "Q1", subject: "Hello", sent_at: "2025-01-01",
@@ -184,7 +184,7 @@ describe("EDM — analyze_edm_performance", () => {
 
 // ── suggest_send_time ─────────────────────────────────────────────────────────
 
-describe("EDM — suggest_send_time", () => {
+describe("EDM - suggest_send_time", () => {
   it("returns top_send_windows with day and hour", async () => {
     const rows = [
       { day_of_week: "2", hour_of_day: "10", open_count: "120" },
@@ -225,7 +225,7 @@ describe("EDM — suggest_send_time", () => {
 
 // ── unknown tool ──────────────────────────────────────────────────────────────
 
-describe("EDM — unknown tool", () => {
+describe("EDM - unknown tool", () => {
   it("returns error for unrecognised tool name", async () => {
     const result = await handleEdmTool("blast_everyone", {}, makePool());
     expect(JSON.parse(result.content[0].text).error).toMatch(/Unknown EDM tool/);

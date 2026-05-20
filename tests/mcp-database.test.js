@@ -28,7 +28,7 @@ function makePool(rows = [], rowCount = null) {
   return { query: vi.fn().mockResolvedValue({ rows, rowCount: rowCount ?? rows.length }) };
 }
 
-describe("DB Connector — tool registration", () => {
+describe("DB Connector - tool registration", () => {
   it("exports exactly the expected tool names", () => {
     const names = databaseTools.map((t) => t.name);
     expect(names).toEqual(EXPECTED_TOOLS);
@@ -54,7 +54,7 @@ describe("DB Connector — tool registration", () => {
   });
 });
 
-describe("DB Connector — query_data", () => {
+describe("DB Connector - query_data", () => {
   it("executes SELECT and returns rows", async () => {
     const pool = makePool([{ sessions: 100 }]);
     const result = await handleDatabaseTool("query_data", { sql: "SELECT sessions FROM ga_landing.website_metrics" }, pool, []);
@@ -87,7 +87,7 @@ describe("DB Connector — query_data", () => {
   });
 });
 
-describe("DB Connector — list_tables", () => {
+describe("DB Connector - list_tables", () => {
   it("returns all tables from dictionary", async () => {
     const result = await handleDatabaseTool("list_tables", {}, null, mockDictionary);
     const data = JSON.parse(result.content[0].text);
@@ -104,7 +104,7 @@ describe("DB Connector — list_tables", () => {
   });
 });
 
-describe("DB Connector — describe_table", () => {
+describe("DB Connector - describe_table", () => {
   it("returns full table definition by name", async () => {
     const result = await handleDatabaseTool("describe_table", { table_name: "membership" }, null, mockDictionary);
     const data = JSON.parse(result.content[0].text);
@@ -131,7 +131,7 @@ describe("DB Connector — describe_table", () => {
   });
 });
 
-describe("DB Connector — unknown tool", () => {
+describe("DB Connector - unknown tool", () => {
   it("returns an error for an unrecognised tool name", async () => {
     const result = await handleDatabaseTool("does_not_exist", {}, null, []);
     const data = JSON.parse(result.content[0].text);

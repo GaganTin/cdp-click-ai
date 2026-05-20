@@ -176,7 +176,7 @@ function TestSendModal({ open, onClose, campaignState }) {
         reply_to: campaignState.reply_to,
       });
       if (result.simulated) {
-        toast.success(`Test sent (simulated — no Resend API key configured)`);
+        toast.success(`Test sent (simulated - no Resend API key configured)`);
       } else {
         toast.success(`Test email sent to ${email}`);
       }
@@ -223,7 +223,7 @@ function TestSendModal({ open, onClose, campaignState }) {
 
 // ── Main editor ───────────────────────────────────────────────────────────────
 export default function CampaignEditor({ open, onClose, onSave, initial = null }) {
-  // Only a real saved campaign has an id — AI suggestions passed as initial are treated as new
+  // Only a real saved campaign has an id - AI suggestions passed as initial are treated as new
   const isEdit = !!initial?.id;
 
   const [activeTab, setActiveTab] = useState("email");
@@ -240,7 +240,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   // Multiple event triggers: [{ id, event, delay_hours }]
   const [events, setEvents] = useState([]);
 
-  // Campaign fields (no scheduled_at — derived from schedules array on save)
+  // Campaign fields (no scheduled_at - derived from schedules array on save)
   const [form, setForm] = useState({
     name: "New Campaign",
     subject: "",
@@ -498,7 +498,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                       />
                       {form.subject.length > 50 && (
                         <p className="text-[11px] text-amber-500 mt-0.5 flex items-center gap-1">
-                          <AlertCircle className="w-3 h-3" /> Over 50 chars — may be clipped in inbox
+                          <AlertCircle className="w-3 h-3" /> Over 50 chars - may be clipped in inbox
                         </p>
                       )}
                     </div>
@@ -571,7 +571,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                       <div>
                         <Label className="text-sm font-medium">Audience Segment</Label>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Only customer segments are available — anonymous profiles don't have email addresses.
+                          Only customer segments are available - anonymous profiles don't have email addresses.
                         </p>
                       </div>
                       <button
@@ -621,10 +621,10 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                       onValueChange={v => set("utm_campaign_id", v === "__none__" ? "" : v)}
                     >
                       <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="None — use links as-is" />
+                        <SelectValue placeholder="None - use links as-is" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">None — use links as-is</SelectItem>
+                        <SelectItem value="__none__">None - use links as-is</SelectItem>
                         {utmCampaigns.map(c => (
                           <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                         ))}
