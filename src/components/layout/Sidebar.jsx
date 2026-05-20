@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ContactRound,
+  Mail,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -15,6 +16,7 @@ const navItems = [
   { path: "/", label: "AI Analyst", icon: MessageSquare },
   { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/campaigns", label: "UTM", icon: Target },
+  { path: "/edm", label: "Email", icon: Mail },
   { path: "/profiles", label: "Profiles", icon: ContactRound },
   { path: "/segments", label: "Segments", icon: Users },
 ];

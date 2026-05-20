@@ -13,6 +13,7 @@ import Analyst from './pages/Analyst';
 import Campaigns from './pages/Campaigns';
 import Segments from './pages/Segments';
 import Profiles from './pages/Profiles';
+import EDM from './pages/EDM';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -42,6 +43,7 @@ const AuthenticatedApp = () => {
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/segments" element={<Segments />} />
         <Route path="/profiles" element={<Profiles />} />
+        <Route path="/edm" element={<EDM />} />
       </Route>
       <Route path="*" element={<PageNotFound />} />
     </Routes>

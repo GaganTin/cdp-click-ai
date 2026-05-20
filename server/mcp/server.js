@@ -6,8 +6,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { databaseTools, handleDatabaseTool } from "./tools/database.js";
 import { segmentTools, handleSegmentTool } from "./tools/segments.js";
 import { utmTools, handleUtmTool } from "./tools/utm.js";
+import { edmTools, handleEdmTool } from "./tools/edm.js";
 
-const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools];
+const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...edmTools];
 
 /**
  * Create a connected MCP server+client pair for in-process use.
@@ -39,6 +40,9 @@ export async function createAnalystMCPClient(pool, dataDictionary) {
     }
     if (utmTools.some((t) => t.name === name)) {
       return handleUtmTool(name, args, pool);
+    }
+    if (edmTools.some((t) => t.name === name)) {
+      return handleEdmTool(name, args, pool);
     }
 
     return { content: [{ type: "text", text: JSON.stringify({ error: `Unknown tool: ${name}` }) }] };

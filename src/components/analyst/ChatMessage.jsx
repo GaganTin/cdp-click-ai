@@ -1,6 +1,6 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle } from "lucide-react";
+import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import MiniChart from "../dashboard/MiniChart";
@@ -120,31 +120,431 @@ function UTMLinkCard({ data, onAdd }) {
 
 function SegmentCard({ data, onAdd }) {
   const [added, setAdded] = useState(false);
+  const criteria = data.metadata?.criteria || [];
+
   const handleAdd = async () => {
     await onAdd?.(data);
     setAdded(true);
   };
+
   return (
-    <div className="my-3 border border-border rounded-lg overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
-        <Users className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-        <span className="text-xs font-semibold flex-1">Suggested Segment — {data.name}</span>
-        <Button size="sm" variant={added ? "secondary" : "default"} className="h-7 text-xs gap-1.5" onClick={handleAdd} disabled={added}>
-          {added ? <><Check className="w-3 h-3" /> Added</> : <><PlusCircle className="w-3 h-3" /> Add to Segments</>}
+    <div className="my-3 border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-3 bg-violet-50/60 dark:bg-violet-950/20 border-b border-violet-100 dark:border-violet-800/50">
+        <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900 flex items-center justify-center flex-shrink-0">
+          <Users className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-semibold">{data.name}</span>
+          <span className="text-[10px] text-muted-foreground ml-2">AI-suggested segment</span>
+        </div>
+        {data.estimated_size != null && (
+          <span className="text-sm font-bold text-violet-700 dark:text-violet-300 tabular-nums flex-shrink-0 mr-2">
+            {Number(data.estimated_size).toLocaleString()}
+            <span className="text-[10px] font-normal ml-0.5">members</span>
+          </span>
+        )}
+        <Button
+          size="sm"
+          variant={added ? "secondary" : "default"}
+          className="h-7 text-xs gap-1.5 flex-shrink-0"
+          onClick={handleAdd}
+          disabled={added}
+        >
+          {added ? <><Check className="w-3 h-3" /> Saved</> : <><PlusCircle className="w-3 h-3" /> Save Segment</>}
         </Button>
       </div>
-      <div className="px-4 py-3 space-y-1 text-xs">
-        {data.description && <p className="text-muted-foreground leading-relaxed">{data.description}</p>}
-        <div className="flex gap-4 mt-2 text-muted-foreground">
-          <span>Type: <strong className="text-foreground">{data.segment_type === "anonymous_profile" ? "Anonymous" : "Customer"}</strong></span>
-          {data.estimated_size && <span>Est. size: <strong className="text-foreground">{Number(data.estimated_size).toLocaleString()} users</strong></span>}
+
+      {/* Details */}
+      <div className="px-4 py-3 space-y-2.5">
+        {data.description && (
+          <p className="text-xs text-muted-foreground leading-relaxed">{data.description}</p>
+        )}
+
+        {/* Criteria tags */}
+        {criteria.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {criteria.map((c, i) => (
+              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 border border-violet-100 dark:border-violet-800">
+                {c}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-4 text-[11px] text-muted-foreground">
+          <span>Type: <strong className="text-foreground capitalize">{data.segment_type === "anonymous_profile" ? "Anonymous Visitors" : "Customer Members"}</strong></span>
+          {data.status && <span>Status: <strong className="text-foreground capitalize">{data.status}</strong></span>}
         </div>
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-2 border-t border-violet-100 dark:border-violet-800/50 bg-violet-50/30 dark:bg-violet-950/10">
+        <p className="text-[10px] text-muted-foreground">
+          Click "Save Segment" to add this to your Segments page — it can then be linked to email campaigns
+        </p>
       </div>
     </div>
   );
 }
 
-export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment }) {
+const TRIGGER_LABELS = {
+  manual: "Manual Send", scheduled: "Scheduled",
+  new_member: "New Member", member_upgraded: "Member Upgraded",
+  member_expired: "Membership Expired", member_anniversary: "Anniversary",
+  seminar_attended: "Seminar Attended", webinar_attended: "Webinar Attended",
+  form_submitted: "Form Submitted", event_registered: "Event Registered",
+  high_activity: "Highly Active", page_viewed: "Page View",
+  file_downloaded: "File Download", whatsapp_clicked: "WhatsApp Click",
+  inactivity_30d: "30-day Inactive", inactivity_60d: "60-day Inactive",
+  inactivity_90d: "90-day Inactive", inactivity_180d: "6-month Inactive",
+  birthday: "Birthday", join_anniversary: "Join Anniversary",
+};
+
+function SegmentPanel({ seg, choice, onChoice }) {
+  if (!seg) return null;
+  const isExisting = seg.action === "use_existing";
+  const displayName = isExisting ? seg.existing_segment_name : seg.name;
+
+  return (
+    <div className={cn(
+      "rounded-lg border overflow-hidden transition-all",
+      choice === "none" ? "opacity-60 border-border" : "border-violet-200 dark:border-violet-800"
+    )}>
+      {/* Panel header */}
+      <div className="flex items-center gap-2 px-3 py-2 bg-violet-50/60 dark:bg-violet-950/20 border-b border-violet-100 dark:border-violet-800/50">
+        <div className="w-5 h-5 rounded bg-violet-100 dark:bg-violet-900 flex items-center justify-center flex-shrink-0">
+          <Users className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+        </div>
+        <span className="text-[11px] font-semibold text-violet-900 dark:text-violet-200 flex-1">
+          {isExisting ? "Existing Segment" : "Recommended Segment"}
+        </span>
+        {seg.estimated_size != null && (
+          <span className="text-[11px] font-bold text-violet-700 dark:text-violet-300 tabular-nums">
+            {Number(seg.estimated_size).toLocaleString()} members
+          </span>
+        )}
+      </div>
+
+      {/* Segment details */}
+      <div className="px-3 py-2.5 bg-background space-y-1.5">
+        <p className="text-xs font-semibold">{displayName}</p>
+        {seg.description && (
+          <p className="text-[11px] text-muted-foreground leading-relaxed">{seg.description}</p>
+        )}
+        {/* Criteria tags */}
+        {seg.metadata?.criteria && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {(Array.isArray(seg.metadata.criteria) ? seg.metadata.criteria : [seg.metadata.criteria]).map((c, i) => (
+              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 border border-violet-100 dark:border-violet-800">
+                {c}
+              </span>
+            ))}
+          </div>
+        )}
+        {seg.rationale && (
+          <p className="text-[10px] text-muted-foreground/70 italic">{seg.rationale}</p>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-1.5 px-3 py-2 bg-secondary/10 border-t border-border">
+        {!isExisting && (
+          <button
+            onClick={() => onChoice("create_new")}
+            className={cn(
+              "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
+              choice === "create_new"
+                ? "bg-violet-600 text-white border-violet-600"
+                : "border-border text-muted-foreground hover:border-violet-400 hover:text-violet-700"
+            )}
+          >
+            {choice === "create_new" ? <><Check className="w-3 h-3" /> Creating Segment</> : <><PlusCircle className="w-3 h-3" /> Create Segment</>}
+          </button>
+        )}
+        {isExisting && (
+          <button
+            onClick={() => onChoice("use_existing")}
+            className={cn(
+              "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
+              choice === "use_existing"
+                ? "bg-violet-600 text-white border-violet-600"
+                : "border-border text-muted-foreground hover:border-violet-400 hover:text-violet-700"
+            )}
+          >
+            {choice === "use_existing" ? <><Check className="w-3 h-3" /> Using Segment</> : "Use This Segment"}
+          </button>
+        )}
+        {seg.existing_segment_id && !isExisting && (
+          <button
+            onClick={() => onChoice("use_existing")}
+            className={cn(
+              "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border transition-all",
+              choice === "use_existing"
+                ? "bg-secondary text-foreground border-border"
+                : "border-border text-muted-foreground hover:border-foreground/30"
+            )}
+          >
+            Use Existing
+          </button>
+        )}
+        <button
+          onClick={() => onChoice("none")}
+          className={cn(
+            "text-[11px] px-2 py-1 rounded-md border transition-all",
+            choice === "none"
+              ? "bg-secondary text-foreground border-border"
+              : "border-dashed border-border text-muted-foreground hover:border-foreground/30"
+          )}
+        >
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UTMPanel({ utm, choice, onChoice }) {
+  if (!utm) return null;
+  const isExisting = utm.action === "use_existing";
+  const isPending = utm.action === "pending";
+  const slug = utm.utm_campaign || utm.name || "";
+  const isDecided = choice === "create_new" || choice === "use_existing" || choice === "none";
+
+  return (
+    <div className={cn(
+      "rounded-lg border overflow-hidden transition-all",
+      choice === "none" ? "opacity-60 border-border"
+        : isPending && !isDecided ? "border-amber-200 dark:border-amber-800"
+        : "border-blue-200 dark:border-blue-800"
+    )}>
+      {/* Panel header */}
+      <div className={cn(
+        "flex items-center gap-2 px-3 py-2 border-b",
+        isPending && !isDecided
+          ? "bg-amber-50/60 dark:bg-amber-950/20 border-amber-100 dark:border-amber-800/50"
+          : "bg-blue-50/60 dark:bg-blue-950/20 border-blue-100 dark:border-blue-800/50"
+      )}>
+        <div className={cn(
+          "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
+          isPending && !isDecided ? "bg-amber-100 dark:bg-amber-900" : "bg-blue-100 dark:bg-blue-900"
+        )}>
+          <LinkIcon className={cn("w-3 h-3", isPending && !isDecided ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400")} />
+        </div>
+        <span className={cn(
+          "text-[11px] font-semibold flex-1",
+          isPending && !isDecided ? "text-amber-900 dark:text-amber-200" : "text-blue-900 dark:text-blue-200"
+        )}>
+          {isExisting ? "Existing UTM Link" : isPending && !isDecided ? "UTM Tracking — Your choice" : "Recommended UTM Tracking"}
+        </span>
+        {isPending && !isDecided && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+            Decide below
+          </span>
+        )}
+      </div>
+
+      {/* UTM details */}
+      <div className="px-3 py-2.5 bg-background space-y-2">
+        <div className="flex flex-wrap gap-1.5">
+          {(utm.utm_source || "email") && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800">
+              source: {utm.utm_source || "email"}
+            </span>
+          )}
+          {(utm.utm_medium || "email") && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800">
+              medium: {utm.utm_medium || "email"}
+            </span>
+          )}
+          {slug && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800 font-mono">
+              campaign: {slug}
+            </span>
+          )}
+        </div>
+        {isExisting && utm.existing_utm_name && (
+          <p className="text-[11px] text-muted-foreground">Reusing: <span className="font-medium">{utm.existing_utm_name}</span></p>
+        )}
+        {utm.rationale && (
+          <p className="text-[10px] text-muted-foreground/70 italic">{utm.rationale}</p>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-1.5 px-3 py-2 bg-secondary/10 border-t border-border">
+        <button
+          onClick={() => onChoice(isExisting ? "use_existing" : "create_new")}
+          className={cn(
+            "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
+            (choice === "create_new" || choice === "use_existing")
+              ? "bg-blue-600 text-white border-blue-600"
+              : "border-border text-muted-foreground hover:border-blue-400 hover:text-blue-700"
+          )}
+        >
+          {choice === "create_new"
+            ? <><Check className="w-3 h-3" /> Creating UTM</>
+            : choice === "use_existing"
+              ? <><Check className="w-3 h-3" /> Using UTM</>
+              : <><LinkIcon className="w-3 h-3" /> {isExisting ? "Use UTM Link" : "Yes, create UTM link"}</>}
+        </button>
+        <button
+          onClick={() => onChoice("none")}
+          className={cn(
+            "text-[11px] px-2.5 py-1 rounded-md border transition-all font-medium",
+            choice === "none"
+              ? "bg-secondary text-foreground border-border"
+              : "border-dashed border-border text-muted-foreground hover:border-foreground/30"
+          )}
+        >
+          {choice === "none" ? "Skipped" : "No thanks"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EDMCard({ data, onAdd, onOpenInEditor }) {
+  const [saved, setSaved] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const seg = data._suggested_segment;
+  const utm = data._suggested_utm;
+
+  const [segmentChoice, setSegmentChoice] = useState(
+    seg ? (seg.action === "use_existing" ? "use_existing" : "create_new") : "none"
+  );
+  const [utmChoice, setUtmChoice] = useState(
+    !utm ? "none"
+    : utm.action === "use_existing" ? "use_existing"
+    : utm.action === "pending" ? "pending"
+    : "create_new"
+  );
+
+  const handleSave = async () => {
+    await onAdd?.({ ...data, _segment_choice: segmentChoice, _utm_choice: utmChoice });
+    setSaved(true);
+  };
+
+  const handleOpenEditor = () => {
+    onOpenInEditor?.({ ...data, _segment_choice: segmentChoice, _utm_choice: utmChoice });
+  };
+
+  const triggerLabel = data.trigger_event
+    ? TRIGGER_LABELS[data.trigger_event] || data.trigger_event
+    : data.trigger_type === "scheduled"
+      ? "Scheduled"
+      : "Manual";
+
+  return (
+    <div className="my-3 border border-border rounded-xl overflow-hidden shadow-sm">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
+        <div className="w-6 h-6 rounded-md bg-foreground/10 flex items-center justify-center flex-shrink-0">
+          <Mail className="w-3.5 h-3.5 text-foreground/70" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-semibold">{data.name}</span>
+          <span className="text-[10px] text-muted-foreground ml-2">AI-suggested campaign</span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" onClick={handleOpenEditor}>
+            <Pencil className="w-3 h-3" /> Open in Editor
+          </Button>
+          <Button
+            size="sm"
+            variant={saved ? "secondary" : "default"}
+            className="h-7 text-xs gap-1.5"
+            onClick={handleSave}
+            disabled={saved}
+          >
+            {saved ? <><Check className="w-3 h-3" /> Saved</> : <><PlusCircle className="w-3 h-3" /> Save as Draft</>}
+          </Button>
+        </div>
+      </div>
+
+      {/* Rationale */}
+      {data.rationale && (
+        <div className="px-4 py-2.5 bg-blue-50/50 border-b border-border/50 dark:bg-blue-950/10">
+          <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">{data.rationale}</p>
+        </div>
+      )}
+
+      {/* Campaign details */}
+      <div className="px-4 py-3 space-y-3">
+        {/* Subject + Preview */}
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Subject</p>
+          <p className="text-sm font-medium">{data.subject}</p>
+          {data.preview_text && (
+            <p className="text-xs text-muted-foreground mt-0.5 italic">{data.preview_text}</p>
+          )}
+        </div>
+
+        {/* Metadata chips */}
+        <div className="flex flex-wrap gap-2">
+          {data.estimated_recipients != null && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border">
+              <Users className="w-3 h-3 text-muted-foreground" />
+              {Number(data.estimated_recipients).toLocaleString()} recipients
+            </span>
+          )}
+          {(data.trigger_event || data.trigger_type) && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border">
+              <Zap className="w-3 h-3 text-muted-foreground" />
+              {triggerLabel}
+            </span>
+          )}
+          {data.suggested_send_time && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-secondary border border-border">
+              <Calendar className="w-3 h-3 text-muted-foreground" />
+              {data.suggested_send_time}
+            </span>
+          )}
+        </div>
+
+        {/* Segment panel */}
+        <SegmentPanel seg={seg} choice={segmentChoice} onChoice={setSegmentChoice} />
+
+        {/* UTM panel */}
+        <UTMPanel utm={utm} choice={utmChoice} onChoice={setUtmChoice} />
+
+        {/* Email preview toggle */}
+        {data.html_body && (
+          <div>
+            <button
+              onClick={() => setPreviewOpen(v => !v)}
+              className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            >
+              <ChevronRight className={cn("w-3 h-3 transition-transform", previewOpen && "rotate-90")} />
+              {previewOpen ? "Hide preview" : "Preview email"}
+            </button>
+            {previewOpen && (
+              <div className="mt-2 border border-border rounded-lg overflow-hidden bg-white">
+                <iframe
+                  srcDoc={data.html_body}
+                  title="Email preview"
+                  className="w-full border-0"
+                  style={{ height: 320 }}
+                  sandbox="allow-same-origin"
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-2 border-t border-border bg-secondary/20">
+        <p className="text-[10px] text-muted-foreground">
+          Segment &amp; UTM are created automatically when you save · "Open in Editor" lets you refine the email first
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
@@ -187,6 +587,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     const csvRegex = /```csv\n([\s\S]*?)```/g;
     const utmRegex = /```utm_link\n([\s\S]*?)```/g;
     const segmentRegex = /```segment\n([\s\S]*?)```/g;
+    const edmRegex = /```edm\n([\s\S]*?)```/g;
     const tableRegex = /(\|.+\|\n\|[-| :]+\|\n(?:\|.+\|\n?)+)/g;
 
     let parts = [];
@@ -209,6 +610,10 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     while ((match = segmentRegex.exec(content)) !== null) {
       segmentBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
     }
+    const edmBlocks = [];
+    while ((match = edmRegex.exec(content)) !== null) {
+      edmBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
+    }
     const tables = [];
     while ((match = tableRegex.exec(content)) !== null) {
       const before = content.slice(0, match.index);
@@ -223,6 +628,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
       ...csvBlocks.map(c => ({ ...c, type: "csv" })),
       ...utmBlocks.map(c => ({ ...c, type: "utm_link" })),
       ...segmentBlocks.map(c => ({ ...c, type: "segment" })),
+      ...edmBlocks.map(c => ({ ...c, type: "edm" })),
       ...tables.map(c => ({ ...c, type: "table" })),
     ].sort((a, b) => a.index - b.index);
 
@@ -348,6 +754,15 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
           parts.push(<SegmentCard key={`seg-${i}`} data={data} onAdd={onAddSegment} />);
         } catch {
           parts.push(<p key={`seg-err-${i}`} className="text-xs text-destructive">Invalid segment data</p>);
+        }
+      }
+
+      if (block.type === "edm") {
+        try {
+          const data = JSON.parse(block.json);
+          parts.push(<EDMCard key={`edm-${i}`} data={data} onAdd={onAddEDM} onOpenInEditor={onOpenEDMInEditor} />);
+        } catch {
+          parts.push(<p key={`edm-err-${i}`} className="text-xs text-destructive">Invalid EDM data</p>);
         }
       }
 

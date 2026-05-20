@@ -9,6 +9,10 @@ const EXPECTED_TOOLS = [
   "preview_segment_size",
   "list_campaigns",
   "analyze_utm_performance",
+  "list_edm_campaigns",
+  "preview_edm_recipients",
+  "analyze_edm_performance",
+  "suggest_send_time",
 ];
 
 function makeMockPool() {
@@ -18,7 +22,7 @@ function makeMockPool() {
 }
 
 describe("MCP Server — tool discovery", () => {
-  it("registers all 7 expected tools", async () => {
+  it("registers all 11 expected tools", async () => {
     const client = await createAnalystMCPClient(makeMockPool(), []);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);

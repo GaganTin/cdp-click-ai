@@ -9,6 +9,7 @@ import ChatInput from "../components/analyst/ChatInput";
 import SuggestedPrompts from "../components/analyst/SuggestedPrompts";
 import DashboardPreviewPanel from "../components/dashboard/DashboardPreviewPanel";
 import ConversationSidebar from "../components/analyst/ConversationSidebar";
+import CampaignEditor from "@/components/edm/CampaignEditor";
 
 export default function Analyst() {
   const [conversationId, setConversationId] = useState(null);
@@ -16,6 +17,8 @@ export default function Analyst() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
   const [lastPinnedChart, setLastPinnedChart] = useState(null);
+  const [campaignEditorOpen, setCampaignEditorOpen] = useState(false);
+  const [campaignEditorInitial, setCampaignEditorInitial] = useState(null);
   // Track whether the current conversation has had its context injected
   const contextInjectedRef = useRef(false);
   const scrollRef = useRef(null);
@@ -38,6 +41,10 @@ export default function Analyst() {
   const { data: pinnedCharts = [] } = useQuery({
     queryKey: ["pinnedCharts"],
     queryFn: () => appClient.entities.PinnedChart.list("-created_date", 20),
+  });
+  const { data: edmCampaigns = [] } = useQuery({
+    queryKey: ["edm-campaigns"],
+    queryFn: () => appClient.edm.listCampaigns({ limit: 10, offset: 0 }).then(r => r.results || r),
   });
 
   const stripContextPrefix = (text) => {
@@ -97,6 +104,12 @@ export default function Analyst() {
       lines.push(`\nSAVED REPORTS (${reports.length}):`);
       reports.slice(0, 8).forEach(r => {
         lines.push(`  - "${r.title}" (${r.created_date?.slice(0, 10)})`);
+      });
+    }
+    if (edmCampaigns.length > 0) {
+      lines.push(`\nEDM CAMPAIGNS (${edmCampaigns.length}):`);
+      edmCampaigns.slice(0, 8).forEach(c => {
+        lines.push(`  - "${c.name}" [${c.status}] subject="${c.subject || ""}" sent=${c.sent_count ?? 0} opened=${c.opened_count ?? 0}`);
       });
     }
     lines.push("\n[END APP CONTEXT — user question follows:]\n");
@@ -208,6 +221,114 @@ export default function Analyst() {
     }
   };
 
+  const resolveSegmentAndUTM = async (data) => {
+    let segmentId = data.segment_id || null;
+    let utmCampaignId = null;
+
+    if (data._segment_choice === "create_new" && data._suggested_segment?.name) {
+      try {
+        const seg = await appClient.entities.Segment.create({
+          name: data._suggested_segment.name,
+          description: data._suggested_segment.description || "",
+          segment_type: data._suggested_segment.segment_type || "customer",
+          estimated_size: data._suggested_segment.estimated_size || null,
+          status: "active",
+          metadata: data._suggested_segment.metadata || {},
+        });
+        segmentId = seg.id;
+        queryClient.invalidateQueries({ queryKey: ["segments"] });
+        toast.success(`Segment "${data._suggested_segment.name}" created`);
+      } catch {}
+    } else if (data._segment_choice === "use_existing" && data._suggested_segment?.existing_segment_id) {
+      segmentId = data._suggested_segment.existing_segment_id;
+    }
+
+    if (data._utm_choice === "create_new" && data._utm_choice !== "pending" && data._suggested_utm) {
+      try {
+        const slug = data._suggested_utm.utm_campaign || data.utm_campaign_name || data.name?.toLowerCase().replace(/\s+/g, "-");
+        const utm = await appClient.entities.Campaign.create({
+          name: data._suggested_utm.name || slug,
+          utm_source: data._suggested_utm.utm_source || "email",
+          utm_medium: data._suggested_utm.utm_medium || "email",
+          utm_campaign: slug,
+          utm_term: "",
+          utm_content: "",
+          status: "active",
+        });
+        utmCampaignId = utm.id;
+        queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+        toast.success(`UTM link "${utm.name}" created`);
+      } catch {}
+    } else if (data._utm_choice === "use_existing" && data._suggested_utm?.existing_utm_id) {
+      utmCampaignId = data._suggested_utm.existing_utm_id;
+    }
+
+    return { segmentId, utmCampaignId };
+  };
+
+  const handleAddEDM = async (data) => {
+    try {
+      const { segmentId, utmCampaignId } = await resolveSegmentAndUTM(data);
+      await appClient.edm.createCampaign({
+        name: data.name,
+        subject: data.subject || "",
+        preview_text: data.preview_text || null,
+        from_name: data.from_name || "Click AI",
+        from_email: data.from_email || "onboarding@resend.dev",
+        html_body: data.html_body || null,
+        segment_id: segmentId,
+        utm_campaign_id: utmCampaignId,
+        status: "draft",
+      });
+      queryClient.invalidateQueries({ queryKey: ["edm-campaigns"] });
+      toast.success(`Email campaign "${data.name}" saved as draft — go to Email page to review and send`);
+    } catch (err) {
+      toast.error(err.message || "Failed to save email campaign");
+    }
+  };
+
+  const handleOpenEDMInEditor = (data) => {
+    setCampaignEditorInitial({
+      name: data.name,
+      subject: data.subject || "",
+      preview_text: data.preview_text || "",
+      from_name: data.from_name || "Click AI",
+      from_email: data.from_email || "onboarding@resend.dev",
+      reply_to: "",
+      segment_id: data.segment_id || "",
+      utm_campaign_id: "",
+      html_body: data.html_body || "",
+      ab_test_config: {
+        _blocks: data._blocks || [],
+        _html_mode: !data._blocks || data._blocks.length === 0,
+        _trigger_type: data._trigger_type || data.trigger_type || "manual",
+        _schedules: [],
+        _events: data.trigger_event
+          ? [{ id: "ai_event_1", event: data.trigger_event, delay_hours: 24 }]
+          : [],
+      },
+    });
+    setCampaignEditorOpen(true);
+  };
+
+  const handleSaveEDMFromEditor = async (formData) => {
+    try {
+      // Resolve segment/UTM from the original AI suggestion stored in initial
+      const { segmentId, utmCampaignId } = await resolveSegmentAndUTM(campaignEditorInitial || {});
+      await appClient.edm.createCampaign({
+        ...formData,
+        segment_id: formData.segment_id || segmentId || null,
+        utm_campaign_id: formData.utm_campaign_id || utmCampaignId || null,
+      });
+      queryClient.invalidateQueries({ queryKey: ["edm-campaigns"] });
+      toast.success(`Email campaign "${formData.name}" saved — go to Email page to send`);
+      setCampaignEditorOpen(false);
+      setCampaignEditorInitial(null);
+    } catch (err) {
+      toast.error(err.message || "Failed to save email campaign");
+    }
+  };
+
   const handleEditChartRequest = async (item) => {
     let config = {};
     try { config = JSON.parse(item.chart_config); } catch {}
@@ -255,6 +376,8 @@ export default function Analyst() {
                   onDownloadCSV={handleDownloadCSV}
                   onAddUTMLink={handleAddUTMLink}
                   onAddSegment={handleAddSegment}
+                  onAddEDM={handleAddEDM}
+                  onOpenEDMInEditor={handleOpenEDMInEditor}
                 />
               ))}
               {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
@@ -290,6 +413,14 @@ export default function Analyst() {
           />
         </div>
       )}
+
+      {/* Campaign editor opened from AI suggestion */}
+      <CampaignEditor
+        open={campaignEditorOpen}
+        onClose={() => { setCampaignEditorOpen(false); setCampaignEditorInitial(null); }}
+        onSave={handleSaveEDMFromEditor}
+        initial={campaignEditorInitial}
+      />
     </div>
   );
 }

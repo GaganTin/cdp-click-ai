@@ -1,15 +1,20 @@
 import { useState, useEffect } from "react";
 import { appClient } from "@/api/appClient";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   UserCheck, Ghost, Search, ChevronLeft, ChevronRight,
   Mail, Phone, Calendar, MapPin, Globe, BookOpen,
   Activity, ExternalLink, Filter, X,
   Star, MousePointer, Clock, MessageCircle,
-  TrendingUp, CheckSquare, ChevronDown, ChevronUp
+  TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { toast } from "sonner";
 import { format, parseISO, isValid } from "date-fns";
 
 const TABS = [
@@ -399,15 +404,113 @@ function ActiveFilters({ filters, labels, onRemove }) {
   );
 }
 
+function filtersToSegmentCriteria(filters, isCustomer) {
+  if (!isCustomer) {
+    return {
+      source_medium: filters.source_medium || "",
+      has_form_complete: filters.has_form_complete === "true" ? "true" : "",
+    };
+  }
+  return {
+    reg_channel:       filters.reg_channel || "",
+    education_level:   filters.education_level || "",
+    age_group:         filters.age_group || "",
+    gender:            filters.gender || "",
+    nationality:       filters.nationality || "",
+    preferred_language: filters.preferred_language || "",
+    employment_status: filters.employment_status || "",
+    income_level:      filters.income_level || "",
+    member_type:       filters.member_type || "",
+    preferred_channel: filters.preferred_channel || "",
+    is_opt_in_email:   filters.opt_in_email === "true" ? "true" : "",
+    opt_in_sms:        filters.opt_in_sms === "true" ? "true" : "",
+    is_subscriber:     filters.is_subscriber === "true" ? "true" : "",
+    has_ga_activity:   filters.has_ga === "true" ? "true" : "",
+    min_ga_sessions:   filters.min_ga_sessions || "",
+    has_seminars:      filters.has_seminars === "true" ? "true" : "",
+    has_attributes:    filters.has_attributes === "true" ? "true" : "",
+  };
+}
+
+function criteriaToChips(crit) {
+  const labels = {
+    reg_channel:        v => `channel: ${v}`,
+    education_level:    v => `education: ${v}`,
+    age_group:          v => `age group: ${v}`,
+    gender:             v => `gender: ${v}`,
+    nationality:        v => `nationality: ${v}`,
+    preferred_language: v => `language: ${v}`,
+    employment_status:  v => `employment: ${v}`,
+    income_level:       v => `income: ${v}`,
+    member_type:        v => `member type: ${v}`,
+    preferred_channel:  v => `preferred channel: ${v}`,
+    is_opt_in_email:    () => `email opted-in`,
+    opt_in_sms:         () => `SMS opted-in`,
+    is_subscriber:      () => `subscriber only`,
+    has_ga_activity:    () => `has web activity`,
+    min_ga_sessions:    v => `${v}+ GA sessions`,
+    has_seminars:       () => `attended seminar`,
+    has_attributes:     () => `has study intentions`,
+    source_medium:      v => `source: ${v}`,
+    has_form_complete:  () => `completed a form`,
+  };
+  return Object.entries(crit)
+    .filter(([, v]) => v)
+    .map(([k, v]) => labels[k]?.(v) || `${k}: ${v}`);
+}
+
 export default function Profiles() {
   const [activeTab, setActiveTab] = useState("customer");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
-  const [custFilters, setCustFilters] = useState({ reg_channel: "", education_level: "", age_group: "", gender: "", nationality: "", preferred_language: "", has_ga: "" });
+  const [saveSegmentOpen, setSaveSegmentOpen] = useState(false);
+  const [segmentName, setSegmentName] = useState("");
+  const [segmentDesc, setSegmentDesc] = useState("");
+  const [custFilters, setCustFilters] = useState({
+    reg_channel: "", education_level: "", age_group: "", gender: "", nationality: "", preferred_language: "",
+    employment_status: "", income_level: "", member_type: "", preferred_channel: "",
+    has_ga: "", min_ga_sessions: "", has_seminars: "", has_attributes: "",
+    opt_in_email: "", opt_in_sms: "", is_subscriber: "",
+  });
   const [anonFilters, setAnonFilters] = useState({ source_medium: "", has_form_complete: "" });
   const queryClient = useQueryClient();
   const LIMIT = 20;
+
+  const saveSegmentMutation = useMutation({
+    mutationFn: (data) => appClient.entities.Segment.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["segments"] });
+      setSaveSegmentOpen(false);
+      setSegmentName("");
+      setSegmentDesc("");
+      toast.success("Segment saved");
+    },
+    onError: (err) => toast.error(err.message || "Failed to save segment"),
+  });
+
+  const handleSaveSegment = () => {
+    const isCustomer = activeTab === "customer";
+    const filters = isCustomer ? custFilters : anonFilters;
+    const crit = filtersToSegmentCriteria(filters, isCustomer);
+    const chips = criteriaToChips(crit);
+    const activeCrit = Object.fromEntries(Object.entries(crit).filter(([, v]) => v));
+    const descParts = chips.length ? `Criteria: ${chips.join(", ")}.` : "";
+    const description = segmentDesc
+      ? (chips.length ? `${segmentDesc} ${descParts}` : segmentDesc)
+      : descParts;
+    saveSegmentMutation.mutate({
+      name: segmentName,
+      description,
+      segment_type: isCustomer ? "customer" : "anonymous_profile",
+      status: "draft",
+      estimated_size: (isCustomer ? custData?.total : anonData?.total) || undefined,
+      metadata: {
+        ...(chips.length ? { criteria: chips } : {}),
+        ...(Object.keys(activeCrit).length ? { filter_criteria: activeCrit } : {}),
+      },
+    });
+  };
 
   useEffect(() => { setPage(1); }, [activeTab, search, custFilters, anonFilters]);
 
@@ -493,40 +596,136 @@ export default function Profiles() {
               <Filter className="w-3.5 h-3.5" /> Filters
               {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground" />}
             </Button>
+            {hasActiveFilters && (
+              <Button
+                variant="outline" size="sm" className="h-9 gap-1.5"
+                onClick={() => {
+                  const chips = criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer));
+                  setSegmentDesc(chips.length ? `Criteria: ${chips.join(", ")}.` : "");
+                  setSegmentName("");
+                  setSaveSegmentOpen(true);
+                }}
+              >
+                <Users className="w-3.5 h-3.5" /> Save as Segment
+              </Button>
+            )}
           </div>
 
           {showFilters && (
-            <div className="mt-3 p-4 border border-border rounded-lg bg-secondary/20 flex flex-wrap gap-3">
+            <div className="mt-3 border border-border rounded-lg bg-secondary/20 overflow-hidden">
               {isCustomer ? (
-                <>
-                  {[
-                    { key: "reg_channel", label: "Channel", opts: custFilterOpts?.reg_channels },
-                    { key: "education_level", label: "Education", opts: custFilterOpts?.education_levels },
-                    { key: "age_group", label: "Age group", opts: custFilterOpts?.age_groups },
-                    { key: "gender", label: "Gender", opts: custFilterOpts?.genders },
-                    { key: "nationality", label: "Nationality", opts: custFilterOpts?.nationalities },
-                    { key: "preferred_language", label: "Language", opts: custFilterOpts?.languages },
-                  ].map(f => (
-                    <div key={f.key}>
-                      <p className="text-[10px] text-muted-foreground mb-1">{f.label}</p>
-                      <select value={custFilters[f.key]} onChange={e => setCustFilter(f.key, e.target.value)}
-                        className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                        <option value="">All</option>
-                        {(f.opts || []).map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
+                <div className="divide-y divide-border">
+                  {/* Demographics */}
+                  <div className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Demographics</p>
+                    <div className="flex flex-wrap gap-3">
+                      {[
+                        { key: "reg_channel",       label: "Channel",     opts: custFilterOpts?.reg_channels },
+                        { key: "age_group",          label: "Age group",   opts: custFilterOpts?.age_groups },
+                        { key: "gender",             label: "Gender",      opts: custFilterOpts?.genders },
+                        { key: "nationality",        label: "Nationality", opts: custFilterOpts?.nationalities },
+                        { key: "education_level",    label: "Education",   opts: custFilterOpts?.education_levels },
+                        { key: "employment_status",  label: "Employment",  opts: custFilterOpts?.employment_statuses },
+                        { key: "income_level",       label: "Income",      opts: custFilterOpts?.income_levels },
+                        { key: "member_type",        label: "Member type", opts: custFilterOpts?.member_types },
+                        { key: "preferred_language", label: "Language",    opts: custFilterOpts?.languages },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <p className="text-[10px] text-muted-foreground mb-1">{f.label}</p>
+                          <select value={custFilters[f.key]} onChange={e => setCustFilter(f.key, e.target.value)}
+                            className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                            <option value="">All</option>
+                            {(f.opts || []).map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Web activity</p>
-                    <select value={custFilters.has_ga} onChange={e => setCustFilter("has_ga", e.target.value)}
-                      className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                      <option value="">All</option>
-                      <option value="true">Has GA data</option>
-                    </select>
                   </div>
-                </>
+
+                  {/* Communication */}
+                  <div className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Communication</p>
+                    <div className="flex flex-wrap gap-3">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Email opt-in</p>
+                        <select value={custFilters.opt_in_email} onChange={e => setCustFilter("opt_in_email", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Opted in</option>
+                          <option value="false">Not opted in</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">SMS opt-in</p>
+                        <select value={custFilters.opt_in_sms} onChange={e => setCustFilter("opt_in_sms", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Opted in</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Subscriber only</p>
+                        <select value={custFilters.is_subscriber} onChange={e => setCustFilter("is_subscriber", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Subscriber only</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Preferred channel</p>
+                        <select value={custFilters.preferred_channel} onChange={e => setCustFilter("preferred_channel", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          {(custFilterOpts?.preferred_channels || []).map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Activity */}
+                  <div className="p-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Activity</p>
+                    <div className="flex flex-wrap gap-3">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Web activity</p>
+                        <select value={custFilters.has_ga} onChange={e => setCustFilter("has_ga", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Has web data</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Min. GA sessions</p>
+                        <select value={custFilters.min_ga_sessions} onChange={e => setCustFilter("min_ga_sessions", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">Any</option>
+                          <option value="1">1+ sessions</option>
+                          <option value="3">3+ sessions</option>
+                          <option value="5">5+ sessions</option>
+                          <option value="10">10+ sessions</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Seminars</p>
+                        <select value={custFilters.has_seminars} onChange={e => setCustFilter("has_seminars", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Attended seminar</option>
+                        </select>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-1">Attributes</p>
+                        <select value={custFilters.has_attributes} onChange={e => setCustFilter("has_attributes", e.target.value)}
+                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          <option value="">All</option>
+                          <option value="true">Has study intentions</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : (
-                <>
+                <div className="p-4 flex flex-wrap gap-3">
                   <div>
                     <p className="text-[10px] text-muted-foreground mb-1">Source / Medium</p>
                     <select value={anonFilters.source_medium} onChange={e => setAnonFilter("source_medium", e.target.value)}
@@ -543,13 +742,20 @@ export default function Profiles() {
                       <option value="true">Completed a form (high intent)</option>
                     </select>
                   </div>
-                </>
+                </div>
               )}
             </div>
           )}
 
           {isCustomer
-            ? <ActiveFilters filters={custFilters} labels={{ reg_channel: "Channel", education_level: "Education", age_group: "Age", gender: "Gender", nationality: "Nationality", preferred_language: "Language", has_ga: "Web data" }} onRemove={k => setCustFilter(k, "")} />
+            ? <ActiveFilters filters={custFilters} labels={{
+                reg_channel: "Channel", education_level: "Education", age_group: "Age", gender: "Gender",
+                nationality: "Nationality", preferred_language: "Language", employment_status: "Employment",
+                income_level: "Income", member_type: "Member type", preferred_channel: "Pref. channel",
+                has_ga: "Web data", min_ga_sessions: "Min sessions", has_seminars: "Seminars",
+                has_attributes: "Attributes", opt_in_email: "Email opt-in", opt_in_sms: "SMS opt-in",
+                is_subscriber: "Subscriber",
+              }} onRemove={k => setCustFilter(k, "")} />
             : <ActiveFilters filters={anonFilters} labels={{ source_medium: "Source/Medium", has_form_complete: "Form completed" }} onRemove={k => setAnonFilter(k, "")} />
           }
         </div>
@@ -596,6 +802,55 @@ export default function Profiles() {
           </div>
         )}
       </div>
+
+      {/* Save as Segment dialog */}
+      <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Save as Segment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div>
+              <Label className="text-xs">Segment Name</Label>
+              <Input
+                value={segmentName}
+                onChange={e => setSegmentName(e.target.value)}
+                placeholder={isCustomer ? "e.g. Email Opted-in Web Visitors" : "e.g. High-Intent Anonymous Visitors"}
+                className="mt-1"
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Description</Label>
+              <Textarea
+                value={segmentDesc}
+                onChange={e => setSegmentDesc(e.target.value)}
+                className="mt-1" rows={3}
+              />
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Applied criteria</p>
+              <div className="flex flex-wrap gap-1.5">
+                {criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)).map((chip, i) => (
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/60 border border-border text-muted-foreground">{chip}</span>
+                ))}
+              </div>
+              {total > 0 && (
+                <p className="text-[11px] text-muted-foreground mt-2">
+                  Estimated size: <strong className="text-foreground">{total.toLocaleString()} profiles</strong> matching current filters
+                </p>
+              )}
+            </div>
+            <Button
+              className="w-full"
+              disabled={!segmentName.trim() || saveSegmentMutation.isPending}
+              onClick={handleSaveSegment}
+            >
+              {saveSegmentMutation.isPending ? "Saving…" : "Create Segment"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

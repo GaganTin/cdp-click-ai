@@ -44,49 +44,87 @@ function CriteriaRow({ label, value, onChange, opts }) {
   );
 }
 
-function SegmentForm({ initialValues, onSubmit, isPending, submitLabel = "Save", segmentType = "customer" }) {
+const CUST_CRITERIA_EMPTY = {
+  reg_channel: "", education_level: "", age_group: "", gender: "", nationality: "", preferred_language: "",
+  employment_status: "", income_level: "", member_type: "", preferred_channel: "",
+  is_opt_in_email: "", opt_in_sms: "", is_subscriber: "",
+  has_ga_activity: "", min_ga_sessions: "", has_seminars: "", has_attributes: "",
+};
+const ANON_CRITERIA_EMPTY = { source_medium: "", has_form_complete: "" };
+
+function criteriaToChips(criteria, isCustomer) {
+  const labels = {
+    reg_channel:        v => `channel: ${v}`,
+    education_level:    v => `education: ${v}`,
+    age_group:          v => `age group: ${v}`,
+    gender:             v => `gender: ${v}`,
+    nationality:        v => `nationality: ${v}`,
+    preferred_language: v => `language: ${v}`,
+    employment_status:  v => `employment: ${v}`,
+    income_level:       v => `income: ${v}`,
+    member_type:        v => `member type: ${v}`,
+    preferred_channel:  v => `preferred channel: ${v}`,
+    is_opt_in_email:    () => `email opted-in`,
+    opt_in_sms:         () => `SMS opted-in`,
+    is_subscriber:      () => `subscriber only`,
+    has_ga_activity:    () => `has web activity`,
+    min_ga_sessions:    v => `${v}+ GA sessions`,
+    has_seminars:       () => `attended seminar`,
+    has_attributes:     () => `has study intentions`,
+    source_medium:      v => `source: ${v}`,
+    has_form_complete:  () => `completed a form`,
+  };
+  return Object.entries(criteria)
+    .filter(([, v]) => v)
+    .map(([k, v]) => labels[k]?.(v) || `${k}: ${v}`);
+}
+
+function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, submitLabel = "Save", segmentType = "customer" }) {
+  const isCustomer = segmentType === "customer";
+  const emptyCrit = isCustomer ? CUST_CRITERIA_EMPTY : ANON_CRITERIA_EMPTY;
+
   const [form, setForm] = useState(initialValues || EMPTY);
-  const [showCriteria, setShowCriteria] = useState(false);
-  const [criteria, setCriteria] = useState({
-    reg_channel: "", education_level: "", age_group: "", gender: "",
-    nationality: "", preferred_language: "", is_opt_in_email: "",
-    has_ga_activity: "", source_medium: "", has_form_complete: "",
+  const [showCriteria, setShowCriteria] = useState(!!(initialCriteria && Object.values(initialCriteria).some(Boolean)));
+  const [criteria, setCriteria] = useState(() => {
+    // Prefer initialCriteria prop, then fall back to metadata.filter_criteria on the segment
+    const stored = initialValues?.metadata?.filter_criteria;
+    return { ...emptyCrit, ...(initialCriteria || stored || {}) };
   });
 
   const { data: custFilters } = useQuery({
     queryKey: ["profiles-cust-filters"],
     queryFn: () => appClient.profiles.customerFilters(),
-    enabled: segmentType === "customer",
+    enabled: isCustomer,
   });
   const { data: anonFilters } = useQuery({
     queryKey: ["profiles-anon-filters"],
     queryFn: () => appClient.profiles.anonymousFilters(),
-    enabled: segmentType === "anonymous_profile",
+    enabled: !isCustomer,
   });
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setCrit = (k, v) => setCriteria(c => ({ ...c, [k]: v }));
 
   const activeCriteria = Object.entries(criteria).filter(([, v]) => v);
-
-  const buildDescription = () => {
-    if (!activeCriteria.length) return form.description;
-    const parts = activeCriteria.map(([k, v]) => {
-      const labels = {
-        reg_channel: `registered via ${v}`, education_level: `education: ${v}`, age_group: `age group: ${v}`,
-        gender: `gender: ${v}`, nationality: `nationality: ${v}`, preferred_language: `language: ${v}`,
-        is_opt_in_email: "opted-in to email", has_ga_activity: "has web activity",
-        source_medium: `source: ${v}`, has_form_complete: "completed a form",
-      };
-      return labels[k] || `${k}: ${v}`;
-    });
-    const auto = `Criteria: ${parts.join(", ")}.`;
-    return form.description ? `${form.description} ${auto}` : auto;
-  };
+  const chips = criteriaToChips(criteria, isCustomer);
 
   const handleSubmit = () => {
-    const finalDesc = buildDescription();
-    onSubmit({ ...form, description: finalDesc, estimated_size: form.estimated_size ? Number(form.estimated_size) : undefined });
+    const descParts = chips.length ? `Criteria: ${chips.join(", ")}.` : "";
+    const description = form.description
+      ? (chips.length ? `${form.description} ${descParts}` : form.description)
+      : descParts;
+    const existingMeta = initialValues?.metadata || {};
+    const metadata = {
+      ...existingMeta,
+      ...(chips.length ? { criteria: chips } : {}),
+      ...(activeCriteria.length ? { filter_criteria: Object.fromEntries(activeCriteria) } : {}),
+    };
+    onSubmit({
+      ...form,
+      description,
+      estimated_size: form.estimated_size ? Number(form.estimated_size) : undefined,
+      metadata,
+    });
   };
 
   return (
@@ -94,7 +132,7 @@ function SegmentForm({ initialValues, onSubmit, isPending, submitLabel = "Save",
       <div>
         <Label className="text-xs">Segment Name</Label>
         <Input value={form.name} onChange={e => set("name", e.target.value)}
-          placeholder={segmentType === "customer" ? "High-Value Seminar Members" : "High-Intent Anonymous Visitors"}
+          placeholder={isCustomer ? "High-Value Seminar Members" : "High-Intent Anonymous Visitors"}
           className="mt-1" />
       </div>
       <div>
@@ -121,28 +159,54 @@ function SegmentForm({ initialValues, onSubmit, isPending, submitLabel = "Save",
         </button>
 
         {showCriteria && (
-          <div className="px-3 pb-3 pt-1 border-t border-border space-y-2">
-            {segmentType === "customer" ? (
+          <div className="px-3 pb-3 pt-2 border-t border-border space-y-3">
+            {isCustomer ? (
               <>
-                <CriteriaRow label="Reg. channel" value={criteria.reg_channel} onChange={v => setCrit("reg_channel", v)} opts={custFilters?.reg_channels || []} />
-                <CriteriaRow label="Education" value={criteria.education_level} onChange={v => setCrit("education_level", v)} opts={custFilters?.education_levels || []} />
-                <CriteriaRow label="Age group" value={criteria.age_group} onChange={v => setCrit("age_group", v)} opts={custFilters?.age_groups || []} />
-                <CriteriaRow label="Gender" value={criteria.gender} onChange={v => setCrit("gender", v)} opts={custFilters?.genders || []} />
-                <CriteriaRow label="Nationality" value={criteria.nationality} onChange={v => setCrit("nationality", v)} opts={custFilters?.nationalities || []} />
-                <CriteriaRow label="Language" value={criteria.preferred_language} onChange={v => setCrit("preferred_language", v)} opts={custFilters?.languages || []} />
-                <CriteriaRow label="Email opt-in" value={criteria.is_opt_in_email} onChange={v => setCrit("is_opt_in_email", v)} opts={["true"]} />
-                <CriteriaRow label="Web activity" value={criteria.has_ga_activity} onChange={v => setCrit("has_ga_activity", v)} opts={["true"]} />
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Demographics</p>
+                  <div className="space-y-1.5">
+                    <CriteriaRow label="Reg. channel"  value={criteria.reg_channel}       onChange={v => setCrit("reg_channel", v)}       opts={custFilters?.reg_channels || []} />
+                    <CriteriaRow label="Age group"     value={criteria.age_group}          onChange={v => setCrit("age_group", v)}          opts={custFilters?.age_groups || []} />
+                    <CriteriaRow label="Gender"        value={criteria.gender}             onChange={v => setCrit("gender", v)}             opts={custFilters?.genders || []} />
+                    <CriteriaRow label="Nationality"   value={criteria.nationality}        onChange={v => setCrit("nationality", v)}        opts={custFilters?.nationalities || []} />
+                    <CriteriaRow label="Education"     value={criteria.education_level}    onChange={v => setCrit("education_level", v)}    opts={custFilters?.education_levels || []} />
+                    <CriteriaRow label="Employment"    value={criteria.employment_status}  onChange={v => setCrit("employment_status", v)}  opts={custFilters?.employment_statuses || []} />
+                    <CriteriaRow label="Income"        value={criteria.income_level}       onChange={v => setCrit("income_level", v)}       opts={custFilters?.income_levels || []} />
+                    <CriteriaRow label="Member type"   value={criteria.member_type}        onChange={v => setCrit("member_type", v)}        opts={custFilters?.member_types || []} />
+                    <CriteriaRow label="Language"      value={criteria.preferred_language} onChange={v => setCrit("preferred_language", v)} opts={custFilters?.languages || []} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Communication</p>
+                  <div className="space-y-1.5">
+                    <CriteriaRow label="Email opt-in"  value={criteria.is_opt_in_email}   onChange={v => setCrit("is_opt_in_email", v)}   opts={["true"]} />
+                    <CriteriaRow label="SMS opt-in"    value={criteria.opt_in_sms}         onChange={v => setCrit("opt_in_sms", v)}         opts={["true"]} />
+                    <CriteriaRow label="Subscriber"    value={criteria.is_subscriber}      onChange={v => setCrit("is_subscriber", v)}      opts={["true"]} />
+                    <CriteriaRow label="Pref. channel" value={criteria.preferred_channel}  onChange={v => setCrit("preferred_channel", v)}  opts={custFilters?.preferred_channels || []} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Activity</p>
+                  <div className="space-y-1.5">
+                    <CriteriaRow label="Web activity"  value={criteria.has_ga_activity}   onChange={v => setCrit("has_ga_activity", v)}   opts={["true"]} />
+                    <CriteriaRow label="Min. sessions" value={criteria.min_ga_sessions}    onChange={v => setCrit("min_ga_sessions", v)}    opts={["1", "3", "5", "10"]} />
+                    <CriteriaRow label="Seminars"      value={criteria.has_seminars}       onChange={v => setCrit("has_seminars", v)}       opts={["true"]} />
+                    <CriteriaRow label="Attributes"    value={criteria.has_attributes}     onChange={v => setCrit("has_attributes", v)}     opts={["true"]} />
+                  </div>
+                </div>
               </>
             ) : (
-              <>
-                <CriteriaRow label="Source / Medium" value={criteria.source_medium} onChange={v => setCrit("source_medium", v)} opts={anonFilters?.source_mediums || []} />
-                <CriteriaRow label="Form completed" value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
-              </>
+              <div className="space-y-1.5">
+                <CriteriaRow label="Source / Medium" value={criteria.source_medium}    onChange={v => setCrit("source_medium", v)}    opts={anonFilters?.source_mediums || []} />
+                <CriteriaRow label="Form completed"  value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
+              </div>
             )}
-            {activeCriteria.length > 0 && (
-              <p className="text-[10px] text-muted-foreground pt-1">
-                These criteria will be appended to your description and used by the AI analyst for segment sizing.
-              </p>
+            {chips.length > 0 && (
+              <div className="pt-1 flex flex-wrap gap-1">
+                {chips.map((c, i) => (
+                  <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/60 border border-border text-muted-foreground">{c}</span>
+                ))}
+              </div>
             )}
           </div>
         )}

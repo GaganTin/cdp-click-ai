@@ -145,6 +145,35 @@ export const appClient = {
       return request("/profiles/refresh", { method: "POST" });
     },
   },
+  edm: {
+    // Campaigns
+    listCampaigns: () => request("/edm/campaigns"),
+    createCampaign: (data) => request("/edm/campaigns", { method: "POST", body: JSON.stringify(data) }),
+    getCampaign: (id) => request(`/edm/campaigns/${id}`),
+    updateCampaign: (id, data) => request(`/edm/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    deleteCampaign: (id) => request(`/edm/campaigns/${id}`, { method: "DELETE" }),
+    sendCampaign: (id) => request(`/edm/campaigns/${id}/send`, { method: "POST" }),
+    cancelCampaign: (id) => request(`/edm/campaigns/${id}/cancel`, { method: "POST" }),
+    getCampaignStats: (id) => request(`/edm/campaigns/${id}/stats`),
+    getCampaignSends: (id) => request(`/edm/campaigns/${id}/sends`),
+    getRecipientsPreview: (id) => request(`/edm/campaigns/${id}/recipients/preview`),
+    previewRecipientsBySegment: () => request("/edm/recipients/preview"),
+    testSend: (payload) => request("/edm/test-send", { method: "POST", body: JSON.stringify(payload) }),
+    // Templates
+    listTemplates: () => request("/edm/templates"),
+    createTemplate: (data) => request("/edm/templates", { method: "POST", body: JSON.stringify(data) }),
+    updateTemplate: (id, data) => request(`/edm/templates/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    deleteTemplate: (id) => request(`/edm/templates/${id}`, { method: "DELETE" }),
+    // Suppression
+    listSuppression: () => request("/edm/suppression"),
+    addSuppression: (email, reason = "manual") => request("/edm/suppression", { method: "POST", body: JSON.stringify({ email, reason }) }),
+    removeSuppression: (email) => request(`/edm/suppression/${encodeURIComponent(email)}`, { method: "DELETE" }),
+    // Automations
+    listAutomations: () => request("/edm/automations"),
+    createAutomation: (data) => request("/edm/automations", { method: "POST", body: JSON.stringify(data) }),
+    updateAutomation: (id, data) => request(`/edm/automations/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    deleteAutomation: (id) => request(`/edm/automations/${id}`, { method: "DELETE" }),
+  },
   chartSummaries: {
     async explain(payload) {
       return request("/chart-summaries/explain", {
