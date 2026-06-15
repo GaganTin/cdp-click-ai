@@ -7,7 +7,7 @@ export const databaseTools = [
     description:
       "Execute a read-only SELECT query against the PostgreSQL database. " +
       "Use this whenever you need actual data to answer a question or estimate numbers. " +
-      "Always prefix table names with their schema (e.g. ga_landing.utm_daily_performance, public.membership, app.segments).",
+      "Always prefix table names with their schema (e.g. ga_landing.utm_daily_performance, app.customer_profiles, app.segments). All data tables are company-scoped - filter by company_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -70,21 +70,19 @@ export async function handleDatabaseTool(name, args, pool, dataDictionary) {
   }
 
   if (name === "list_tables") {
+    // Dictionary entries are { table, use_case, granularity, fields[] }. Schema
+    // prefixes are given in the system prompt (ga_landing.* for GA/GSC reports).
     const tables = dataDictionary.map((t) => ({
-      schema_name: t.schema_name,
-      table_name: t.table_name,
-      description: t.description || "",
-      column_count: Array.isArray(t.columns) ? t.columns.length : 0,
+      table_name: t.table,
+      use_case: t.use_case || "",
+      granularity: t.granularity || "",
+      column_count: Array.isArray(t.fields) ? t.fields.length : 0,
     }));
     return { content: [{ type: "text", text: JSON.stringify({ tables }) }] };
   }
 
   if (name === "describe_table") {
-    const entry = dataDictionary.find(
-      (t) =>
-        t.table_name === args.table_name &&
-        (!args.schema_name || t.schema_name === args.schema_name)
-    );
+    const entry = dataDictionary.find((t) => t.table === args.table_name);
     if (!entry) {
       return {
         content: [{

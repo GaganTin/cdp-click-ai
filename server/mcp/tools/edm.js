@@ -115,6 +115,14 @@ export const edmTools = [
   },
 ];
 
+// ── Recipient eligibility (shared across opportunity/preview queries) ──────────
+// A profile is an eligible EDM recipient when it has opted in, has a real email,
+// and is not on the (global) suppression list.
+const NOT_SUPPRESSED = "cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)";
+const ELIGIBLE_RECIPIENT = `cp.is_opt_in_email = true
+          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
+          AND ${NOT_SUPPRESSED}`;
+
 export async function handleEdmTool(name, args, pool) {
 
   if (name === "suggest_edm_opportunities") {
@@ -123,9 +131,7 @@ export async function handleEdmTool(name, args, pool) {
       const { rows: newJoiners } = await pool.query(`
         SELECT COUNT(*) AS cnt
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
           AND cp.member_join_date >= NOW() - INTERVAL '30 days'
       `);
 
@@ -133,9 +139,7 @@ export async function handleEdmTool(name, args, pool) {
       const { rows: inactive90 } = await pool.query(`
         SELECT COUNT(*) AS cnt
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
           AND (cp.last_activity_date IS NULL OR cp.last_activity_date < NOW() - INTERVAL '90 days')
       `);
 
@@ -143,9 +147,7 @@ export async function handleEdmTool(name, args, pool) {
       const { rows: inactive30 } = await pool.query(`
         SELECT COUNT(*) AS cnt
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
           AND (cp.last_activity_date IS NULL OR cp.last_activity_date < NOW() - INTERVAL '30 days')
           AND (cp.last_activity_date IS NOT NULL AND cp.last_activity_date >= NOW() - INTERVAL '90 days')
       `);
@@ -154,9 +156,7 @@ export async function handleEdmTool(name, args, pool) {
       const { rows: seminarAttendees } = await pool.query(`
         SELECT COUNT(*) AS cnt
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
           AND cp.seminar_count > 0
       `);
 
@@ -164,9 +164,7 @@ export async function handleEdmTool(name, args, pool) {
       const { rows: total } = await pool.query(`
         SELECT COUNT(*) AS cnt
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
       `);
 
       // Recent EDM performance for context
@@ -259,9 +257,7 @@ export async function handleEdmTool(name, args, pool) {
                COUNT(*) FILTER (WHERE cp.ga_sessions >= 3) AS active_web_users,
                AVG(cp.ga_sessions)::numeric(6,1) AS avg_sessions
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL AND cp.primary_email != ''
-          AND cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)
+        WHERE ${ELIGIBLE_RECIPIENT}
           AND cp.${col} IS NOT NULL
         GROUP BY cp.${col}
         ORDER BY total_opted_in DESC
@@ -308,7 +304,7 @@ export async function handleEdmTool(name, args, pool) {
         "cp.is_opt_in_email = true",
         "cp.primary_email IS NOT NULL",
         "cp.primary_email != ''",
-        "cp.primary_email NOT IN (SELECT email FROM app.edm_suppression)",
+        NOT_SUPPRESSED,
       ];
       const params = [];
 

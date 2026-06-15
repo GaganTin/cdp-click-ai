@@ -61,7 +61,7 @@ describe("Segments - list_segments", () => {
 });
 
 describe("Segments - preview_segment_size", () => {
-  it("queries public.membership for customer segments", async () => {
+  it("queries app.customer_profiles for customer segments", async () => {
     const pool = makePool([{ count: "342" }]);
     const result = await handleSegmentTool(
       "preview_segment_size",
@@ -71,11 +71,11 @@ describe("Segments - preview_segment_size", () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.estimated_count).toBe(342);
     const [sql] = pool.query.mock.calls[0];
-    expect(sql).toMatch(/public\.membership/);
+    expect(sql).toMatch(/app\.customer_profiles/);
     expect(sql).toMatch(/member_reg_channel = 'Seminar'/);
   });
 
-  it("queries path_exploration for anonymous_profile and excludes mapped members", async () => {
+  it("queries app.anonymous_profiles for anonymous_profile segments", async () => {
     const pool = makePool([{ count: "1500" }]);
     const result = await handleSegmentTool(
       "preview_segment_size",
@@ -85,8 +85,8 @@ describe("Segments - preview_segment_size", () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.estimated_count).toBe(1500);
     const [sql] = pool.query.mock.calls[0];
-    expect(sql).toMatch(/path_exploration/);
-    expect(sql).toMatch(/membership_ap_mapping/); // excludes known members
+    expect(sql).toMatch(/app\.anonymous_profiles/);
+    expect(sql).toMatch(/session_source_medium = 'google \/ cpc'/);
   });
 
   it("returns error with attempted SQL when DB query fails", async () => {

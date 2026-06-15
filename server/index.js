@@ -13,13 +13,23 @@ import cron from "node-cron";
 import { createAnalystMCPClient, toOpenAITools } from "./mcp/server.js";
 import { createEdmRouter } from "./routes/edm.js";
 import { createIntegrationsRouter } from "./routes/integrations.js";
+import { createAttributesRouter } from "./routes/attributes.js";
+import { startIntegrationQueueWorker } from "./lib/integrationQueue.js";
+import { startNotificationScanWorker } from "./lib/notificationsScan.js";
+import { startAttributeQueueWorker, processNextAttributeJob } from "./lib/attributeQueue.js";
+import { runDailyRuleRefresh } from "./lib/attributeRules.js";
+import { runDailyTestLinkRefresh } from "./lib/attributeTestLinks.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createCompanyRouter } from "./routes/company.js";
 import { createPlansRouter, FALLBACK_PLANS } from "./routes/plans.js";
 import { createBillingRouter } from "./routes/billing.js";
+import { createAdminRouter } from "./routes/admin.js";
 import { createSupportRouter } from "./routes/support.js";
+import { createNotificationsRouter } from "./routes/notifications.js";
 import { createPopupRouter } from "./routes/popup.js";
-import { authenticate, withCompany } from "./middleware/auth.js";
+import { createUtmRouter } from "./routes/utm.js";
+import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } from "./middleware/auth.js";
+import { resolveSegmentEntities, countSegmentEntities, customerWhere, anonWhere } from "./lib/attributeManual.js";
 
 dotenv.config();
 
@@ -35,6 +45,16 @@ const pgConn = process.env.POSTGRESQL_CONN || process.env.DATABASE_URL || "";
 
 const upload = multer({ dest: uploadsDir });
 const pool = pgConn ? new Pool({ connectionString: pgConn }) : null;
+// Let authenticate() invalidate tokens issued before a password change.
+if (pool) setAuthPool(pool);
+
+// Verify the caller is an active member of the x-company-id workspace before any
+// company-scoped query. Returns the company_id, or null after sending the error.
+// blockViewerOnPost:false → viewers may still use read-style POSTs (e.g. the
+// analyst) but PATCH/PUT/DELETE are blocked for them.
+async function companyGuard(req, res) {
+  return resolveCompanyId(pool, req, res, { blockViewerOnPost: false });
+}
 
 // ── Azure OpenAI ──────────────────────────────────────────────────────────────
 const azureEndpoint = (process.env.AZURE_OPENAI_ENDPOINT || "").replace(/\/$/, "");
@@ -72,17 +92,18 @@ const TABLE_SCHEMA_MAP = {
   page_metrics: "ga_landing",
   page_utm_metrics: "ga_landing",
   path_exploration: "ga_landing",
-  outbound_links_attributes: "ga_landing",
+  path_exploration_duration: "ga_landing",
+  funnel_report: "ga_landing",
+  purchase_list: "ga_landing",
   utm_ad_performance: "ga_landing",
   utm_daily_full_param_performance: "ga_landing",
   utm_daily_performance: "ga_landing",
+  utm_daily_utm_id_performance: "ga_landing",
   utm_performance: "ga_landing",
   website_metrics: "ga_landing",
-  membership: "public",
-  membership_ap_mapping: "public",
-  membership_attributes: "public",
-  membership_attributes_mapping: "public",
-  membership_custom_activity: "public",
+  customer_profiles: "app",
+  anonymous_profiles: "app",
+  profile_identities: "app",
   data_integrations: "app",
   company_report_config: "app",
   web_content_html_elements: "app",
@@ -99,7 +120,7 @@ const ENTITY_CONFIG = {
   },
   Segment: {
     table: "app.segments",
-    columns: new Set(["name", "description", "estimated_size", "status", "segment_type", "visibility", "metadata"]),
+    columns: new Set(["name", "description", "estimated_size", "status", "segment_type", "visibility", "daily_refresh", "last_refreshed", "metadata"]),
     sortable: new Set(["created_date", "updated_date", "name", "status"]),
     multiTenant: true,
   },
@@ -161,151 +182,256 @@ async function initDb() {
     console.warn("No Postgres connection - skipping schema init.");
     return;
   }
-  const sql = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
-  await pool.query(sql);
-  console.log("app schema ready");
 
+  // Schema is managed by the modular files in server/sql/01..12
+  // (apply via scripts/apply_schema.cjs). Just verify it's present.
   try {
-    const authSql = fs.readFileSync(path.join(__dirname, "auth_schema.sql"), "utf8");
-    await pool.query(authSql);
-    console.log("auth schema ready");
-  } catch (err) {
-    console.error("Auth schema migration warning (non-fatal):", err.message);
-  }
-
-  // Auto-refresh profile tables if they are empty
-  const { rows } = await pool.query("SELECT COUNT(*) FROM app.customer_profiles");
-  if (parseInt(rows[0].count) === 0) {
-    console.log("Profile tables empty - running initial refresh...");
-    refreshProfiles(pool).catch(e => console.error("Profile refresh error:", e));
+    await pool.query("SELECT 1 FROM app.companies LIMIT 1");
+    console.log("schema managed by server/sql/* (ready)");
+  } catch (e) {
+    console.error("app.companies not found - apply server/sql/* first:", e.message);
   }
 }
 
-async function refreshProfiles(pg) {
-  console.log("Refreshing customer profiles...");
-  await pg.query("DELETE FROM app.customer_profiles WHERE is_imported = false");
+// Ingests the synced commerce members (commerce.customer - Shopify today,
+// Shopline/Odoo/WooCommerce later, distinguished by source_platform) into the
+// unified golden record. Set-based and idempotent:
+//   1. upsert membership rows into app.customer_profiles (member_source = platform)
+//   2. register identity links (member_id / email / phone) in app.profile_identities
+//   3. queue cross-source duplicates (same email/phone, different member) in
+//      app.profile_merge_candidates for review
+//   4. refresh the commerce aggregates (order_count / total_spend / first+last
+//      order) from commerce."order" (completed + confirmed orders only)
+async function syncCommerceProfiles(pg, cid) {
+  // 1. Membership upsert. member_id = commerce.customer_id ({ref}_cust_*), which
+  // can only collide with a previous run of this same upsert - never with
+  // manual/GA member ids - so the DO UPDATE refreshes the member fields in place
+  // and preserves the GA aggregate columns untouched.
   await pg.query(`
-    WITH ga_stats AS (
-      SELECT
-        apm.membership_id,
-        COUNT(DISTINCT apm.capsuite_apid)                                                                   AS ga_sessions,
-        COUNT(*)                                                                                             AS ga_total_events,
-        SUM(CASE WHEN pe.event_name = 'page_view'                                        THEN 1 ELSE 0 END) AS ga_page_views,
-        SUM(CASE WHEN pe.event_name = 'first_visit'                                      THEN 1 ELSE 0 END) AS ga_first_visits,
-        SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')                 THEN 1 ELSE 0 END) AS ga_form_starts,
-        SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS ga_form_completes,
-        SUM(CASE WHEN pe.event_name = 'scroll'                                           THEN 1 ELSE 0 END) AS ga_scroll_events,
-        SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')           THEN 1 ELSE 0 END) AS ga_whatsapp_clicks,
-        SUM(CASE WHEN pe.event_name = 'file_download'                                   THEN 1 ELSE 0 END) AS ga_file_downloads,
-        MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                                   AS ga_first_seen,
-        MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                                   AS ga_last_seen,
-        MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                                             AS ga_top_source_medium,
-        MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                                             AS ga_top_campaign,
-        ARRAY_AGG(DISTINCT apm.capsuite_apid)        FILTER (WHERE apm.capsuite_apid IS NOT NULL)            AS ga_visitor_ids,
-        ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS ga_source_mediums,
-        ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS ga_campaigns,
-        ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)               AS ga_events_list,
-        ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS ga_pages_visited
-      FROM public.membership_ap_mapping apm
-      JOIN ga_landing.path_exploration pe ON pe.capsuite_apid = apm.capsuite_apid
-      GROUP BY apm.membership_id
-    ),
-    seminar_stats AS (
-      SELECT
-        membership_id,
-        COUNT(*)                                                                    AS seminar_count,
-        JSONB_AGG(JSONB_BUILD_OBJECT('event_name', event_name, 'event_date', event_date, 'action', action) ORDER BY event_date DESC) AS seminars
-      FROM public.membership_custom_activity
-      GROUP BY membership_id
-    ),
-    attr_stats AS (
-      SELECT
-        mam.membership_id,
-        COUNT(*)                                                                    AS attribute_count,
-        JSONB_OBJECT_AGG(ma.attribute_name, ma.attribute_value)                    AS attributes
-      FROM public.membership_attributes_mapping mam
-      JOIN public.membership_attributes ma ON ma.attribute_id = mam.attribute_id AND ma.capsuite_ref = mam.capsuite_ref
-      GROUP BY mam.membership_id
+    INSERT INTO app.customer_profiles (
+      company_id, member_id, member_source, capsuite_ref, is_manual,
+      primary_email, primary_phone, has_email, has_phone,
+      eng_first_name, eng_last_name, eng_full_name, display_name,
+      member_no, member_type, member_join_date, member_last_update,
+      member_reg_channel, is_opt_in_email, is_opt_in_sms, tags
     )
-    INSERT INTO app.customer_profiles
     SELECT
-      m.member_id, m.capsuite_ref,
-      m.primary_email, m.secondary_email, m.eng_full_name, m.eng_first_name, m.eng_last_name,
-      m.chi_full_name, m.display_name, m.member_no, m.title,
-      m.member_join_date, m.member_last_update, m.member_reg_channel, m.member_reg_location,
-      m.member_type, m.is_company,
-      m.gender, m.age, m.age_group, m.birthday_year, m.birthday_month, m.birthday_day,
-      m.education_level, m.income_level, m.employment_status, m.marital_status, m.nationality,
-      m.has_email, m.has_phone, m.primary_phone, m.preferred_language, m.preferred_channel,
-      m.is_opt_in_email, m.is_opt_in_call, m.is_opt_in_dm, m.is_opt_in_sms, m.is_subscriber_only, m.tags,
-      COALESCE(g.ga_sessions,        0)  AS ga_sessions,
-      COALESCE(g.ga_total_events,    0)  AS ga_total_events,
-      COALESCE(g.ga_page_views,      0)  AS ga_page_views,
-      COALESCE(g.ga_first_visits,    0)  AS ga_first_visits,
-      COALESCE(g.ga_form_starts,     0)  AS ga_form_starts,
-      COALESCE(g.ga_form_completes,  0)  AS ga_form_completes,
-      COALESCE(g.ga_scroll_events,   0)  AS ga_scroll_events,
-      COALESCE(g.ga_whatsapp_clicks, 0)  AS ga_whatsapp_clicks,
-      COALESCE(g.ga_file_downloads,  0)  AS ga_file_downloads,
-      g.ga_first_seen, g.ga_last_seen, g.ga_top_source_medium, g.ga_top_campaign,
-      COALESCE(g.ga_source_mediums, '{}') AS ga_source_mediums,
-      COALESCE(g.ga_campaigns,       '{}') AS ga_campaigns,
-      COALESCE(g.ga_events_list,     '{}') AS ga_events_list,
-      COALESCE(g.ga_pages_visited,   '{}') AS ga_pages_visited,
-      COALESCE(s.seminar_count,  0)   AS seminar_count,
-      COALESCE(s.seminars,       '[]'::JSONB) AS seminars,
-      COALESCE(a.attribute_count, 0)  AS attribute_count,
-      COALESCE(a.attributes,     '{}'::JSONB) AS attributes,
-      NOW() AS last_refreshed,
-      COALESCE(g.ga_visitor_ids,    '{}') AS ga_visitor_ids,
-      -- is_imported / imported_at: preserve imported profiles via ON CONFLICT DO NOTHING
-      false                              AS is_imported,
-      NULL::TIMESTAMPTZ                  AS imported_at
-    FROM (SELECT DISTINCT ON (member_id) * FROM public.membership WHERE is_imported = false ORDER BY member_id, member_join_date DESC NULLS LAST) m
-    LEFT JOIN ga_stats      g ON g.membership_id = m.member_id
-    LEFT JOIN seminar_stats s ON s.membership_id = m.member_id
-    LEFT JOIN attr_stats    a ON a.membership_id = m.member_id
-    ON CONFLICT (member_id) DO NOTHING
-  `);
-  console.log("Customer profiles refreshed.");
+      cc.company_id, cc.customer_id, cc.source_platform, cc.capsuite_ref, false,
+      cc.primary_email, cc.primary_phone,
+      COALESCE(cc.has_email, false), COALESCE(cc.has_phone, false),
+      cc.first_name, cc.last_name, cc.full_name, COALESCE(cc.display_name, cc.full_name),
+      cc.customer_no, COALESCE(cc.customer_type, 'Customer'), cc.join_date, cc.last_update,
+      cc.source_platform, cc.is_opt_in_email, cc.is_opt_in_sms, cc.tags
+    FROM commerce.customer cc
+    WHERE cc.company_id = $1
+    ON CONFLICT (company_id, member_id) DO UPDATE SET
+      primary_email      = EXCLUDED.primary_email,
+      primary_phone      = EXCLUDED.primary_phone,
+      has_email          = EXCLUDED.has_email,
+      has_phone          = EXCLUDED.has_phone,
+      eng_first_name     = EXCLUDED.eng_first_name,
+      eng_last_name      = EXCLUDED.eng_last_name,
+      eng_full_name      = EXCLUDED.eng_full_name,
+      display_name       = EXCLUDED.display_name,
+      member_no          = EXCLUDED.member_no,
+      member_type        = EXCLUDED.member_type,
+      member_join_date   = EXCLUDED.member_join_date,
+      member_last_update = EXCLUDED.member_last_update,
+      is_opt_in_email    = EXCLUDED.is_opt_in_email,
+      is_opt_in_sms      = EXCLUDED.is_opt_in_sms,
+      tags               = EXCLUDED.tags,
+      last_refreshed     = NOW()
+  `, [cid]);
 
-  console.log("Refreshing anonymous profiles...");
-  await pg.query("TRUNCATE app.anonymous_profiles");
+  // 2. Identity links. The unique (company, type, value) index keeps an
+  // email/phone that already belongs to ANOTHER profile with that profile -
+  // such overlaps surface as merge candidates below instead.
   await pg.query(`
-    INSERT INTO app.anonymous_profiles
-    SELECT
-      pe.capsuite_apid                                                                                        AS visitor_id,
-      MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                                       AS first_seen,
-      MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                                       AS last_seen,
-      COUNT(*)                                                                                                AS total_events,
-      SUM(CASE WHEN pe.event_name = 'page_view'                                         THEN 1 ELSE 0 END)   AS page_views,
-      SUM(CASE WHEN pe.event_name = 'session_start'                                     THEN 1 ELSE 0 END)   AS sessions,
-      SUM(CASE WHEN pe.event_name = 'first_visit'                                       THEN 1 ELSE 0 END)   AS first_visits,
-      SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')                  THEN 1 ELSE 0 END)   AS form_starts,
-      SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS form_completes,
-      SUM(CASE WHEN pe.event_name = 'scroll'                                            THEN 1 ELSE 0 END)   AS scroll_events,
-      SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')            THEN 1 ELSE 0 END)   AS whatsapp_clicks,
-      SUM(CASE WHEN pe.event_name = 'file_download'                                    THEN 1 ELSE 0 END)   AS file_downloads,
-      SUM(CASE WHEN pe.event_name IN ('click','click_button')                           THEN 1 ELSE 0 END)   AS click_events,
-      SUM(CASE WHEN pe.event_name = 'user_engagement'                                  THEN 1 ELSE 0 END)   AS user_engagement,
-      MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                                                AS top_source_medium,
-      MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                                                AS top_campaign,
-      ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS source_mediums,
-      ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS campaigns,
-      ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)                  AS events,
-      ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS pages_visited,
-      NOW()                                                                                                  AS last_refreshed
-    FROM ga_landing.path_exploration pe
-    WHERE pe.capsuite_apid IS NOT NULL
-      AND pe.capsuite_apid != ''
-      AND pe.capsuite_apid != '(not set)'
-      AND LENGTH(pe.capsuite_apid) > 6
-      AND pe.capsuite_apid NOT IN (
-        SELECT capsuite_apid FROM public.membership_ap_mapping WHERE capsuite_apid IS NOT NULL
+    INSERT INTO app.profile_identities
+      (company_id, member_id, source, source_id, identity_type, identity_value, is_primary)
+    SELECT cc.company_id, cc.customer_id, cc.source_platform, cc.source_id, 'member_id', cc.customer_id, true
+    FROM commerce.customer cc WHERE cc.company_id = $1
+    ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING
+  `, [cid]);
+  await pg.query(`
+    INSERT INTO app.profile_identities
+      (company_id, member_id, source, source_id, identity_type, identity_value, is_primary)
+    SELECT cc.company_id, cc.customer_id, cc.source_platform, cc.source_id, 'email', cc.primary_email, false
+    FROM commerce.customer cc
+    WHERE cc.company_id = $1 AND cc.primary_email IS NOT NULL AND cc.primary_email <> ''
+    ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING
+  `, [cid]);
+  await pg.query(`
+    INSERT INTO app.profile_identities
+      (company_id, member_id, source, source_id, identity_type, identity_value, is_primary)
+    SELECT cc.company_id, cc.customer_id, cc.source_platform, cc.source_id, 'phone', cc.primary_phone, false
+    FROM commerce.customer cc
+    WHERE cc.company_id = $1 AND cc.primary_phone IS NOT NULL AND cc.primary_phone <> ''
+    ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING
+  `, [cid]);
+
+  // 3. Cross-source duplicate review queue (email, then phone). The pair-unique
+  // index (LEAST/GREATEST + match_type) makes re-runs no-ops.
+  await pg.query(`
+    INSERT INTO app.profile_merge_candidates
+      (company_id, member_id_a, source_a, member_id_b, source_b, match_type, match_value)
+    SELECT cc.company_id, cp.member_id, cp.member_source, cc.customer_id, cc.source_platform,
+           'email', LOWER(cc.primary_email)
+    FROM commerce.customer cc
+    JOIN app.customer_profiles cp
+      ON cp.company_id = cc.company_id
+     AND LOWER(cp.primary_email) = LOWER(cc.primary_email)
+     AND cp.member_id <> cc.customer_id
+    WHERE cc.company_id = $1 AND cc.primary_email IS NOT NULL AND cc.primary_email <> ''
+    ON CONFLICT DO NOTHING
+  `, [cid]);
+  await pg.query(`
+    INSERT INTO app.profile_merge_candidates
+      (company_id, member_id_a, source_a, member_id_b, source_b, match_type, match_value)
+    SELECT cc.company_id, cp.member_id, cp.member_source, cc.customer_id, cc.source_platform,
+           'phone', cc.primary_phone
+    FROM commerce.customer cc
+    JOIN app.customer_profiles cp
+      ON cp.company_id = cc.company_id
+     AND cp.primary_phone = cc.primary_phone
+     AND cp.member_id <> cc.customer_id
+    WHERE cc.company_id = $1 AND cc.primary_phone IS NOT NULL AND cc.primary_phone <> ''
+    ON CONFLICT DO NOTHING
+  `, [cid]);
+
+  // 4. Commerce aggregates (display cache on the golden record).
+  await pg.query(`
+    UPDATE app.customer_profiles cp SET
+      order_count      = a.n,
+      total_spend      = a.spend,
+      first_order_date = a.first_o,
+      last_order_date  = a.last_o,
+      last_refreshed   = NOW()
+    FROM (
+      SELECT customer_id,
+             COUNT(*)::int                 AS n,
+             COALESCE(SUM(net_amount), 0)  AS spend,
+             MIN(order_date)               AS first_o,
+             MAX(order_date)               AS last_o
+      FROM commerce."order"
+      WHERE company_id = $1
+        AND customer_id IS NOT NULL
+        AND order_status IN ('completed', 'confirmed')
+      GROUP BY customer_id
+    ) a
+    WHERE cp.company_id = $1 AND cp.member_id = a.customer_id
+  `, [cid]);
+}
+
+// Recomputes the derived layers of the unified profiles for one company (or all
+// companies when companyId is omitted): first ingest the synced commerce members
+// (commerce.customer -> app.customer_profiles, see syncCommerceProfiles), then
+// (re)derive the GA aggregates by walking the identity map (anonymous_id) into
+// ga_landing.path_exploration, and rebuild the unresolved-visitor list
+// app.anonymous_profiles. Fully company-scoped.
+async function refreshProfiles(pg, companyId = null) {
+  let companyIds = [];
+  if (companyId) {
+    companyIds = [companyId];
+  } else {
+    const { rows } = await pg.query("SELECT id FROM app.companies WHERE is_active = true");
+    companyIds = rows.map(r => r.id);
+  }
+
+  for (const cid of companyIds) {
+    // 0. Pull the latest synced commerce members into the golden record.
+    await syncCommerceProfiles(pg, cid);
+
+    // 1. Layer GA activity onto known customers via the anonymous_id identity links.
+    await pg.query(`
+      WITH ga_stats AS (
+        SELECT
+          pi.member_id,
+          COUNT(DISTINCT pe.capsuite_apid)                                                   AS ga_sessions,
+          COUNT(*)                                                                            AS ga_total_events,
+          SUM(CASE WHEN pe.event_name = 'page_view'                                 THEN 1 ELSE 0 END) AS ga_page_views,
+          SUM(CASE WHEN pe.event_name = 'first_visit'                               THEN 1 ELSE 0 END) AS ga_first_visits,
+          SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')          THEN 1 ELSE 0 END) AS ga_form_starts,
+          SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS ga_form_completes,
+          SUM(CASE WHEN pe.event_name = 'scroll'                                    THEN 1 ELSE 0 END) AS ga_scroll_events,
+          SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')    THEN 1 ELSE 0 END) AS ga_whatsapp_clicks,
+          SUM(CASE WHEN pe.event_name = 'file_download'                            THEN 1 ELSE 0 END) AS ga_file_downloads,
+          MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                  AS ga_first_seen,
+          MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                  AS ga_last_seen,
+          MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                            AS ga_top_source_medium,
+          MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                            AS ga_top_campaign,
+          ARRAY_AGG(DISTINCT pe.capsuite_apid)         FILTER (WHERE pe.capsuite_apid IS NOT NULL) AS ga_visitor_ids,
+          ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS ga_source_mediums,
+          ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS ga_campaigns,
+          ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)               AS ga_events_list,
+          ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS ga_pages_visited
+        FROM app.profile_identities pi
+        JOIN ga_landing.path_exploration pe
+          ON pe.company_id = pi.company_id AND pe.capsuite_apid = pi.identity_value
+        WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id'
+        GROUP BY pi.member_id
       )
-    GROUP BY pe.capsuite_apid
-  `);
-  console.log("Anonymous profiles refreshed.");
+      UPDATE app.customer_profiles cp SET
+        ga_sessions = g.ga_sessions, ga_total_events = g.ga_total_events, ga_page_views = g.ga_page_views,
+        ga_first_visits = g.ga_first_visits, ga_form_starts = g.ga_form_starts, ga_form_completes = g.ga_form_completes,
+        ga_scroll_events = g.ga_scroll_events, ga_whatsapp_clicks = g.ga_whatsapp_clicks, ga_file_downloads = g.ga_file_downloads,
+        ga_first_seen = g.ga_first_seen, ga_last_seen = g.ga_last_seen,
+        ga_top_source_medium = g.ga_top_source_medium, ga_top_campaign = g.ga_top_campaign,
+        ga_visitor_ids = COALESCE(g.ga_visitor_ids, '{}'), ga_source_mediums = COALESCE(g.ga_source_mediums, '{}'),
+        ga_campaigns = COALESCE(g.ga_campaigns, '{}'), ga_events_list = COALESCE(g.ga_events_list, '{}'),
+        ga_pages_visited = COALESCE(g.ga_pages_visited, '{}'),
+        last_refreshed = NOW()
+      FROM ga_stats g
+      WHERE cp.company_id = $1 AND cp.member_id = g.member_id
+    `, [cid]);
+
+    // 2. Rebuild the unresolved anonymous-visitor list for this company.
+    await pg.query("DELETE FROM app.anonymous_profiles WHERE company_id = $1", [cid]);
+    await pg.query(`
+      INSERT INTO app.anonymous_profiles (
+        company_id, visitor_id, first_seen, last_seen, total_events, page_views, sessions,
+        first_visits, form_starts, form_completes, scroll_events, whatsapp_clicks, file_downloads,
+        click_events, user_engagement, top_source_medium, top_campaign,
+        source_mediums, campaigns, events, pages_visited, last_refreshed
+      )
+      SELECT
+        $1                                                                                                     AS company_id,
+        pe.capsuite_apid                                                                                       AS visitor_id,
+        MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                                      AS first_seen,
+        MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                                      AS last_seen,
+        COUNT(*)                                                                                               AS total_events,
+        SUM(CASE WHEN pe.event_name = 'page_view'                                         THEN 1 ELSE 0 END)  AS page_views,
+        SUM(CASE WHEN pe.event_name = 'session_start'                                     THEN 1 ELSE 0 END)  AS sessions,
+        SUM(CASE WHEN pe.event_name = 'first_visit'                                       THEN 1 ELSE 0 END)  AS first_visits,
+        SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')                  THEN 1 ELSE 0 END)  AS form_starts,
+        SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS form_completes,
+        SUM(CASE WHEN pe.event_name = 'scroll'                                            THEN 1 ELSE 0 END)  AS scroll_events,
+        SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')            THEN 1 ELSE 0 END)  AS whatsapp_clicks,
+        SUM(CASE WHEN pe.event_name = 'file_download'                                    THEN 1 ELSE 0 END)  AS file_downloads,
+        SUM(CASE WHEN pe.event_name IN ('click','click_button')                           THEN 1 ELSE 0 END)  AS click_events,
+        SUM(CASE WHEN pe.event_name = 'user_engagement'                                  THEN 1 ELSE 0 END)  AS user_engagement,
+        MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                                               AS top_source_medium,
+        MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                                               AS top_campaign,
+        ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS source_mediums,
+        ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS campaigns,
+        ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)                 AS events,
+        ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS pages_visited,
+        NOW()                                                                                                 AS last_refreshed
+      FROM ga_landing.path_exploration pe
+      WHERE pe.company_id = $1
+        AND pe.capsuite_apid IS NOT NULL
+        AND pe.capsuite_apid != ''
+        AND pe.capsuite_apid != '(not set)'
+        AND LENGTH(pe.capsuite_apid) > 6
+        AND NOT EXISTS (
+          SELECT 1 FROM app.profile_identities pi
+          WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id'
+            AND pi.identity_value = pe.capsuite_apid
+        )
+      GROUP BY pe.capsuite_apid
+    `, [cid]);
+  }
+  console.log(`Profiles refreshed for ${companyIds.length} company(ies).`);
 }
 
 // ── Read-only Postgres query (GA data, used by AI tool) ───────────────────────
@@ -319,9 +445,9 @@ async function runReadOnlyQuery(query) {
 }
 
 // ── AI system prompt ──────────────────────────────────────────────────────────
-function buildSystemPrompt(customContext = "") {
+function buildSystemPrompt(customContext = "", skillsContext = "", companyId = "") {
   const tableLines = dataDictionary.map((t) => {
-    const schema = TABLE_SCHEMA_MAP[t.table] || "public";
+    const schema = t.schema || TABLE_SCHEMA_MAP[t.table] || "app";
     const fieldLines = t.fields
       .map((f) => {
         let line = `    ${f.name} (${f.type})`;
@@ -339,8 +465,12 @@ function buildSystemPrompt(customContext = "") {
     ? `\n═══ COMPANY CONTEXT (set by the team - treat as ground truth) ═══\n${customContext.trim()}\nUse the above context to personalise your analysis, recommendations, tone, and industry framing. Always defer to this context when making assumptions about the business.\n`
     : "";
 
+  const skillsSection = skillsContext?.trim()
+    ? `\n═══ ACTIVE SKILLS (user-selected instructions for this session) ═══\n${skillsContext.trim()}\n`
+    : "";
+
   return `You are Click AI - an expert marketing data analyst embedded in a Customer Data Platform (CDP). Your mission is to turn raw Google Analytics and membership data into clear, actionable intelligence that grows the business.
-${companyContextSection}
+${companyContextSection}${skillsSection}
 ═══ THINKING PROCESS ═══
 For every question, work through these steps BEFORE writing any response:
 1. What business decision is this user trying to make?
@@ -373,9 +503,14 @@ Lead with the business implication. Then show the numbers.
 PostgreSQL with 4 schemas:
 
 ga_landing - Google Analytics 4 data (traffic, UTM, events, pages, geo, devices)
-public - Membership and CRM data (profiles, attributes, activities, purchases)
-metadata - Data documentation (rarely needed)
-app - Application data (campaigns, segments, reports, pinned charts)
+commerce - Unified eCommerce data synced from the connected store platforms
+  (Shopify today; Shopline/Odoo/WooCommerce later - every row is tagged with
+  source_platform). Tables: commerce.customer, commerce."order" (quote it -
+  "order" is a reserved word), commerce.order_line, commerce.product,
+  commerce.refund, commerce.refund_line, commerce.inventory_level.
+  All company-scoped: ALWAYS filter by company_id.
+manual - CSV-uploaded membership and sales data (manual.membership, manual.sale)
+app - Application data (campaigns, segments, reports, pinned charts, profiles)
 
 APP SCHEMA (query just like other tables):
   app.campaigns - UTM campaigns saved by users
@@ -385,9 +520,11 @@ APP SCHEMA (query just like other tables):
   app.saved_reports - saved analysis reports
   app.pinned_charts - charts pinned to dashboard
 
-  ★ app.customer_profiles - PRE-JOINED member+GA+seminar view (USE THIS for all audience analytics)
-    This table is a denormalised snapshot combining public.membership + GA activity + seminar data.
-    All public.membership columns are present PLUS:
+  ★ app.customer_profiles - the unified golden-record member list (USE THIS for all audience analytics)
+    One row per resolved person per workspace (company_id), stitched from every membership
+    source (manual.membership + commerce.customer; member_source = manual|shopify|shopline|odoo|ga|mixed).
+    Commerce aggregates are pre-computed on it: order_count, total_spend, first_order_date, last_order_date.
+    Carries all the member/demographic columns PLUS pre-aggregated:
       ga_sessions (int)       - matched GA sessions count. 0 = no web activity. Use > 0 for "has web activity".
       ga_total_events (int)   - total GA events
       ga_page_views (int)     - page view count
@@ -410,7 +547,7 @@ APP SCHEMA (query just like other tables):
 ═══ SEGMENT & RECIPIENT QUERY PATTERNS ═══
 Use these exact patterns. These have been verified to work against the real schema.
 
-▸ preview_segment_size (sql_where applied to public.membership):
+▸ preview_segment_size (sql_where applied to app.customer_profiles):
   Email opt-in only:
     sql_where: "is_opt_in_email = true"
   Email opt-in + has web activity:
@@ -453,22 +590,24 @@ Use these exact patterns. These have been verified to work against the real sche
 
 PROFILES PAGE CONTEXT:
   The app has a Profiles page with two tabs:
-  - Customers tab: shows known members from public.membership (2,238 total). Users can filter by reg_channel, education_level, age_group, gender, has GA activity.
-  - Anonymous Profiles tab: shows anonymous GA visitors from ga_landing.path_exploration (grouped by capsuite_apid) who are NOT in membership_ap_mapping (~104K anonymous visitors). Filterable by source_medium and form completion.
+  - Customers tab: shows known members from app.customer_profiles. Users can filter by reg_channel, education_level, age_group, gender, has GA activity.
+  - Anonymous Profiles tab: shows unresolved web visitors from app.anonymous_profiles (one row per capsuite_apid not yet linked to a customer). Filterable by source_medium and form completion.
   When suggesting segments, reference these profile attributes - they map directly to real DB fields.
 
-GA_LANDING & PUBLIC TABLES:
+AVAILABLE TABLES (always filter by company_id):
 ${tableLines}
 
 ═══ SQL RULES ═══
-- Always prefix with schema: ga_landing.utm_daily_performance, public.membership, app.campaigns, etc.
+- Always prefix with schema: ga_landing.utm_daily_performance, app.customer_profiles, app.campaigns, etc.
+- ALWAYS scope to the current workspace: add company_id = '${companyId}' to every query (app.customer_profiles, ga_landing.*, manual.*, commerce.* all have company_id).
+- Commerce data lives in commerce.* (NOT a platform schema); "order" is reserved - write commerce."order".
 - SELECT only - never INSERT, UPDATE, DELETE, DROP, or DDL
 - No semicolons at end of queries
 - Default to last 30 days when no range specified
 - YYYYMMDD date filter: WHERE date >= TO_CHAR(NOW() - INTERVAL '30 days', 'YYYYMMDD')
 - Limit to 100 rows unless user asks for more
 - Run multiple targeted queries rather than one giant query
-- For app schema: SELECT * FROM app.campaigns ORDER BY created_date DESC LIMIT 20
+- For app schema: SELECT * FROM app.campaigns WHERE company_id = '${companyId}' ORDER BY created_date DESC LIMIT 20
 
 ═══ OUTPUT FORMAT ═══
 Structure every substantive response like this:
@@ -494,7 +633,7 @@ Then for context:
 
 **Related insight:** [Something they didn't ask for but should know - query the DB to get the real number]
 
-When you identify a targetable audience, suggest a segment. Use segment_type "customer" for known members (public.membership), or "anonymous_profile" for anonymous GA visitors.
+When you identify a targetable audience, suggest a segment. Use segment_type "customer" for known members (app.customer_profiles), or "anonymous_profile" for anonymous web visitors (app.anonymous_profiles).
 
 BEFORE suggesting a segment:
 1. Call \`list_segments\` to check if a similar segment already exists - avoid duplicates.
@@ -672,59 +811,56 @@ Expected output structure:
 
 Members can be linked to their real GA4 sessions using the Capsuite tracking pixel custom dimensions.
 
+EVERY query must be scoped to the current workspace with company_id = '${companyId}'
+(app.customer_profiles, ga_landing.*, manual.*, commerce.* all carry company_id).
+
 JOIN PATH (for session-level queries):
-  ga_landing.path_exploration pe
-    INNER JOIN public.membership_ap_mapping apm ON pe.capsuite_apid = apm.capsuite_apid
-    INNER JOIN public.membership m ON apm.membership_id = m.member_id
+  app.customer_profiles cp                                    -- the unified member record
+    JOIN app.profile_identities pi
+      ON pi.company_id = cp.company_id AND pi.member_id = cp.member_id AND pi.identity_type = 'anonymous_id'
+    JOIN ga_landing.path_exploration pe
+      ON pe.company_id = cp.company_id AND pe.capsuite_apid = pi.identity_value
 
 KEY COLUMNS:
-  path_exploration.capsuite_apid  - Capsuite application/session ID captured in GA4 as custom dimension
-  path_exploration.capsuite_sid   - Capsuite session ID (secondary identifier, use if apid is empty)
-  membership_ap_mapping.capsuite_apid - same ID, links to membership_id
-  membership_ap_mapping.membership_id - foreign key to membership.member_id
+  customer_profiles.member_id     - person key (unique per company)
+  customer_profiles.ga_visitor_ids- array of that member's GA anonymous ids (capsuite_apid)
+  path_exploration.capsuite_apid  - GA anonymous/visitor id (custom dimension)
+  profile_identities.identity_type/identity_value - the identity graph (email | phone | member_id | anonymous_id)
 
-COVERAGE (as of latest data):
-  - Total members: ~2,238 | Members with ≥1 GA event: 51 (only logged-in sessions are tracked)
-  - Matched GA events: 986 out of 105,387 total (most traffic is anonymous)
-  - Members with ap_mapping entries: ~2,989 (a member can have multiple capsuite_apids)
-  - When you JOIN, you get: member profile + their exact GA journey (pages, events, campaigns, source/medium)
+PREFER THE PRE-JOINED AGGREGATES: app.customer_profiles already carries each member's
+GA activity (ga_sessions, ga_page_views, ga_form_completes, ga_last_seen, ga_top_source_medium…),
+commerce (order_count, total_spend, last_order_date) and offline events (seminar_count,
+seminars JSONB). Use those columns directly instead of re-joining whenever possible.
 
-MEMBER FIELDS USEFUL FOR SEGMENTATION (public.membership):
-  primary_email, eng_full_name, member_id, member_no
-  member_reg_channel (Seminar, Direct, Consultant Referral, etc.)
-  member_join_date (timestamptz)
+MEMBER FIELDS USEFUL FOR SEGMENTATION (app.customer_profiles):
+  primary_email, eng_full_name, member_id, member_no, member_source (manual|shopify|ga|mixed)
+  member_reg_channel, member_join_date (timestamptz)
   gender, age_group, education_level, income_level, employment_status
   nationality, preferred_language, preferred_channel
   is_opt_in_email, is_subscriber_only
 
-OFFLINE EVENTS (public.membership_custom_activity):
-  capsuite_ref, membership_id, event_date, event_ref_id, event_name (seminar/webinar names), action (submit)
-  - 3,361 events tracking seminar registrations and form submissions by members
-  - JOIN to membership: WHERE mc.membership_id = m.member_id
-  - Combine with GA path_exploration to get: who registered → did they also visit the website?
+OFFLINE EVENTS: app.customer_profiles.seminar_count (int) and seminars (JSONB array of
+  {event_name, event_date, action}); expand with jsonb_array_elements(seminars).
 
-EXAMPLE QUERIES:
+EXAMPLE QUERIES (always include company_id):
   -- Members who completed a GA form event + their profile:
-  SELECT m.eng_full_name, m.member_reg_channel, m.education_level, pe.session_campaign_name, pe.session_source_medium
-  FROM ga_landing.path_exploration pe
-  INNER JOIN public.membership_ap_mapping apm ON pe.capsuite_apid = apm.capsuite_apid
-  INNER JOIN public.membership m ON apm.membership_id = m.member_id
-  WHERE pe.event_name IN ('Event_Form_Complete','form_submit')
+  SELECT cp.eng_full_name, cp.member_reg_channel, cp.education_level, pe.session_campaign_name, pe.session_source_medium
+  FROM app.customer_profiles cp
+  JOIN app.profile_identities pi ON pi.company_id = cp.company_id AND pi.member_id = cp.member_id AND pi.identity_type = 'anonymous_id'
+  JOIN ga_landing.path_exploration pe ON pe.company_id = cp.company_id AND pe.capsuite_apid = pi.identity_value
+  WHERE cp.company_id = '${companyId}' AND pe.event_name IN ('Event_Form_Complete','form_submit')
 
-  -- Top campaigns reaching known members:
-  SELECT pe.session_campaign_name, pe.session_source_medium, COUNT(DISTINCT apm.membership_id) as members
-  FROM ga_landing.path_exploration pe
-  INNER JOIN public.membership_ap_mapping apm ON pe.capsuite_apid = apm.capsuite_apid
-  GROUP BY pe.session_campaign_name, pe.session_source_medium ORDER BY members DESC
+  -- Top traffic sources reaching known members (pre-aggregated, no join):
+  SELECT ga_top_source_medium, ga_top_campaign, COUNT(*) AS members
+  FROM app.customer_profiles
+  WHERE company_id = '${companyId}' AND ga_sessions > 0
+  GROUP BY ga_top_source_medium, ga_top_campaign ORDER BY members DESC
 
-  -- Members with seminar activity + their GA web visits:
-  SELECT m.eng_full_name, mc.event_name as seminar, mc.event_date,
-    COUNT(pe.capsuite_apid) as web_events
-  FROM public.membership m
-  INNER JOIN public.membership_custom_activity mc ON mc.membership_id = m.member_id
-  LEFT JOIN public.membership_ap_mapping apm ON apm.membership_id = m.member_id
-  LEFT JOIN ga_landing.path_exploration pe ON pe.capsuite_apid = apm.capsuite_apid
-  GROUP BY m.eng_full_name, mc.event_name, mc.event_date ORDER BY web_events DESC
+  -- Members with seminar activity:
+  SELECT eng_full_name, seminar_count, seminars
+  FROM app.customer_profiles
+  WHERE company_id = '${companyId}' AND seminar_count > 0
+  ORDER BY seminar_count DESC
 
 ═══ BEHAVIOUR RULES ═══
 1. ALWAYS call tools and query the database FIRST - never state any specific number without a tool result to back it. If you don't have a tool result for a number, say "I couldn't get a live count" instead of inventing one.
@@ -734,7 +870,7 @@ EXAMPLE QUERIES:
 5. Surface one related insight proactively - the thing they didn't ask for but should know.
 6. For UTM questions/optimisation: call \`analyze_utm_performance\` first to identify top AND bottom performers, then suggest specific improvements. Only output a utm_link block when the user asks for one.
 7. For segmentation: cross-reference GA behaviour with membership data using the JOIN PATH. Call \`preview_segment_size\` with the exact SQL WHERE before outputting the segment block - estimated_size must equal that result.
-8. For member analysis: use the JOIN PATH; remember only ~51 members have GA data (logged-in sessions); use membership_custom_activity for offline events.
+8. For member analysis: prefer the pre-aggregated columns on app.customer_profiles (ga_sessions, order_count, seminar_count) and only use the JOIN PATH for event-level detail; use customer_profiles.seminars (JSONB) for offline events.
 9. For "create campaigns / suggest campaigns for [audience]": follow the COMBINED CAMPAIGN RESPONSE PATTERN above - verify audience with tools first, then chart → segment → edm → ask about UTM.
 10. Keep responses focused - one big insight beats five mediocre ones.
 11. If the user has existing campaigns or segments (shown in context), reference them when relevant rather than creating duplicates.
@@ -806,8 +942,8 @@ Tailor bgColor/color to match the campaign tone:
   "name": "Campaign name - specific and descriptive",
   "subject": "Subject under 50 chars with {{first_name}}",
   "preview_text": "One sentence shown before email opens in inbox",
-  "from_name": "Click AI",
-  "from_email": "onboarding@resend.dev",
+  "from_name": "leave blank - populated from company email defaults",
+  "from_email": "leave blank - populated from company email defaults",
   "estimated_recipients": 342,
   "segment_description": "Who this targets and why - describe the criteria",
   "segment_id": "uuid-if-you-found-one-from-list_segments-or-omit",
@@ -882,15 +1018,18 @@ IMPORTANT EDM RULES:
 // ── AI agent loop (MCP-based) ─────────────────────────────────────────────────
 // Tools are served by the MCP server (server/mcp/server.js).
 // Tool groups: DB Connector, Segments, UTM - all read-only; no writes without user approval.
-async function runAnalystAgent(messages) {
+async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
   if (!aiClient) throw new Error("Azure OpenAI is not configured.");
   if (!mcpClient) throw new Error("MCP analyst server is not initialized.");
 
-  // Load company context from settings
+  // Load this workspace's analyst context from settings (company-scoped)
   let customContext = "";
-  if (pool) {
+  if (pool && companyId) {
     try {
-      const { rows } = await pool.query("SELECT value FROM app.settings WHERE key = 'analyst_system_prompt'");
+      const { rows } = await pool.query(
+        "SELECT value FROM app.settings WHERE key = 'analyst_system_prompt' AND company_id = $1",
+        [companyId]
+      );
       customContext = rows[0]?.value || "";
     } catch { /* table might not exist yet - safe to ignore */ }
   }
@@ -900,11 +1039,14 @@ async function runAnalystAgent(messages) {
   const aiTools = toOpenAITools(mcpTools);
 
   const aiMessages = [
-    { role: "system", content: buildSystemPrompt(customContext) },
+    { role: "system", content: buildSystemPrompt(customContext, skillsContext, companyId) },
     ...messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({ role: m.role, content: m.content || "" })),
   ];
+
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   for (let i = 0; i < 12; i++) {
     const response = await aiClient.chat.completions.create({
@@ -915,6 +1057,11 @@ async function runAnalystAgent(messages) {
       max_completion_tokens: 8192,
       temperature: 0.3,
     });
+
+    if (response.usage) {
+      totalInputTokens += response.usage.prompt_tokens || 0;
+      totalOutputTokens += response.usage.completion_tokens || 0;
+    }
 
     const choice = response.choices[0];
     const msg = choice.message;
@@ -936,10 +1083,16 @@ async function runAnalystAgent(messages) {
       continue;
     }
 
-    return msg.content || "";
+    return {
+      content: msg.content || "",
+      usage: { input: totalInputTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
+    };
   }
 
-  return "I reached the analysis limit for this request. Please try a more specific question.";
+  return {
+    content: "I reached the analysis limit for this request. Please try a more specific question.",
+    usage: { input: totalInputTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
+  };
 }
 
 // ── Simple LLM call (chart editor, explainers) ────────────────────────────────
@@ -982,8 +1135,8 @@ app.get("/api/entities/:entity", authenticate, async (req, res) => {
     const limit = req.query.limit ? Math.min(Number(req.query.limit), 1000) : 500;
 
     if (config.multiTenant) {
-      const companyId = req.headers["x-company-id"];
-      if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+      const companyId = await companyGuard(req, res);
+      if (!companyId) return;
       const { rows } = await p.query(
         `SELECT * FROM ${config.table}
          WHERE company_id = $1
@@ -1012,8 +1165,8 @@ app.post("/api/entities/:entity", authenticate, async (req, res) => {
     const cols = pickColumns(req.body, config.columns);
 
     if (config.multiTenant) {
-      const companyId = req.headers["x-company-id"];
-      if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+      const companyId = await companyGuard(req, res);
+      if (!companyId) return;
       const allCols = [...cols, "company_id", "created_by"];
       const placeholders = allCols.map((_, i) => `$${i + 1}`).join(", ");
       const values = [...cols.map((c) => req.body[c]), companyId, req.user.id];
@@ -1050,8 +1203,8 @@ app.patch("/api/entities/:entity/:id", authenticate, async (req, res) => {
     if (cols.length === 0) return res.status(400).json({ error: "No valid fields to update." });
 
     if (config.multiTenant) {
-      const companyId = req.headers["x-company-id"];
-      if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+      const companyId = await companyGuard(req, res);
+      if (!companyId) return;
 
       // Only the creator or an admin/owner can edit
       const { rows: owned } = await p.query(
@@ -1099,8 +1252,8 @@ app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
     const p = requirePool();
 
     if (config.multiTenant) {
-      const companyId = req.headers["x-company-id"];
-      if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+      const companyId = await companyGuard(req, res);
+      if (!companyId) return;
       const { rows: item } = await p.query(
         `SELECT created_by FROM ${config.table} WHERE id = $1 AND company_id = $2`,
         [req.params.id, companyId]
@@ -1128,8 +1281,8 @@ app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
 app.get("/api/agents/conversations", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     const params = [companyId];
     let q = "SELECT * FROM app.conversations WHERE company_id = $1";
     if (req.query.agent_name) {
@@ -1147,8 +1300,8 @@ app.get("/api/agents/conversations", authenticate, async (req, res) => {
 app.post("/api/agents/conversations", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     const { rows } = await p.query(
       `INSERT INTO app.conversations (company_id, agent_name, metadata)
        VALUES ($1, $2, $3) RETURNING *`,
@@ -1163,8 +1316,8 @@ app.post("/api/agents/conversations", authenticate, async (req, res) => {
 app.get("/api/agents/conversations/:id", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     const { rows } = await p.query(
       "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2",
       [req.params.id, companyId]
@@ -1179,8 +1332,8 @@ app.get("/api/agents/conversations/:id", authenticate, async (req, res) => {
 app.patch("/api/agents/conversations/:id", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     const allowed = new Set(["title", "metadata", "status"]);
     const cols = pickColumns(req.body, allowed);
     if (cols.length === 0) return res.status(400).json({ error: "No valid fields to update." });
@@ -1207,8 +1360,8 @@ app.patch("/api/agents/conversations/:id", authenticate, async (req, res) => {
 app.delete("/api/agents/conversations/:id", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2", [req.params.id, companyId]);
     res.json({ ok: true });
   } catch (err) {
@@ -1220,8 +1373,8 @@ app.delete("/api/agents/conversations/:id", authenticate, async (req, res) => {
 app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
 
     // Fetch current conversation
     const { rows: convRows } = await p.query(
@@ -1253,12 +1406,29 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
 
     // Run AI in background
     const convId = req.params.id;
-    const agentName = conv.agent_name;
 
     (async () => {
+      // Fetch active context skills from conversation metadata
+      let skillsContext = "";
+      const activeSkillIds = conv.metadata?.active_skill_ids;
+      if (p && Array.isArray(activeSkillIds) && activeSkillIds.length > 0) {
+        try {
+          const { rows: skillRows } = await p.query(
+            "SELECT name, content FROM app.skills WHERE id = ANY($1::uuid[]) AND type = 'context' AND is_active = true",
+            [activeSkillIds]
+          );
+          if (skillRows.length > 0) {
+            skillsContext = skillRows.map((s) => `### ${s.name}\n${s.content}`).join("\n\n");
+          }
+        } catch { /* skills table may not exist yet */ }
+      }
+
       let replyContent;
+      let usage = { input: 0, output: 0, total: 0 };
       try {
-        replyContent = await runAnalystAgent(updatedMessages);
+        const result = await runAnalystAgent(updatedMessages, skillsContext, companyId);
+        replyContent = result.content;
+        usage = result.usage;
       } catch (err) {
         console.error("AI agent error:", err.message);
         replyContent = `I encountered an error while processing your request: ${err.message}`;
@@ -1268,20 +1438,29 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
         role: "assistant",
         content: replyContent,
         created_date: new Date().toISOString(),
+        token_usage: usage,
       };
 
       const { rows: finalConv } = await p.query(
-        "SELECT messages FROM app.conversations WHERE id = $1",
+        "SELECT messages, metadata FROM app.conversations WHERE id = $1",
         [convId]
       );
       if (finalConv.length === 0) return;
 
       const finalMessages = [...(finalConv[0].messages || []), assistantMsg];
+      const existingUsage = finalConv[0].metadata?.token_usage || { input: 0, output: 0, total: 0 };
+      const newTokenUsage = {
+        input: (existingUsage.input || 0) + usage.input,
+        output: (existingUsage.output || 0) + usage.output,
+        total: (existingUsage.total || 0) + usage.total,
+      };
+
       await p.query(
         `UPDATE app.conversations
-         SET messages = $1::jsonb, status = 'idle', updated_date = NOW()
+         SET messages = $1::jsonb, status = 'idle', updated_date = NOW(),
+             metadata = metadata || $3::jsonb
          WHERE id = $2`,
-        [JSON.stringify(finalMessages), convId]
+        [JSON.stringify(finalMessages), convId, JSON.stringify({ token_usage: newTokenUsage })]
       );
     })().catch(console.error);
   } catch (err) {
@@ -1289,9 +1468,130 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
   }
 });
 
+// ── Skills ────────────────────────────────────────────────────────────────────
+
+app.get("/api/skills", authenticate, async (req, res) => {
+  try {
+    const p = requirePool();
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
+    const { rows } = await p.query(
+      `SELECT s.*, u.full_name AS creator_name, u.email AS creator_email
+       FROM app.skills s
+       LEFT JOIN app.users u ON u.id = s.created_by
+       WHERE s.company_id = $1
+       ORDER BY s.type, s.name`,
+      [companyId]
+    );
+    res.json(rows.map(normalizeRow));
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.post("/api/skills", authenticate, async (req, res) => {
+  try {
+    const p = requirePool();
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
+    const { name, description = "", content = "", type = "context", icon } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+    const { rows } = await p.query(
+      `INSERT INTO app.skills (company_id, created_by, name, description, content, type, icon)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [companyId, req.user.id, name.trim(), description, content, type, icon || null]
+    );
+    // Re-fetch with creator info
+    const { rows: full } = await p.query(
+      `SELECT s.*, u.full_name AS creator_name, u.email AS creator_email
+       FROM app.skills s LEFT JOIN app.users u ON u.id = s.created_by
+       WHERE s.id = $1`,
+      [rows[0].id]
+    );
+    res.status(201).json(normalizeRow(full[0]));
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.patch("/api/skills/:id", authenticate, async (req, res) => {
+  try {
+    const p = requirePool();
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
+
+    // Permission: creator or owner/admin
+    const { rows: existing } = await p.query(
+      "SELECT created_by FROM app.skills WHERE id = $1 AND company_id = $2",
+      [req.params.id, companyId]
+    );
+    if (existing.length === 0) return res.status(404).json({ error: "Skill not found" });
+    if (existing[0].created_by !== req.user.id) {
+      const { rows: memberRows } = await p.query(
+        "SELECT role FROM app.company_members WHERE company_id = $1 AND user_id = $2 AND status = 'active'",
+        [companyId, req.user.id]
+      );
+      if (!["owner", "admin"].includes(memberRows[0]?.role)) {
+        return res.status(403).json({ error: "Only the creator or an admin can edit this skill" });
+      }
+    }
+
+    const allowed = new Set(["name", "description", "content", "type", "icon", "is_active"]);
+    const cols = pickColumns(req.body, allowed);
+    if (cols.length === 0) return res.status(400).json({ error: "No valid fields to update." });
+    const values = [...cols.map((c) => req.body[c]), req.params.id, companyId];
+    const setClauses = cols.map((c, i) => `${c} = $${i + 1}`).join(", ");
+    await p.query(
+      `UPDATE app.skills SET ${setClauses} WHERE id = $${values.length - 1} AND company_id = $${values.length}`,
+      values
+    );
+    const { rows: full } = await p.query(
+      `SELECT s.*, u.full_name AS creator_name, u.email AS creator_email
+       FROM app.skills s LEFT JOIN app.users u ON u.id = s.created_by
+       WHERE s.id = $1`,
+      [req.params.id]
+    );
+    res.json(normalizeRow(full[0]));
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.delete("/api/skills/:id", authenticate, async (req, res) => {
+  try {
+    const p = requirePool();
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
+
+    // Permission: creator or owner/admin
+    const { rows: existing } = await p.query(
+      "SELECT created_by FROM app.skills WHERE id = $1 AND company_id = $2",
+      [req.params.id, companyId]
+    );
+    if (existing.length === 0) return res.status(404).json({ error: "Skill not found" });
+    if (existing[0].created_by !== req.user.id) {
+      const { rows: memberRows } = await p.query(
+        "SELECT role FROM app.company_members WHERE company_id = $1 AND user_id = $2 AND status = 'active'",
+        [companyId, req.user.id]
+      );
+      if (!["owner", "admin"].includes(memberRows[0]?.role)) {
+        return res.status(403).json({ error: "Only the creator or an admin can delete this skill" });
+      }
+    }
+
+    await p.query("DELETE FROM app.skills WHERE id = $1 AND company_id = $2", [req.params.id, companyId]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 // ── Functions ─────────────────────────────────────────────────────────────────
 
-app.post("/api/functions/queryPostgres", async (req, res) => {
+// NOTE: arbitrary read-only SQL with no tenant scoping - kept only for legacy/AI
+// internal use. UTM and other UI features must use the company-scoped routes
+// (e.g. /api/utm/*). Requires authentication.
+app.post("/api/functions/queryPostgres", authenticate, async (req, res) => {
   try {
     const result = await runReadOnlyQuery(req.body.query);
     res.json({ data: result });
@@ -1303,8 +1603,8 @@ app.post("/api/functions/queryPostgres", async (req, res) => {
 app.post("/api/functions/deleteConversation", authenticate, async (req, res) => {
   try {
     const p = requirePool();
-    const companyId = req.headers["x-company-id"];
-    if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
     await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2", [req.body.conversation_id, companyId]);
     res.json({ ok: true });
   } catch (err) {
@@ -1372,11 +1672,13 @@ Be plain, specific, and business-focused. Reference actual numbers from the data
 // ── Profiles: refresh trigger ─────────────────────────────────────────────────
 app.post("/api/profiles/refresh", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
-    await refreshProfiles(pool);
+    await refreshProfiles(pool, companyId);
     const [c, a] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM app.customer_profiles"),
-      pool.query("SELECT COUNT(*) FROM app.anonymous_profiles"),
+      pool.query("SELECT COUNT(*) FROM app.customer_profiles WHERE company_id = $1", [companyId]),
+      pool.query("SELECT COUNT(*) FROM app.anonymous_profiles WHERE company_id = $1", [companyId]),
     ]);
     res.json({ ok: true, customers: parseInt(c.rows[0].count), anonymous: parseInt(a.rows[0].count) });
   } catch (err) {
@@ -1387,8 +1689,8 @@ app.post("/api/profiles/refresh", authenticate, async (req, res) => {
 // ── Profiles: Customers (reads from app.customer_profiles) ────────────────────
 app.get("/api/profiles/customers", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const {
       search = "", page = "1", limit = "20",
@@ -1397,26 +1699,34 @@ app.get("/api/profiles/customers", authenticate, async (req, res) => {
       has_ga, min_ga_sessions,
       opt_in_email, opt_in_sms, is_subscriber,
       has_seminars, has_attributes, is_imported,
+      has_transactions, min_orders, min_spend, ordered_within,
+      attribute_value_ids, attr_groups,
+      sort, dir,
     } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    // Show global GA-synced profiles (company_id IS NULL) plus this company's imported profiles
+    // Profiles are fully company-scoped in the unified schema.
     const params = [companyId];
-    const conditions = ["(company_id IS NULL OR company_id = $1)"];
+    const conditions = ["company_id = $1"];
+    // Multi-select demographic fields arrive comma-separated → match any (IN/ANY).
+    const addIn = (raw, col) => {
+      const vals = String(raw || "").split(",").map(s => s.trim()).filter(Boolean);
+      if (vals.length) { params.push(vals); conditions.push(`${col} = ANY($${params.length}::text[])`); }
+    };
 
     if (search) {
       params.push(`%${search.toLowerCase()}%`);
-      conditions.push(`(LOWER(eng_full_name) LIKE $${params.length} OR LOWER(primary_email) LIKE $${params.length} OR member_no LIKE $${params.length})`);
+      conditions.push(`(LOWER(eng_full_name) LIKE $${params.length} OR LOWER(primary_email) LIKE $${params.length} OR LOWER(member_no) LIKE $${params.length} OR LOWER(customer_profiles.member_id) LIKE $${params.length})`);
     }
-    if (reg_channel)        { params.push(reg_channel);        conditions.push(`member_reg_channel = $${params.length}`); }
-    if (education_level)    { params.push(education_level);    conditions.push(`education_level = $${params.length}`); }
-    if (age_group)          { params.push(age_group);          conditions.push(`age_group = $${params.length}`); }
-    if (gender)             { params.push(gender);             conditions.push(`gender = $${params.length}`); }
-    if (nationality)        { params.push(nationality);        conditions.push(`nationality = $${params.length}`); }
-    if (preferred_language) { params.push(preferred_language); conditions.push(`preferred_language = $${params.length}`); }
-    if (employment_status)  { params.push(employment_status);  conditions.push(`employment_status = $${params.length}`); }
-    if (income_level)       { params.push(income_level);       conditions.push(`income_level = $${params.length}`); }
-    if (member_type)        { params.push(member_type);        conditions.push(`member_type = $${params.length}`); }
-    if (preferred_channel)  { params.push(preferred_channel);  conditions.push(`preferred_channel = $${params.length}`); }
+    addIn(reg_channel,        "member_reg_channel");
+    addIn(education_level,    "education_level");
+    addIn(age_group,          "age_group");
+    addIn(gender,             "gender");
+    addIn(nationality,        "nationality");
+    addIn(preferred_language, "preferred_language");
+    addIn(employment_status,  "employment_status");
+    addIn(income_level,       "income_level");
+    addIn(member_type,        "member_type");
+    addIn(preferred_channel,  "preferred_channel");
     if (has_ga === "true")        conditions.push("ga_sessions > 0");
     if (min_ga_sessions)          { params.push(parseInt(min_ga_sessions)); conditions.push(`ga_sessions >= $${params.length}`); }
     if (opt_in_email === "true")  conditions.push("is_opt_in_email = true");
@@ -1425,14 +1735,66 @@ app.get("/api/profiles/customers", authenticate, async (req, res) => {
     if (is_subscriber === "true") conditions.push("is_subscriber_only = true");
     if (has_seminars === "true")  conditions.push("seminar_count > 0");
     if (has_attributes === "true") conditions.push("attribute_count > 0");
-    if (is_imported === "true")   conditions.push("is_imported = true");
+    if (is_imported === "true")   conditions.push("is_manual = true");
+    // Transaction (Shopify sale) filters - reference the `txn` aggregate join below.
+    if (has_transactions === "true") conditions.push("COALESCE(txn.order_count, 0) > 0");
+    if (min_orders) { params.push(parseInt(min_orders));   conditions.push(`COALESCE(txn.order_count, 0) >= $${params.length}`); }
+    if (min_spend)  { params.push(parseFloat(min_spend));  conditions.push(`COALESCE(txn.total_spend, 0) >= $${params.length}`); }
+    if (ordered_within) { params.push(parseInt(ordered_within)); conditions.push(`txn.last_order_date >= NOW() - make_interval(days => $${params.length})`); }
+    // Applied-attribute filters: each group (one per attribute) ANDs, values within a group OR.
+    // `attr_groups` = "v1,v2;v3"; legacy `attribute_value_ids` = "v1,v2" is treated as one group.
+    const attrGroups = String(attr_groups || attribute_value_ids || "")
+      .split(";").map(g => g.split(",").map(s => s.trim()).filter(Boolean)).filter(g => g.length);
+    for (const group of attrGroups) {
+      params.push(group);
+      conditions.push(`EXISTS (SELECT 1 FROM app.profile_attribute_values pav
+        JOIN app.attributes pa ON pa.id = pav.attribute_id AND pa.status = 'active'
+        WHERE pav.entity_type = 'customer' AND pav.entity_id = customer_profiles.member_id
+          AND pav.attribute_value_id = ANY($${params.length}::uuid[]))`);
+    }
 
     const where = `WHERE ${conditions.join(" AND ")}`;
+    // Per-member purchase aggregates, company-scoped and source-agnostic (synced
+    // commerce + manual sales). Members with no sales get NULL → COALESCE'd to 0.
+    const txnJoin = `
+      LEFT JOIN (
+        SELECT member_id,
+               COUNT(*)                                  AS order_count,
+               COALESCE(SUM(net_amount), 0)              AS total_spend,
+               MAX(order_date)                           AS last_order_date,
+               MIN(order_date)                           AS first_order_date,
+               MODE() WITHIN GROUP (ORDER BY currency)   AS order_currency
+          FROM (
+            SELECT customer_id AS member_id, net_amount, currency, order_date
+              FROM commerce."order" WHERE company_id = $1 AND order_status IN ('completed','confirmed')
+            UNION ALL
+            SELECT member_id, trxn_original_net_amt, trxn_original_net_currency, trxn_date
+              FROM manual.sale  WHERE company_id = $1 AND trxn_order_status IN ('completed','confirmed')
+          ) all_sales
+         WHERE member_id IS NOT NULL
+         GROUP BY member_id
+      ) txn ON txn.member_id = customer_profiles.member_id`;
+    const from = `FROM app.customer_profiles ${txnJoin} ${where}`;
+    // Whitelisted sort column + direction (order_count/total_spend are SELECT aliases).
+    const CUST_SORT = {
+      join_date: "member_join_date", name: "eng_full_name", orders: "order_count",
+      spend: "total_spend", last_order: "txn.last_order_date", sessions: "ga_sessions",
+      last_seen: "ga_last_seen",
+    };
+    const orderCol = CUST_SORT[sort] || "member_join_date";
+    const orderDir = String(dir).toLowerCase() === "asc" ? "ASC" : "DESC";
     params.push(parseInt(limit), offset);
 
     const [result, countResult] = await Promise.all([
-      pool.query(`SELECT * FROM app.customer_profiles ${where} ORDER BY member_join_date DESC NULLS LAST LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
-      pool.query(`SELECT COUNT(*) FROM app.customer_profiles ${where}`, params.slice(0, params.length - 2)),
+      pool.query(`SELECT customer_profiles.*,
+                         customer_profiles.is_manual AS is_imported,
+                         COALESCE(txn.order_count, 0) AS order_count,
+                         COALESCE(txn.total_spend, 0) AS total_spend,
+                         txn.last_order_date, txn.first_order_date, txn.order_currency
+                  ${from}
+                  ORDER BY ${orderCol} ${orderDir} NULLS LAST
+                  LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
+      pool.query(`SELECT COUNT(*) ${from}`, params.slice(0, params.length - 2)),
     ]);
     res.json({ profiles: result.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
@@ -1442,11 +1804,12 @@ app.get("/api/profiles/customers", authenticate, async (req, res) => {
 
 app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
-    const scope = "(company_id IS NULL OR company_id = $1)";
-    const [channels, educations, ages, genders, nationalities, languages, employments, incomes, memberTypes, prefChannels] = await Promise.all([
+    const scope = "company_id = $1";
+    const webScope = `${scope} AND %COL% IS NOT NULL AND %COL% NOT IN ('', '(not set)')`;
+    const [channels, educations, ages, genders, nationalities, languages, employments, incomes, memberTypes, prefChannels, sourceMediums, sources, mediums, campaigns] = await Promise.all([
       pool.query(`SELECT DISTINCT member_reg_channel FROM app.customer_profiles WHERE ${scope} AND member_reg_channel IS NOT NULL ORDER BY member_reg_channel`, [companyId]),
       pool.query(`SELECT DISTINCT education_level FROM app.customer_profiles WHERE ${scope} AND education_level IS NOT NULL ORDER BY education_level`, [companyId]),
       pool.query(`SELECT DISTINCT age_group FROM app.customer_profiles WHERE ${scope} AND age_group IS NOT NULL ORDER BY age_group`, [companyId]),
@@ -1457,6 +1820,10 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
       pool.query(`SELECT DISTINCT income_level FROM app.customer_profiles WHERE ${scope} AND income_level IS NOT NULL ORDER BY income_level`, [companyId]),
       pool.query(`SELECT DISTINCT member_type FROM app.customer_profiles WHERE ${scope} AND member_type IS NOT NULL ORDER BY member_type`, [companyId]),
       pool.query(`SELECT DISTINCT preferred_channel FROM app.customer_profiles WHERE ${scope} AND preferred_channel IS NOT NULL ORDER BY preferred_channel`, [companyId]),
+      pool.query(`SELECT DISTINCT ga_top_source_medium FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_source_medium")} ORDER BY ga_top_source_medium`, [companyId]),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(ga_top_source_medium, ' / ', 1)) AS s FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_source_medium")} ORDER BY s`, [companyId]),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(ga_top_source_medium, ' / ', 2)) AS m FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_source_medium")} ORDER BY m`, [companyId]),
+      pool.query(`SELECT DISTINCT ga_top_campaign FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_campaign")} ORDER BY ga_top_campaign`, [companyId]),
     ]);
     res.json({
       reg_channels: channels.rows.map(r => r.member_reg_channel),
@@ -1469,6 +1836,10 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
       income_levels: incomes.rows.map(r => r.income_level),
       member_types: memberTypes.rows.map(r => r.member_type),
       preferred_channels: prefChannels.rows.map(r => r.preferred_channel),
+      source_mediums: sourceMediums.rows.map(r => r.ga_top_source_medium),
+      sources: sources.rows.map(r => r.s).filter(s => s && s !== '(not set)'),
+      mediums: mediums.rows.map(r => r.m).filter(m => m && m !== '(not set)'),
+      campaigns: campaigns.rows.map(r => r.ga_top_campaign),
     });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -1479,20 +1850,43 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
 app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
-    const { search = "", page = "1", limit = "20", source_medium, has_form_complete } = req.query;
+    const { search = "", page = "1", limit = "20", source_medium, source, medium, has_form_complete, attribute_value_ids, attr_groups, sort, dir } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [];
     const conditions = [];
 
     if (search)       { params.push(`%${search.toLowerCase()}%`); conditions.push(`LOWER(visitor_id) LIKE $${params.length}`); }
-    if (source_medium){ params.push(source_medium); conditions.push(`$${params.length} = ANY(source_mediums)`); }
+    // source_mediums is an array of "source / medium" strings.
+    const sourceMediums = String(source_medium || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (sourceMediums.length) { params.push(sourceMediums); conditions.push(`source_mediums && $${params.length}::text[]`); }
+    // Separate source / medium: match the split parts of any element of source_mediums.
+    const sources = String(source || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (sources.length) { params.push(sources); conditions.push(`EXISTS (SELECT 1 FROM unnest(source_mediums) sm WHERE TRIM(split_part(sm, ' / ', 1)) = ANY($${params.length}::text[]))`); }
+    const mediums = String(medium || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (mediums.length) { params.push(mediums); conditions.push(`EXISTS (SELECT 1 FROM unnest(source_mediums) sm WHERE TRIM(split_part(sm, ' / ', 2)) = ANY($${params.length}::text[]))`); }
     if (has_form_complete === "true") conditions.push("form_completes > 0");
+    // Applied-attribute filters: each group (one per attribute) ANDs, values within a group OR.
+    const attrGroups = String(attr_groups || attribute_value_ids || "")
+      .split(";").map(g => g.split(",").map(s => s.trim()).filter(Boolean)).filter(g => g.length);
+    for (const group of attrGroups) {
+      params.push(group);
+      conditions.push(`EXISTS (SELECT 1 FROM app.profile_attribute_values pav
+        JOIN app.attributes pa ON pa.id = pav.attribute_id AND pa.status = 'active'
+        WHERE pav.entity_type = 'anonymous' AND pav.entity_id = anonymous_profiles.visitor_id
+          AND pav.attribute_value_id = ANY($${params.length}::uuid[]))`);
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const ANON_SORT = {
+      events: "total_events", page_views: "page_views", sessions: "sessions",
+      last_seen: "last_seen", first_seen: "first_seen",
+    };
+    const orderCol = ANON_SORT[sort] || "total_events";
+    const orderDir = String(dir).toLowerCase() === "asc" ? "ASC" : "DESC";
     params.push(parseInt(limit), offset);
 
     const [result, countResult] = await Promise.all([
-      pool.query(`SELECT * FROM app.anonymous_profiles ${where} ORDER BY total_events DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
+      pool.query(`SELECT * FROM app.anonymous_profiles ${where} ORDER BY ${orderCol} ${orderDir} NULLS LAST LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
       pool.query(`SELECT COUNT(*) FROM app.anonymous_profiles ${where}`, params.slice(0, params.length - 2)),
     ]);
     res.json({ profiles: result.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
@@ -1504,10 +1898,148 @@ app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
 app.get("/api/profiles/anonymous-filters", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
   try {
-    const r = await pool.query(`
-      SELECT DISTINCT UNNEST(source_mediums) AS sm FROM app.anonymous_profiles ORDER BY sm
-    `);
-    res.json({ source_mediums: r.rows.map(x => x.sm).filter(Boolean) });
+    const [sm, src, med, camp] = await Promise.all([
+      pool.query(`SELECT DISTINCT UNNEST(source_mediums) AS sm FROM app.anonymous_profiles ORDER BY sm`),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 1)) AS s FROM app.anonymous_profiles ORDER BY s`),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 2)) AS m FROM app.anonymous_profiles ORDER BY m`),
+      pool.query(`SELECT DISTINCT top_campaign AS c FROM app.anonymous_profiles WHERE top_campaign IS NOT NULL AND top_campaign NOT IN ('', '(not set)') ORDER BY top_campaign`),
+    ]);
+    res.json({
+      source_mediums: sm.rows.map(x => x.sm).filter(Boolean),
+      sources: src.rows.map(x => x.s).filter(s => s && s !== '(not set)'),
+      mediums: med.rows.map(x => x.m).filter(m => m && m !== '(not set)'),
+      campaigns: camp.rows.map(x => x.c).filter(Boolean),
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: Analytics (aggregates over customer + anonymous profiles) ───────
+app.get("/api/profiles/analytics", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { from = "", to = "" } = req.query;
+    const scope = "company_id = $1";
+
+    // Date window. Empty range = all-time (default, unchanged). When a range is set
+    // every metric is scoped to it - customers by member_join_date, anonymous by
+    // last_seen - so the period filter, and period comparison, are meaningful.
+    const dParams = [companyId];
+    let dClause = "";
+    if (from) { dParams.push(from); dClause += ` AND member_join_date >= $${dParams.length}`; }
+    if (to)   { dParams.push(to);   dClause += ` AND member_join_date <= ($${dParams.length}::date + 1)`; }
+
+    const aParams = [];
+    let aClause = "";
+    if (from) { aParams.push(from); aClause += ` AND last_seen >= $${aParams.length}`; }
+    if (to)   { aParams.push(to);   aClause += ` AND last_seen <= ($${aParams.length}::date + 1)`; }
+    const aWhere = aClause ? `WHERE ${aClause.replace(/^ AND /, "")}` : "";
+
+    // Categorical breakdown over customer_profiles, excluding blanks/(not set).
+    const groupQ = (col, { excludeNotSet = false } = {}) => pool.query(
+      `SELECT ${col} AS name, COUNT(*)::int AS value
+         FROM app.customer_profiles
+        WHERE ${scope} AND ${col} IS NOT NULL AND ${col} <> ''
+              ${excludeNotSet ? `AND ${col} NOT IN ('(not set)', '(none)')` : ""}${dClause}
+        GROUP BY ${col} ORDER BY value DESC LIMIT 12`,
+      dParams
+    );
+
+    const [
+      kpis, newOverTime, newInRange,
+      ageGroup, gender, education, income, nationality, memberType,
+      channels, sources, consent, engagement,
+      anon, anonSources, withPurchases,
+    ] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS total_customers,
+                COUNT(*) FILTER (WHERE is_opt_in_email::text = 'true')::int AS opt_in_email,
+                COUNT(*) FILTER (WHERE ga_sessions > 0)::int                AS web_active,
+                COUNT(*) FILTER (WHERE seminar_count > 0)::int              AS with_seminars,
+                COUNT(*) FILTER (WHERE attribute_count > 0)::int            AS with_attributes
+           FROM app.customer_profiles WHERE ${scope}${dClause}`, dParams),
+      pool.query(
+        `SELECT to_char(date_trunc('month', member_join_date), 'YYYY-MM') AS name, COUNT(*)::int AS value
+           FROM app.customer_profiles
+          WHERE ${scope} AND member_join_date IS NOT NULL${dClause}
+          GROUP BY 1 ORDER BY 1 ASC`, dParams),
+      pool.query(
+        `SELECT COUNT(*)::int AS value FROM app.customer_profiles
+          WHERE ${scope} AND member_join_date IS NOT NULL${dClause}`, dParams),
+      groupQ("age_group"),
+      groupQ("gender"),
+      groupQ("education_level"),
+      groupQ("income_level"),
+      groupQ("nationality"),
+      groupQ("member_type"),
+      groupQ("member_reg_channel"),
+      groupQ("ga_top_source_medium", { excludeNotSet: true }),
+      pool.query(
+        `SELECT COUNT(*) FILTER (WHERE is_opt_in_email::text = 'true')::int AS email,
+                COUNT(*) FILTER (WHERE is_opt_in_sms::text   = 'true')::int AS sms,
+                COUNT(*) FILTER (WHERE is_opt_in_call::text  = 'true')::int AS call,
+                COUNT(*) FILTER (WHERE is_opt_in_dm::text    = 'true')::int AS dm
+           FROM app.customer_profiles WHERE ${scope}${dClause}`, dParams),
+      pool.query(
+        `SELECT CASE
+                  WHEN ga_sessions IS NULL OR ga_sessions = 0 THEN '0'
+                  WHEN ga_sessions BETWEEN 1 AND 2  THEN '1-2'
+                  WHEN ga_sessions BETWEEN 3 AND 5  THEN '3-5'
+                  WHEN ga_sessions BETWEEN 6 AND 10 THEN '6-10'
+                  ELSE '10+' END AS name,
+                COUNT(*)::int AS value
+           FROM app.customer_profiles WHERE ${scope}${dClause}
+          GROUP BY 1`, dParams),
+      pool.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE form_completes > 0)::int AS high_intent
+           FROM app.anonymous_profiles ${aWhere}`, aParams),
+      pool.query(
+        `SELECT top_source_medium AS name, COUNT(*)::int AS value
+           FROM app.anonymous_profiles
+          WHERE top_source_medium IS NOT NULL AND top_source_medium NOT IN ('', '(not set)', '(none)')${aClause}
+          GROUP BY 1 ORDER BY value DESC LIMIT 10`, aParams),
+      pool.query(
+        `SELECT COUNT(DISTINCT cp.member_id)::int AS value
+           FROM app.customer_profiles cp
+          WHERE ${scope.replace(/company_id/g, "cp.company_id")}${dClause}
+            AND EXISTS (SELECT 1 FROM commerce."order" s
+                         WHERE s.customer_id = cp.member_id
+                           AND s.order_status IN ('completed', 'confirmed'))`, dParams)
+        .catch(() => ({ rows: [{ value: 0 }] })), // commerce schema may be absent
+    ]);
+
+    res.json({
+      kpis: {
+        ...kpis.rows[0],
+        with_purchases: withPurchases.rows[0].value,
+        new_in_range: newInRange.rows[0].value,
+        anonymous_total: anon.rows[0].total,
+        anonymous_high_intent: anon.rows[0].high_intent,
+      },
+      new_over_time: newOverTime.rows,
+      demographics: {
+        age_group: ageGroup.rows,
+        gender: gender.rows,
+        education_level: education.rows,
+        income_level: income.rows,
+        nationality: nationality.rows,
+        member_type: memberType.rows,
+      },
+      channels: channels.rows,
+      sources: sources.rows,
+      consent: [
+        { name: "Email", value: consent.rows[0].email },
+        { name: "SMS",   value: consent.rows[0].sms },
+        { name: "Call",  value: consent.rows[0].call },
+        { name: "DM",    value: consent.rows[0].dm },
+      ],
+      engagement: engagement.rows,
+      anonymous_sources: anonSources.rows,
+    });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -1587,8 +2119,8 @@ app.get("/api/profiles/template", (_req, res) => {
 app.post("/api/profiles/import", authenticate, upload.single("file"), async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
 
   let text;
   try {
@@ -1600,6 +2132,19 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
   try {
     const { rows: csvRows } = parseCSV(text);
     if (csvRows.length === 0) return res.status(400).json({ error: "CSV has no data rows" });
+
+    // Enforce the account plan's profile limit (null = unlimited).
+    const profileCap = await planLimit(pool, companyId, "profiles");
+    if (profileCap != null) {
+      const { rows: [pc] } = await pool.query(
+        "SELECT COUNT(*)::int AS n FROM app.customer_profiles WHERE company_id = $1", [companyId]
+      );
+      if (pc.n + csvRows.length > profileCap) {
+        return res.status(403).json({
+          error: `Importing ${csvRows.length} profiles would exceed your plan's ${profileCap}-profile limit (you have ${pc.n}). Upgrade for more.`,
+        });
+      }
+    }
 
     const errors = [];
     const validRows = [];
@@ -1649,31 +2194,26 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
       return res.status(400).json({ error: "No valid rows to import", details: errors });
     }
 
-    // Check against existing profiles in both public.membership and app.customer_profiles
+    // Check against existing profiles in THIS company: the unified golden record
+    // plus both membership sources (manual + synced commerce). All company-scoped.
     const emails = deduped.map(r => r.primary_email.toLowerCase());
     const phones = deduped.filter(r => r.primary_phone).map(r => r.primary_phone);
     const memberIds = deduped.map(r => r.member_id);
 
-    const [existEmailsCp, existEmailsMem, existPhonesCp, existPhonesMem, existIdsCp, existIdsMem] = await Promise.all([
-      pool.query("SELECT LOWER(primary_email) AS email FROM app.customer_profiles WHERE LOWER(primary_email) = ANY($1)", [emails]),
-      pool.query("SELECT LOWER(primary_email) AS email FROM public.membership WHERE LOWER(primary_email) = ANY($1)", [emails]),
-      phones.length ? pool.query("SELECT primary_phone FROM app.customer_profiles WHERE primary_phone = ANY($1)", [phones]) : Promise.resolve({ rows: [] }),
-      phones.length ? pool.query("SELECT primary_phone FROM public.membership WHERE primary_phone = ANY($1)", [phones]) : Promise.resolve({ rows: [] }),
-      pool.query("SELECT member_id FROM app.customer_profiles WHERE member_id = ANY($1)", [memberIds]),
-      pool.query("SELECT member_id FROM public.membership WHERE member_id = ANY($1)", [memberIds]),
+    const [existEmailsCp, existPhonesCp, existIdsCp, existIdsMan, existIdsShop] = await Promise.all([
+      pool.query("SELECT LOWER(primary_email) AS email FROM app.customer_profiles WHERE company_id = $2 AND LOWER(primary_email) = ANY($1)", [emails, companyId]),
+      phones.length ? pool.query("SELECT primary_phone FROM app.customer_profiles WHERE company_id = $2 AND primary_phone = ANY($1)", [phones, companyId]) : Promise.resolve({ rows: [] }),
+      pool.query("SELECT member_id FROM app.customer_profiles WHERE company_id = $2 AND member_id = ANY($1)", [memberIds, companyId]),
+      pool.query("SELECT member_id FROM manual.membership WHERE company_id = $2 AND member_id = ANY($1)", [memberIds, companyId]),
+      pool.query("SELECT customer_id AS member_id FROM commerce.customer WHERE company_id = $2 AND customer_id = ANY($1)", [memberIds, companyId]),
     ]);
 
-    const conflictEmails = new Set([
-      ...existEmailsCp.rows.map(r => r.email),
-      ...existEmailsMem.rows.map(r => r.email),
-    ]);
-    const conflictPhones = new Set([
-      ...existPhonesCp.rows.map(r => r.primary_phone),
-      ...existPhonesMem.rows.map(r => r.primary_phone),
-    ]);
+    const conflictEmails = new Set(existEmailsCp.rows.map(r => r.email));
+    const conflictPhones = new Set(existPhonesCp.rows.map(r => r.primary_phone));
     const conflictIds = new Set([
       ...existIdsCp.rows.map(r => r.member_id),
-      ...existIdsMem.rows.map(r => r.member_id),
+      ...existIdsMan.rows.map(r => r.member_id),
+      ...existIdsShop.rows.map(r => r.member_id),
     ]);
 
     const toInsert = [];
@@ -1693,10 +2233,26 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
       toInsert.push(row);
     }
 
+    // Provenance: every manual-upload row is tagged company + capsuite_ref + is_manual.
+    const { rows: coRows } = await pool.query("SELECT capsuite_ref FROM app.companies WHERE id = $1", [companyId]);
+    const capsuiteRef = coRows[0]?.capsuite_ref || null;
+
+    // One upload batch per import, so manual rows carry their provenance
+    // (file name, who uploaded, when) and a batch can later be tracked / undone.
+    let uploadBatchId = null;
+    if (toInsert.length) {
+      const { rows: [batch] } = await pool.query(
+        `INSERT INTO manual.upload_batches (company_id, uploaded_by, entity_type, file_name, row_count, status)
+         VALUES ($1, $2, 'membership', $3, $4, 'completed')
+         RETURNING id`,
+        [companyId, req.user?.id || null, req.file.originalname || null, toInsert.length]
+      );
+      uploadBatchId = batch.id;
+    }
+
     let imported = 0;
     for (const row of toInsert) {
       const boolField = v => v === "true" ? true : v === "false" ? false : null;
-      const textBool = v => (v === "true" || v === "false") ? v : null;
       const regChannel = row.member_reg_channel || "Manual Import";
 
       const params = [
@@ -1724,16 +2280,21 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
         row.preferred_language || null,   // $22
         row.preferred_channel || null,    // $23
         boolField(row.is_opt_in_email),   // $24
-        textBool(row.is_opt_in_sms),      // $25
-        textBool(row.is_opt_in_call),     // $26
-        textBool(row.is_opt_in_dm),       // $27
+        boolField(row.is_opt_in_sms),     // $25
+        boolField(row.is_opt_in_call),    // $26
+        boolField(row.is_opt_in_dm),      // $27
         row.tags || null,                 // $28
+        companyId,                        // $29
+        capsuiteRef,                      // $30
+        uploadBatchId,                    // $31  upload_batch_id (provenance)
       ];
 
-      // Write to public.membership so segmentation, EDM, and preview_segment_size queries see the profile
+      // 1. Source-of-record row in the manual schema (provenance: is_manual=true,
+      //    linked to this import's upload batch).
       await pool.query(
-        `INSERT INTO public.membership (
-          member_id, primary_email, primary_phone, has_email, has_phone,
+        `INSERT INTO manual.membership (
+          member_id, company_id, is_manual, capsuite_ref, upload_batch_id,
+          primary_email, primary_phone, has_email, has_phone,
           eng_full_name, eng_first_name, eng_last_name, display_name,
           member_no, title, member_type, member_join_date, member_last_update,
           member_reg_channel,
@@ -1741,22 +2302,23 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
           education_level, income_level, employment_status, marital_status,
           preferred_language, preferred_channel,
           is_opt_in_email, is_opt_in_sms, is_opt_in_call, is_opt_in_dm,
-          tags, is_imported, imported_at
+          tags
         ) VALUES (
-          $1,$2,$3,$4,$5,
-          $6,$7,$8,$9,$10,
-          $11,$12,$13,NOW(),$14,
+          $1,$29,true,$30,$31,
+          $2,$3,$4,$5,
+          $6,$7,$8,$9,
+          $10,$11,$12,$13,NOW(),
+          $14,
           $15,$16,$17,$18,$19,$20,$21,
-          $22,$23,$24,$25,$26,$27,$28,
-          true,NOW()
-        ) ON CONFLICT DO NOTHING`,
+          $22,$23,$24,$25,$26,$27,$28
+        ) ON CONFLICT (company_id, member_id) DO NOTHING`,
         params
       );
 
-      // Write to app.customer_profiles (the denormalized view used by the Profiles page)
+      // 2. Unified golden record used by the Profiles page / segmentation / EDM.
       await pool.query(
         `INSERT INTO app.customer_profiles (
-          company_id,
+          company_id, member_source, is_manual, capsuite_ref,
           member_id, primary_email, primary_phone, has_email, has_phone,
           eng_full_name, eng_first_name, eng_last_name, display_name,
           member_no, title, member_type, member_join_date,
@@ -1765,18 +2327,32 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
           education_level, income_level, employment_status, marital_status,
           preferred_language, preferred_channel,
           is_opt_in_email, is_opt_in_sms, is_opt_in_call, is_opt_in_dm,
-          tags, is_imported, imported_at
+          tags
         ) VALUES (
-          $29,
+          $29,'manual',true,$30,
           $1,$2,$3,$4,$5,
-          $6,$7,$8,$9,$10,
-          $11,$12,$13,$14,
+          $6,$7,$8,$9,
+          $10,$11,$12,$13,
+          $14,
           $15,$16,$17,$18,$19,$20,$21,
-          $22,$23,$24,$25,$26,$27,$28,
-          true,NOW()
-        ) ON CONFLICT (member_id) DO NOTHING`,
-        [...params, companyId]
+          $22,$23,$24,$25,$26,$27,$28
+        ) ON CONFLICT (company_id, member_id) DO NOTHING`,
+        params
       );
+
+      // 3. Identity links so this profile is reachable by email / phone / member_id.
+      const identities = [["member_id", row.member_id, true]];
+      if (row.primary_email) identities.push(["email", row.primary_email, false]);
+      if (row.primary_phone) identities.push(["phone", row.primary_phone, false]);
+      for (const [itype, ivalue, isPrimary] of identities) {
+        await pool.query(
+          `INSERT INTO app.profile_identities
+             (company_id, member_id, source, source_id, identity_type, identity_value, is_primary)
+           VALUES ($1,$2,'manual',$2,$3,$4,$5)
+           ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING`,
+          [companyId, row.member_id, itype, ivalue, isPrimary]
+        );
+      }
 
       imported++;
     }
@@ -1795,22 +2371,374 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
 // ── Profiles: Delete imported profile ─────────────────────────────────────────
 app.delete("/api/profiles/customers/:memberId", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const { rows } = await pool.query(
-      "SELECT is_imported FROM app.customer_profiles WHERE member_id = $1 AND company_id = $2",
+      "SELECT is_manual FROM app.customer_profiles WHERE member_id = $1 AND company_id = $2",
       [req.params.memberId, companyId]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Profile not found" });
-    if (!rows[0].is_imported) return res.status(403).json({ error: "Only manually imported profiles can be deleted" });
+    if (!rows[0].is_manual) return res.status(403).json({ error: "Only manually imported profiles can be deleted" });
 
-    // Delete from both tables - public.membership first (FK source), then the denormalized view
+    // Delete from the manual source and the unified record (both company-scoped).
+    // profile_identities cascade off customer_profiles via FK.
     await Promise.all([
-      pool.query("DELETE FROM public.membership WHERE member_id = $1 AND is_imported = true", [req.params.memberId]),
-      pool.query("DELETE FROM app.customer_profiles WHERE member_id = $1 AND company_id = $2 AND is_imported = true", [req.params.memberId, companyId]),
+      pool.query("DELETE FROM manual.membership WHERE member_id = $1 AND company_id = $2", [req.params.memberId, companyId]),
+      pool.query("DELETE FROM app.customer_profiles WHERE member_id = $1 AND company_id = $2 AND is_manual = true", [req.params.memberId, companyId]),
     ]);
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: a customer's commerce transactions (orders + line items) ────────
+// Reads the platform-neutral commerce layer (Shopify today; Shopline/Odoo land
+// in the same tables tagged by source_platform). Response keys keep the trxn_*
+// names the Profiles UI already consumes.
+app.get("/api/profiles/customers/:memberId/transactions", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const memberId = req.params.memberId;
+    // Most recent orders, each with its line items rolled up as JSON.
+    const { rows } = await pool.query(
+      `SELECT o.order_id AS trxn_id, o.order_ref AS trxn_ref, o.order_date AS trxn_date,
+              o.order_status AS trxn_order_status, o.channel AS trxn_channel,
+              o.net_amount AS amount, o.currency, o.source_platform,
+              COALESCE((
+                SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+                         'name', l.product_name, 'sku', l.product_sku, 'category', l.product_type,
+                         'type', l.line_type, 'qty', l.qty_ordered,
+                         'unit_price', l.unit_price_net
+                       ) ORDER BY l.unit_price_net DESC NULLS LAST)
+                  FROM commerce.order_line l
+                 WHERE l.order_id = o.order_id
+              ), '[]'::jsonb) AS items
+         FROM commerce."order" o
+        WHERE o.customer_id = $1
+        ORDER BY o.order_date DESC NULLS LAST
+        LIMIT 25`,
+      [memberId]
+    );
+    // Lifetime summary (counts only real orders, matching the card aggregates).
+    const { rows: sum } = await pool.query(
+      `SELECT COUNT(*)                     AS order_count,
+              COALESCE(SUM(net_amount), 0) AS total_spend,
+              MAX(order_date)              AS last_order_date,
+              MIN(order_date)              AS first_order_date,
+              MODE() WITHIN GROUP (ORDER BY currency) AS currency
+         FROM commerce."order"
+        WHERE customer_id = $1 AND order_status IN ('completed', 'confirmed')`,
+      [memberId]
+    );
+    res.json({ orders: rows, summary: sum[0] });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// Which (non-archived) segments a single profile currently belongs to. Reuses the
+// exact Segments-page predicate builder, scoped to this one entity by id.
+async function segmentsForEntity(pool, companyId, scope, entityId) {
+  if (!companyId || !entityId) return [];
+  const segType = scope === "anonymous" ? "anonymous_profile" : "customer";
+  const table = scope === "anonymous" ? "app.anonymous_profiles" : "app.customer_profiles";
+  const idcol = scope === "anonymous" ? "visitor_id" : "member_id";
+  const { rows: segs } = await pool.query(
+    `SELECT id, name, metadata FROM app.segments WHERE company_id = $1 AND segment_type = $2 AND status <> 'archived' ORDER BY name`,
+    [companyId, segType]
+  );
+  const out = [];
+  for (const s of segs) {
+    const fc = s.metadata?.filter_criteria || {};
+    const built = scope === "anonymous" ? anonWhere(fc) : customerWhere(fc);
+    const params = [entityId, ...built.params];
+    const shifted = String(built.where || "TRUE").replace(/\$(\d+)/g, (_, n) => `$${Number(n) + 1}`);
+    try {
+      const r = await pool.query(`SELECT 1 FROM ${table} p WHERE p.${idcol} = $1 AND (${shifted}) LIMIT 1`, params);
+      if (r.rows.length) out.push({ id: s.id, name: s.name });
+    } catch { /* a segment whose criteria can't be evaluated is simply skipped */ }
+  }
+  return out;
+}
+
+// ── Profiles: per-profile insights (Top web / transaction values + touchpoints) ─
+// Computed live (GA web data, Shopify sales, EDM/popup/UTM touchpoints) when a
+// card is expanded. Device & true engagement-duration aren't in the GA feed, so
+// engagement is reported as the user_engagement event count.
+app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const memberId = req.params.memberId;
+    const prof = await pool.query(
+      "SELECT primary_email, COALESCE(ga_visitor_ids, '{}') AS apids FROM app.customer_profiles WHERE member_id = $1",
+      [memberId]
+    );
+    if (!prof.rows.length) return res.status(404).json({ error: "Profile not found" });
+    const email = prof.rows[0].primary_email || "";
+    const apids = prof.rows[0].apids || [];
+    const hasApids = apids.length > 0;
+    const none = { rows: [] };
+
+    const [topPage, topLink, engagement, topAttr, topProduct, topCategory, topChannel, emails, popups, utmLinks] = await Promise.all([
+      hasApids ? pool.query(
+        `SELECT page_location AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = ANY($1) AND event_name = 'page_view' AND page_location <> ''
+          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [apids]) : none,
+      hasApids ? pool.query(
+        `SELECT link_url AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = ANY($1) AND link_url IS NOT NULL AND link_url <> ''
+          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [apids]) : none,
+      hasApids ? pool.query(
+        `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = ANY($1) AND event_name = 'user_engagement'`, [apids]) : { rows: [{ count: 0 }] },
+      pool.query(
+        `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
+           FROM app.profile_attribute_values pv
+           JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
+           JOIN app.attribute_values v ON v.id = pv.attribute_value_id
+          WHERE pv.entity_type = 'customer' AND pv.entity_id = $1
+          ORDER BY pv.score DESC LIMIT 1`, [memberId]),
+      pool.query(
+        `SELECT product_name AS value, SUM(qty_ordered)::int AS qty FROM commerce.order_line
+          WHERE customer_id = $1 AND line_type = 'line_item' AND product_name IS NOT NULL
+          GROUP BY product_name ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId]),
+      pool.query(
+        `SELECT product_type AS value, SUM(qty_ordered)::int AS qty FROM commerce.order_line
+          WHERE customer_id = $1 AND product_type IS NOT NULL AND product_type <> ''
+          GROUP BY product_type ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId]),
+      pool.query(
+        `SELECT channel AS value, COUNT(*)::int AS count FROM commerce."order"
+          WHERE customer_id = $1 AND channel IS NOT NULL AND channel <> ''
+          GROUP BY channel ORDER BY count DESC LIMIT 1`, [memberId]),
+      email ? pool.query(
+        `SELECT ec.name AS campaign, es.status, es.sent_at,
+                BOOL_OR(ee.event_type = 'open')  AS opened,
+                BOOL_OR(ee.event_type = 'click') AS clicked
+           FROM app.edm_sends es
+           JOIN app.edm_campaigns ec ON ec.id = es.edm_campaign_id
+           LEFT JOIN app.edm_events ee ON ee.send_id = es.id
+          WHERE LOWER(es.email) = LOWER($1)
+          GROUP BY ec.name, es.status, es.sent_at
+          ORDER BY es.sent_at DESC NULLS LAST LIMIT 10`, [email]) : none,
+      pool.query(
+        `SELECT DISTINCT ON (COALESCE(popup_name, popup_ref)) COALESCE(popup_name, popup_ref) AS name, collected_at AS at
+           FROM app.popup_email_collected
+          WHERE ($1 <> '' AND LOWER(email) = LOWER($1)) OR (CARDINALITY($2::text[]) > 0 AND visitor_id = ANY($2))
+          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [email, apids]),
+      hasApids ? pool.query(
+        `SELECT DISTINCT c.name, c.utm_source, c.utm_medium, c.utm_campaign, c.utm_term, c.utm_content, c.base_url
+           FROM ga_landing.path_exploration pe
+           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name
+          WHERE pe.capsuite_apid = ANY($1)
+            AND pe.session_campaign_name <> '' AND pe.session_campaign_name <> '(not set)'
+          LIMIT 10`, [apids]) : none,
+    ]);
+
+    const segments = await segmentsForEntity(pool, req.headers["x-company-id"], "customer", memberId);
+
+    res.json({
+      web: {
+        top_page: topPage.rows[0] || null,
+        top_outbound_link: topLink.rows[0] || null,
+        engagement_events: engagement.rows[0]?.count || 0,
+        top_content_attribute: topAttr.rows[0] || null,
+      },
+      transactions: {
+        top_product: topProduct.rows[0] || null,
+        top_category: topCategory.rows[0] || null,
+        top_channel: topChannel.rows[0] || null,
+      },
+      segments,
+      touchpoints: { emails: emails.rows, popups: popups.rows, utm_links: utmLinks.rows },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.get("/api/profiles/anonymous/:visitorId/insights", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  try {
+    const vid = req.params.visitorId;
+    const [topPage, topLink, engagement, topAttr, popups, utmLinks] = await Promise.all([
+      pool.query(
+        `SELECT page_location AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = $1 AND event_name = 'page_view' AND page_location <> ''
+          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [vid]),
+      pool.query(
+        `SELECT link_url AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = $1 AND link_url IS NOT NULL AND link_url <> ''
+          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [vid]),
+      pool.query(
+        `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
+          WHERE capsuite_apid = $1 AND event_name = 'user_engagement'`, [vid]),
+      pool.query(
+        `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
+           FROM app.profile_attribute_values pv
+           JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
+           JOIN app.attribute_values v ON v.id = pv.attribute_value_id
+          WHERE pv.entity_type = 'anonymous' AND pv.entity_id = $1
+          ORDER BY pv.score DESC LIMIT 1`, [vid]),
+      pool.query(
+        `SELECT DISTINCT ON (COALESCE(popup_name, popup_ref)) COALESCE(popup_name, popup_ref) AS name, collected_at AS at
+           FROM app.popup_email_collected WHERE visitor_id = $1
+          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [vid]),
+      pool.query(
+        `SELECT DISTINCT c.name, c.utm_source, c.utm_medium, c.utm_campaign, c.utm_term, c.utm_content, c.base_url
+           FROM ga_landing.path_exploration pe
+           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name
+          WHERE pe.capsuite_apid = $1
+            AND pe.session_campaign_name <> '' AND pe.session_campaign_name <> '(not set)'
+          LIMIT 10`, [vid]),
+    ]);
+
+    // Pop-ups actually seen/clicked - from the interaction service's activity log
+    // (keyed by capsuite_apid = visitor_id). Guarded: that schema may be absent.
+    let popupsSeen = [];
+    const actReg = await pool.query(`SELECT to_regclass('interaction.activities') AS t`);
+    if (actReg.rows[0]?.t) {
+      const seen = await pool.query(
+        `SELECT pu.name,
+                MIN(ia.created_at) AS at,
+                BOOL_OR(ia.action ILIKE '%click%') AS clicked
+           FROM interaction.activities ia
+           JOIN interaction.interactions ii ON ii.id = ia.correlated_interaction_id
+           JOIN app.popups pu ON pu.cdp_reference_id = ii.cdp_reference_id
+          WHERE ia.capsuite_apid = $1
+          GROUP BY pu.name
+          ORDER BY MIN(ia.created_at) DESC LIMIT 10`, [vid]);
+      popupsSeen = seen.rows;
+    }
+
+    const segments = await segmentsForEntity(pool, req.headers["x-company-id"], "anonymous", vid);
+
+    res.json({
+      web: {
+        top_page: topPage.rows[0] || null,
+        top_outbound_link: topLink.rows[0] || null,
+        engagement_events: engagement.rows[0]?.count || 0,
+        top_content_attribute: topAttr.rows[0] || null,
+      },
+      segments,
+      touchpoints: { emails: [], popups: popups.rows, popups_seen: popupsSeen, utm_links: utmLinks.rows },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Segments: export matching profiles + criteria as CSV ─────────────────────
+// Renders a segment's filter_criteria into a human-readable summary (the criteria
+// every exported profile validates), resolves the matching profiles live, and
+// streams a CSV with a leading "# ..." criteria preamble followed by the rows.
+function summarizeCriteria(fc) {
+  const out = [];
+  const arr = (k, label) => { const v = fc[k]; if (Array.isArray(v) ? v.length : v) out.push(`${label}: ${Array.isArray(v) ? v.join("/") : v}`); };
+  arr("reg_channel", "channel"); arr("education_level", "education"); arr("age_group", "age group");
+  arr("gender", "gender"); arr("nationality", "nationality"); arr("preferred_language", "language");
+  arr("employment_status", "employment"); arr("income_level", "income"); arr("member_type", "member type");
+  arr("preferred_channel", "preferred channel"); arr("source_medium", "source/medium");
+  arr("source", "source"); arr("medium", "medium"); arr("campaign", "campaign");
+  if (fc.min_page_views) out.push(`${fc.min_page_views}+ page views`);
+  if (fc.max_page_views) out.push(`<= ${fc.max_page_views} page views`);
+  if (fc.min_sessions) out.push(`${fc.min_sessions}+ visits`);
+  if (fc.max_sessions) out.push(`<= ${fc.max_sessions} visits`);
+  if (fc.min_engagement) out.push(`${fc.min_engagement}+ engagement`);
+  if (fc.max_engagement) out.push(`<= ${fc.max_engagement} engagement`);
+  if (fc.visited_within) out.push(`visited in last ${fc.visited_within} days`);
+  if (fc.is_opt_in_email === "true" || fc.is_opt_in_email === true) out.push("email opted-in");
+  if (fc.opt_in_sms === "true") out.push("SMS opted-in");
+  if (fc.is_subscriber === "true") out.push("subscriber only");
+  if (fc.has_ga_activity === "true") out.push("has web activity");
+  if (fc.min_ga_sessions) out.push(`${fc.min_ga_sessions}+ GA sessions`);
+  if (fc.max_ga_sessions) out.push(`<= ${fc.max_ga_sessions} GA sessions`);
+  if (fc.has_seminars === "true") out.push("attended seminar");
+  if (fc.has_attributes === "true") out.push("has attributes");
+  if (fc.has_transactions === "true") out.push("has purchases");
+  if (fc.min_orders) out.push(`${fc.min_orders}+ orders`);
+  if (fc.max_orders) out.push(`<= ${fc.max_orders} orders`);
+  if (fc.min_spend) out.push(`${fc.min_spend}+ spend`);
+  if (fc.max_spend) out.push(`<= ${fc.max_spend} spend`);
+  if (fc.ordered_within) out.push(`ordered in last ${fc.ordered_within} days`);
+  if (fc.has_form_complete === "true") out.push("completed a form");
+  if (Array.isArray(fc.attribute_value_ids) && fc.attribute_value_ids.length) out.push(`${fc.attribute_value_ids.length} attribute value(s)`);
+  return out;
+}
+
+// Live member count for a segment (used by the Segments cards).
+app.get("/api/segments/:id/size", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM app.segments
+        WHERE id = $1 AND company_id = $2 AND (visibility = 'company' OR created_by = $3)`,
+      [req.params.id, companyId, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Segment not found" });
+    const count = await countSegmentEntities(pool, req.params.id);
+    res.json({ count });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+app.get("/api/segments/:id/export", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { rows: segRows } = await pool.query(
+      `SELECT id, name, segment_type, metadata FROM app.segments
+        WHERE id = $1 AND company_id = $2 AND (visibility = 'company' OR created_by = $3)`,
+      [req.params.id, companyId, req.user.id]
+    );
+    if (!segRows.length) return res.status(404).json({ error: "Segment not found" });
+    const seg = segRows[0];
+    const fc = seg.metadata?.filter_criteria || {};
+    const criteria = summarizeCriteria(fc);
+    const { entityType, ids } = await resolveSegmentEntities(pool, seg.id);
+
+    const csvCell = (v) => {
+      if (v == null) return "";
+      let s = Array.isArray(v) ? v.join("; ") : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+
+    let columns, rows;
+    if (entityType === "customer") {
+      columns = ["member_id", "primary_email", "primary_phone", "eng_full_name", "member_no", "member_reg_channel",
+        "member_type", "age_group", "gender", "nationality", "education_level", "income_level", "employment_status",
+        "preferred_language", "preferred_channel", "is_opt_in_email", "is_opt_in_sms", "is_subscriber_only",
+        "ga_sessions", "seminar_count", "attribute_count", "member_join_date", "tags"];
+      rows = ids.length ? (await pool.query(
+        `SELECT ${columns.join(", ")} FROM app.customer_profiles WHERE member_id = ANY($1::text[]) ORDER BY member_join_date DESC NULLS LAST`,
+        [ids]
+      )).rows : [];
+    } else {
+      columns = ["visitor_id", "first_seen", "last_seen", "sessions", "page_views", "total_events",
+        "form_starts", "form_completes", "top_source_medium", "top_campaign"];
+      rows = ids.length ? (await pool.query(
+        `SELECT ${columns.join(", ")} FROM app.anonymous_profiles WHERE visitor_id = ANY($1::text[]) ORDER BY last_seen DESC NULLS LAST`,
+        [ids]
+      )).rows : [];
+    }
+
+    const lines = [
+      `# Segment: ${seg.name || "Untitled"}`,
+      `# Type: ${seg.segment_type}`,
+      `# Criteria validated by every profile below: ${criteria.length ? criteria.join("; ") : "none (all profiles)"}`,
+      `# Profiles: ${rows.length}`,
+      columns.join(","),
+      ...rows.map((r) => columns.map((c) => csvCell(r[c])).join(",")),
+    ];
+    const safeName = (seg.name || "segment").replace(/[^a-z0-9\-_]+/gi, "_").toLowerCase();
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="segment_${safeName}.csv"`);
+    res.send(lines.join("\n"));
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -1819,8 +2747,8 @@ app.delete("/api/profiles/customers/:memberId", authenticate, async (req, res) =
 // ── Settings ─────────────────────────────────────────────────────────────────
 app.get("/api/settings", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const { rows } = await pool.query(
       "SELECT key, value, label, updated_date FROM app.settings WHERE company_id = $1 ORDER BY key",
@@ -1835,15 +2763,15 @@ app.get("/api/settings", authenticate, async (req, res) => {
 
 app.put("/api/settings/:key", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = req.headers["x-company-id"];
-  if (!companyId) return res.status(400).json({ error: "x-company-id header required" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   const { key } = req.params;
   const { value, label } = req.body;
   try {
     const { rows } = await pool.query(
       `INSERT INTO app.settings (company_id, key, value, label, updated_date)
        VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (company_id, key) WHERE company_id IS NOT NULL
+       ON CONFLICT (company_id, key)
        DO UPDATE SET value = EXCLUDED.value, label = COALESCE(EXCLUDED.label, app.settings.label), updated_date = NOW()
        RETURNING *`,
       [companyId, key, value ?? null, label ?? null]
@@ -1861,12 +2789,54 @@ if (pool) {
 
 // ── Data Integration routes ───────────────────────────────────────────────────
 if (pool) {
-  app.use("/api/data-integrations", createIntegrationsRouter(pool));
+  app.use("/api/data-integrations", createIntegrationsRouter(pool, { refreshProfiles }));
 }
 
 // ── Popup routes ──────────────────────────────────────────────────────────────
 if (pool) {
   app.use("/api/popups", createPopupRouter(pool));
+}
+
+// ── UTM analytics routes (company-scoped) ──────────────────────────────────────
+if (pool) {
+  app.use("/api/utm", createUtmRouter(pool));
+}
+
+// ── Attributes routes ─────────────────────────────────────────────────────────
+if (pool) {
+  // Public webhook the content_scrape Airflow DAG calls when scraping finishes.
+  // Registered BEFORE the authenticated router so it is reachable without a token
+  // (Airflow has no session); it identifies the tenant by company_id in the body.
+  app.post("/api/attributes/webhook/scrape-complete", async (req, res) => {
+    try {
+      const { company_id, job_id, changed = 0 } = req.body || {};
+      if (!company_id) return res.status(400).json({ error: "company_id required" });
+      if (job_id) {
+        await pool.query(
+          `UPDATE app.attribute_jobs SET status='completed', phase='done', completed_at=NOW()
+           WHERE id=$1 AND company_id=$2 AND status IN ('queued','running')`,
+          [job_id, company_id]
+        );
+      }
+      // If pages changed/were added, run the Node tag phase for them.
+      if (Number(changed) > 0) {
+        const { rows: busy } = await pool.query(
+          `SELECT id FROM app.attribute_jobs WHERE company_id=$1 AND status IN ('queued','running') AND job_type IN ('tag','behavioral') LIMIT 1`,
+          [company_id]
+        );
+        if (!busy.length) {
+          await pool.query(
+            `INSERT INTO app.attribute_jobs (company_id, job_type, status, phase) VALUES ($1,'tag','queued','queued')`,
+            [company_id]
+          );
+          processNextAttributeJob(pool).catch((e) => console.error("[attr] scrape-webhook kick failed:", e.message));
+        }
+      }
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+  });
+
+  app.use("/api/attributes", createAttributesRouter(pool));
 }
 
 // ── EDM tracking endpoints (open pixel + click redirect + unsubscribe) ────────
@@ -1959,7 +2929,9 @@ app.post("/api/integrations/upload", upload.single("file"), (req, res) => {
   const safeName = `${Date.now()}-${req.file.originalname}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const finalPath = path.join(uploadsDir, safeName);
   fs.renameSync(req.file.path, finalPath);
-  res.json({ file_url: `/uploads/${safeName}` });
+  // Return absolute URL so images work inside email HTML sent via Resend
+  const origin = process.env.BACKEND_URL || `${req.protocol}://${req.get("host")}`;
+  res.json({ file_url: `${origin}/uploads/${safeName}`, relative_url: `/uploads/${safeName}` });
 });
 
 // ── Production static serving ─────────────────────────────────────────────────
@@ -1978,7 +2950,9 @@ if (pool) {
   app.use("/api/auth", createAuthRouter(pool));
   app.use("/api/companies", createCompanyRouter(pool));
   app.use("/api/billing", createBillingRouter(pool));
+  app.use("/api/admin", createAdminRouter(pool));
   app.use("/api/support", createSupportRouter(pool));
+  app.use("/api/notifications", createNotificationsRouter(pool));
 } else {
   // Fallback local-mode (no DB) - return static data so the UI is usable
   app.get("/api/plans", (_req, res) => res.json(FALLBACK_PLANS));
@@ -2000,7 +2974,7 @@ async function start() {
       const { tools } = await mcpClient.listTools();
       console.log(`  MCP: Analyst server ready (${tools.length} tools: ${tools.map((t) => t.name).join(", ")})`);
     } catch (err) {
-      console.error("  MCP: Failed to initialize -", err.message);
+      console.error("  MCP: Failed to initialize - ", err.message);
     }
   }
 
@@ -2011,7 +2985,12 @@ async function start() {
   });
 
   // ── EDM scheduled campaign cron (runs every minute) ──────────────────────
-  if (pool) {
+  // DISABLED by default. The fire-and-forget POST below carries no auth /
+  // x-company-id, so the /send endpoint rejects it before the campaign leaves
+  // 'scheduled' - causing it to re-fire (and attempt to re-send) every minute.
+  // Re-enable only once the send is invoked with proper internal auth or by
+  // calling the send logic directly and claiming the campaign atomically.
+  if (pool && process.env.ENABLE_EDM_CRON === "true") {
     cron.schedule("* * * * *", async () => {
       try {
         const { rows: due } = await pool.query(`
@@ -2030,6 +3009,198 @@ async function start() {
       }
     });
     console.log("  EDM: Scheduled campaign cron running");
+  } else {
+    console.log("  EDM: Scheduled campaign cron DISABLED (set ENABLE_EDM_CRON=true to enable)");
+  }
+
+  // ── Nightly segment re-sync (2:00 AM every day) ──────────────────────────
+  // Re-resolves capsuite_apid lists for all active popups whose segment has daily_refresh=true,
+  // then pushes the updated rules to the interaction service.
+  if (pool) {
+    cron.schedule("0 2 * * *", async () => {
+      console.log("[Segment cron] Starting nightly segment re-sync...");
+      try {
+        const INTERACTION_SERVICE_URL = process.env.INTERACTION_SERVICE_URL || "http://localhost:8080";
+
+        // Find all segments with daily_refresh enabled
+        const { rows: segments } = await pool.query(`
+          SELECT id, company_id, segment_type, metadata
+          FROM app.segments
+          WHERE daily_refresh = true AND status = 'active'
+        `);
+
+        for (const seg of segments) {
+          try {
+            // Resolve the segment to fresh capsuite_apid list (reuse existing helper logic)
+            const filterCriteria = seg.metadata?.filter_criteria || null;
+            const { buildSegmentWhere } = await import("./routes/popup.js");
+
+            // Find all active popups using this segment
+            const { rows: popups } = await pool.query(`
+              SELECT p.*, c.settings AS company_settings
+              FROM app.popups p
+              JOIN app.companies c ON c.id = p.company_id
+              WHERE p.is_active = true
+                AND p.company_id = $1
+                AND (
+                  p.rules->>'anonymous_segment_id' = $2
+                  OR p.rules->>'customer_segment_id' = $2
+                )
+            `, [seg.company_id, seg.id]);
+
+            if (!popups.length) continue;
+
+            // Get interaction service company ID (dedicated column in the new schema)
+            const { rows: companyRows } = await pool.query(
+              `SELECT interaction_service_company_id FROM app.companies WHERE id = $1`, [seg.company_id]
+            );
+            const isCompanyId = companyRows[0]?.interaction_service_company_id;
+            if (!isCompanyId) continue;
+
+            for (const popup of popups) {
+              try {
+                // Re-resolve both segment types for this popup
+                const rules = popup.rules || {};
+                let resolvedApids = [];
+
+                // Simple inline resolution - mirrors buildInteractionPayload logic
+                const resolveSegment = async (segId) => {
+                  if (!segId) return [];
+                  const { rows } = await pool.query(
+                    `SELECT segment_type, metadata FROM app.segments WHERE id = $1`, [segId]
+                  );
+                  if (!rows.length) return [];
+                  const { segment_type } = rows[0];
+                  let sql;
+                  if (segment_type === "customer") {
+                    // Known customers' anonymous web ids live on the unified profile.
+                    sql = `SELECT DISTINCT vid AS capsuite_apid
+                           FROM app.customer_profiles cp
+                           CROSS JOIN LATERAL unnest(COALESCE(cp.ga_visitor_ids, '{}')) AS vid
+                           WHERE cp.company_id = $1 AND vid IS NOT NULL AND vid != '' LIMIT 5000`;
+                  } else {
+                    // Unresolved visitors: GA apids not linked to any customer in this company.
+                    sql = `SELECT DISTINCT pe.capsuite_apid FROM ga_landing.path_exploration pe
+                           WHERE pe.company_id = $1 AND pe.capsuite_apid IS NOT NULL AND pe.capsuite_apid != ''
+                             AND NOT EXISTS (SELECT 1 FROM app.profile_identities pi
+                               WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id' AND pi.identity_value = pe.capsuite_apid)
+                           LIMIT 5000`;
+                  }
+                  const result = await pool.query(sql, [seg.company_id]);
+                  return result.rows.map(r => r.capsuite_apid).filter(Boolean);
+                };
+
+                const anonApids = await resolveSegment(rules.anonymous_segment_id);
+                const custApids = await resolveSegment(rules.customer_segment_id);
+                resolvedApids = [...new Set([...anonApids, ...custApids])];
+
+                const updatedRules = {
+                  ...rules,
+                  ...(resolvedApids.length ? { list_capsuite_apid: resolvedApids } : {}),
+                };
+
+                // Push to interaction service
+                await fetch(`${INTERACTION_SERVICE_URL}/interaction/update`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: popup.name,
+                    companyId: isCompanyId,
+                    interactionType: popup.interaction_type,
+                    cdpReferenceId: popup.cdp_reference_id,
+                    rules: updatedRules,
+                    content: popup.content || "",
+                    defaultRecommendation: popup.default_recommendation || {},
+                    isActive: popup.is_active,
+                    isDefault: popup.is_default,
+                    startTime: popup.start_time ? new Date(popup.start_time).toISOString() : new Date().toISOString(),
+                    endTime: popup.end_time ? new Date(popup.end_time).toISOString() : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+                    customer: {},
+                  }),
+                });
+              } catch (popupErr) {
+                console.error(`[Segment cron] Failed to re-sync popup ${popup.id}:`, popupErr.message);
+              }
+            }
+
+            // Mark segment as refreshed
+            await pool.query(
+              `UPDATE app.segments SET last_refreshed = NOW() WHERE id = $1`, [seg.id]
+            );
+            console.log(`[Segment cron] Re-synced segment ${seg.id}`);
+          } catch (segErr) {
+            console.error(`[Segment cron] Failed for segment ${seg.id}:`, segErr.message);
+          }
+        }
+        console.log(`[Segment cron] Done. Processed ${segments.length} segment(s).`);
+      } catch (e) {
+        console.error("[Segment cron] Fatal error:", e.message);
+      }
+    });
+    console.log("  Segment: Nightly re-sync cron scheduled (2:00 AM daily)");
+  }
+
+  // ── Nightly rule-attribute daily refresh (2:30 AM) ───────────────────────
+  // Re-derives every active rule attribute with daily_refresh on (add + drop).
+  // Rule attributes with daily refresh off stay frozen until a manual reapply.
+  if (pool) {
+    cron.schedule("30 2 * * *", async () => {
+      try {
+        const r = await runDailyRuleRefresh(pool);
+        if (r.total) console.log(`[Rule refresh] Re-derived ${r.refreshed}/${r.total} daily-refresh rule attribute(s).`);
+      } catch (e) {
+        console.error("[Rule refresh] Fatal error:", e.message);
+      }
+    });
+    console.log("  Attributes: Nightly rule daily-refresh cron scheduled (2:30 AM daily)");
+  }
+
+  // ── Nightly test-link rollup + daily refresh (2:45 AM) ───────────────────
+  // Rebuilds the page-rank rollup (the expensive GA aggregation, once/night) for
+  // every GA-connected company, then re-syncs the GA test links for companies in
+  // 'daily' mode. 'static' companies keep their frozen set and read the fresh
+  // rollup only when they click "Load top 50".
+  if (pool) {
+    cron.schedule("45 2 * * *", async () => {
+      try {
+        const r = await runDailyTestLinkRefresh(pool);
+        if (r.ranked) console.log(`[Test-links refresh] Rebuilt rollup for ${r.ranked} company(ies); synced ${r.synced} daily-mode set(s).`);
+      } catch (e) {
+        console.error("[Test-links refresh] Fatal error:", e.message);
+      }
+    });
+    console.log("  Attributes: Nightly test-link rollup cron scheduled (2:45 AM daily)");
+  }
+
+  // ── Nightly profile rebuild (1:15 AM) ──────────────────────────────────────
+  // Folds the previous day's scheduled commerce sync (the daily Shopify landing
+  // DAG) into the unified profiles for every active workspace. Manual "Sync
+  // Data" runs don't wait for this - the dag-complete webhook refreshes the
+  // workspace immediately.
+  if (pool) {
+    cron.schedule("15 1 * * *", async () => {
+      try {
+        await refreshProfiles(pool);
+      } catch (e) {
+        console.error("[Profile refresh] Fatal error:", e.message);
+      }
+    });
+    console.log("  Profiles: Nightly rebuild cron scheduled (1:15 AM daily)");
+  }
+
+  // ── Integration sync queue worker ─────────────────────────────────────────
+  if (pool) {
+    startIntegrationQueueWorker(pool);
+  }
+
+  // ── Attribute reconstruct queue worker ────────────────────────────────────
+  if (pool) {
+    startAttributeQueueWorker(pool);
+  }
+
+  // ── Notification scan worker (new-leads polling + weekly summary) ──────────
+  if (pool) {
+    startNotificationScanWorker(pool);
   }
 }
 

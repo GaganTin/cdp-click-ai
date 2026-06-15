@@ -1,7 +1,18 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth.js";
+import { authenticate, resolveCompanyId, planLimit } from "../middleware/auth.js";
 import { sendEmail, sendBatch } from "../services/email.js";
+import { notifyCompany } from "../lib/notifications.js";
 import { injectTracking, applyPersonalization, applyUtmToLinks, injectUnsubscribeFooter, getTrackingBase } from "../services/tracking.js";
+
+// Eligible EDM recipients for a company ($1 = company_id): opted in, has a real
+// email, belongs to the company, and is not on the company's suppression list.
+const ELIGIBLE_RECIPIENTS_WHERE = `WHERE cp.is_opt_in_email = true
+          AND cp.primary_email IS NOT NULL
+          AND cp.primary_email != ''
+          AND cp.company_id = $1
+          AND cp.primary_email NOT IN (
+            SELECT email FROM app.edm_suppression WHERE company_id = $1
+          )`;
 
 export function createEdmRouter(pool) {
   const router = Router();
@@ -10,6 +21,10 @@ export function createEdmRouter(pool) {
 
   function ok(res, data, status = 200) { res.status(status).json(data); }
   function err(res, msg, status = 400) { res.status(status).json({ error: msg }); }
+
+  // Coerce a value to a valid UUID or null - rejects strings like "undefined" or ""
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function uuidOrNull(v) { return (v && UUID_RE.test(v)) ? v : null; }
 
   function normalizeTs(row) {
     if (!row) return null;
@@ -20,19 +35,16 @@ export function createEdmRouter(pool) {
     return r;
   }
 
-  // Every authenticated route requires a valid x-company-id header.
-  function getCompanyId(req, res) {
-    const id = req.headers["x-company-id"];
-    if (!id) { err(res, "x-company-id header required", 400); return null; }
-    return id;
-  }
+  // Every authenticated route requires the caller to be an active member of the
+  // x-company-id workspace (verified) - viewers are read-only.
+  const getCompanyId = (req, res) => resolveCompanyId(pool, req, res);
 
   // ══════════════════════════════════════════════════════════════════════════
   // TEMPLATES
   // ══════════════════════════════════════════════════════════════════════════
 
   router.get("/templates", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(
         `SELECT * FROM app.edm_templates WHERE company_id=$1 ORDER BY created_date DESC LIMIT 100`,
@@ -43,21 +55,21 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/templates", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
-    const { name, subject, preview_text, html_body, text_body, variables = [], status = "draft" } = req.body;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    const { name, subject, preview_text, html_body, text_body, variables = {}, status = "draft" } = req.body;
     if (!name || !subject || !html_body) return err(res, "name, subject, and html_body are required");
     try {
       const { rows } = await pool.query(
         `INSERT INTO app.edm_templates (company_id, name, subject, preview_text, html_body, text_body, variables, status)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-        [companyId, name, subject, preview_text||null, html_body, text_body||null, variables, status]
+        [companyId, name, subject, preview_text||null, html_body, text_body||null, JSON.stringify(variables), status]
       );
       ok(res, normalizeTs(rows[0]), 201);
     } catch (e) { err(res, e.message, 500); }
   });
 
   router.get("/templates/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(
         `SELECT * FROM app.edm_templates WHERE id=$1 AND company_id=$2`,
@@ -69,13 +81,13 @@ export function createEdmRouter(pool) {
   });
 
   router.patch("/templates/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const allowed = ["name","subject","preview_text","html_body","text_body","variables","status"];
     const keys = Object.keys(req.body).filter(k => allowed.includes(k));
     if (!keys.length) return err(res, "No valid fields to update");
     try {
       const sets = keys.map((k, i) => `${k}=$${i + 3}`).join(", ");
-      const vals = keys.map(k => req.body[k]);
+      const vals = keys.map(k => k === "variables" ? JSON.stringify(req.body[k]) : req.body[k]);
       const { rows } = await pool.query(
         `UPDATE app.edm_templates SET ${sets} WHERE id=$1 AND company_id=$2 RETURNING *`,
         [req.params.id, companyId, ...vals]
@@ -86,10 +98,26 @@ export function createEdmRouter(pool) {
   });
 
   router.delete("/templates/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       await pool.query(`DELETE FROM app.edm_templates WHERE id=$1 AND company_id=$2`, [req.params.id, companyId]);
       ok(res, { success: true });
+    } catch (e) { err(res, e.message, 500); }
+  });
+
+  router.post("/templates/:id/duplicate", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    try {
+      const { rows: [src] } = await pool.query(
+        `SELECT * FROM app.edm_templates WHERE id=$1 AND company_id=$2`, [req.params.id, companyId]
+      );
+      if (!src) return err(res, "Template not found", 404);
+      const { rows: [copy] } = await pool.query(
+        `INSERT INTO app.edm_templates (company_id, name, subject, preview_text, html_body, text_body, variables, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'draft') RETURNING *`,
+        [companyId, `${src.name} (copy)`, src.subject, src.preview_text, src.html_body, src.text_body, JSON.stringify(src.variables || {})]
+      );
+      ok(res, normalizeTs(copy), 201);
     } catch (e) { err(res, e.message, 500); }
   });
 
@@ -98,15 +126,23 @@ export function createEdmRouter(pool) {
   // ══════════════════════════════════════════════════════════════════════════
 
   router.get("/campaigns", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(`
-        SELECT ec.*, s.name AS segment_name, t.name AS template_name, c.name AS utm_campaign_name
+        SELECT ec.*,
+          s.name AS segment_name, t.name AS template_name, c.name AS utm_campaign_name,
+          COALESCE(SUM(CASE WHEN ev.event_type='open'        THEN 1 END), 0)::int AS open_count,
+          COALESCE(SUM(CASE WHEN ev.event_type='click'       THEN 1 END), 0)::int AS click_count,
+          COALESCE(SUM(CASE WHEN ev.event_type='bounce'      THEN 1 END), 0)::int AS bounce_count,
+          COALESCE(SUM(CASE WHEN ev.event_type='unsubscribe' THEN 1 END), 0)::int AS unsubscribe_count,
+          COALESCE(SUM(CASE WHEN ev.event_type='delivered'   THEN 1 END), 0)::int AS delivered_count
         FROM app.edm_campaigns ec
         LEFT JOIN app.segments s ON s.id = ec.segment_id
         LEFT JOIN app.edm_templates t ON t.id = ec.template_id AND t.company_id = ec.company_id
         LEFT JOIN app.campaigns c ON c.id = ec.utm_campaign_id AND c.company_id = ec.company_id
+        LEFT JOIN app.edm_events ev ON ev.edm_campaign_id = ec.id
         WHERE ec.company_id=$1
+        GROUP BY ec.id, s.name, t.name, c.name
         ORDER BY ec.created_date DESC LIMIT 100
       `, [companyId]);
       ok(res, rows.map(normalizeTs));
@@ -114,7 +150,7 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/campaigns", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const {
       name, subject, preview_text, from_name, from_email, reply_to,
       template_id, html_body, text_body, segment_id, utm_campaign_id,
@@ -122,6 +158,14 @@ export function createEdmRouter(pool) {
     } = req.body;
     if (!name || !subject || !from_email) return err(res, "name, subject, and from_email are required");
     try {
+      // Enforce the account plan's email-campaign limit (null = unlimited).
+      const cap = await planLimit(pool, companyId, "campaigns");
+      if (cap != null) {
+        const { rows: [c] } = await pool.query(
+          "SELECT COUNT(*)::int AS n FROM app.edm_campaigns WHERE company_id=$1", [companyId]
+        );
+        if (c.n >= cap) return err(res, `Your plan allows up to ${cap} email campaigns. Upgrade for more.`, 403);
+      }
       const { rows } = await pool.query(
         `INSERT INTO app.edm_campaigns
            (company_id, name, subject, preview_text, from_name, from_email, reply_to,
@@ -129,8 +173,8 @@ export function createEdmRouter(pool) {
             status, scheduled_at, ab_test_config)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
         [companyId, name, subject, preview_text||null, from_name||"", from_email, reply_to||null,
-         template_id||null, html_body||null, text_body||null,
-         segment_id||null, utm_campaign_id||null,
+         uuidOrNull(template_id), html_body||null, text_body||null,
+         uuidOrNull(segment_id), uuidOrNull(utm_campaign_id),
          status, scheduled_at||null, JSON.stringify(ab_test_config)]
       );
       ok(res, normalizeTs(rows[0]), 201);
@@ -138,7 +182,7 @@ export function createEdmRouter(pool) {
   });
 
   router.get("/campaigns/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(`
         SELECT ec.*, s.name AS segment_name, t.name AS template_name
@@ -152,15 +196,20 @@ export function createEdmRouter(pool) {
   });
 
   router.patch("/campaigns/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const allowed = ["name","subject","preview_text","from_name","from_email","reply_to",
                      "template_id","html_body","text_body","segment_id","utm_campaign_id",
                      "status","scheduled_at","ab_test_config"];
+    const UUID_FIELDS = new Set(["segment_id", "utm_campaign_id", "template_id"]);
     const keys = Object.keys(req.body).filter(k => allowed.includes(k));
     if (!keys.length) return err(res, "No valid fields to update");
     try {
       const sets = keys.map((k, i) => `${k}=$${i + 3}`).join(", ");
-      const vals = keys.map(k => req.body[k] ?? null);
+      const vals = keys.map(k => {
+        if (UUID_FIELDS.has(k)) return uuidOrNull(req.body[k]);
+        if (k === "ab_test_config") return JSON.stringify(req.body[k] ?? {});
+        return req.body[k] ?? null;
+      });
       const { rows } = await pool.query(
         `UPDATE app.edm_campaigns SET ${sets} WHERE id=$1 AND company_id=$2 RETURNING *`,
         [req.params.id, companyId, ...vals]
@@ -170,40 +219,85 @@ export function createEdmRouter(pool) {
     } catch (e) { err(res, e.message, 500); }
   });
 
+  // Only draft emails can be deleted. Anything that has been scheduled, sent, or
+  // is otherwise in-flight must be archived instead (see /archive below), so the
+  // historical record and its analytics are preserved.
   router.delete("/campaigns/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
+      const { rows: [campaign] } = await pool.query(
+        `SELECT status FROM app.edm_campaigns WHERE id=$1 AND company_id=$2`,
+        [req.params.id, companyId]
+      );
+      if (!campaign) return err(res, "Campaign not found", 404);
+      if (campaign.status !== "draft") {
+        return err(res, "Only draft emails can be deleted. Archive it instead.", 409);
+      }
       await pool.query(`DELETE FROM app.edm_campaigns WHERE id=$1 AND company_id=$2`, [req.params.id, companyId]);
       ok(res, { success: true });
     } catch (e) { err(res, e.message, 500); }
   });
 
+  // Archive a non-draft email. Archived emails stay visible (in the Archived
+  // group) but are removed from the active workflow. Sending campaigns can't be
+  // archived mid-flight.
+  router.post("/campaigns/:id/archive", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    try {
+      const { rows } = await pool.query(
+        `UPDATE app.edm_campaigns SET status='archived'
+         WHERE id=$1 AND company_id=$2 AND status <> 'sending'
+         RETURNING *`,
+        [req.params.id, companyId]
+      );
+      if (!rows.length) return err(res, "Campaign not found or cannot be archived while sending", 404);
+      ok(res, normalizeTs(rows[0]));
+    } catch (e) { err(res, e.message, 500); }
+  });
+
   // ── Standalone recipients preview ───────────────────────────────────────────
   router.get("/recipients/preview", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(`
         SELECT COUNT(*) AS total
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL
-          AND cp.primary_email != ''
-          AND (cp.company_id IS NULL OR cp.company_id = $1)
-          AND cp.primary_email NOT IN (
-            SELECT email FROM app.edm_suppression WHERE company_id = $1
-          )
+        ${ELIGIBLE_RECIPIENTS_WHERE}
       `, [companyId]);
       ok(res, { count: Number(rows[0].total) });
     } catch (e) { err(res, e.message, 500); }
   });
 
+  // ── EDM settings (sender defaults from company DB settings + env fallback) ──
+  router.get("/settings", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    try {
+      const { rows: [company] } = await pool.query(
+        `SELECT settings FROM app.companies WHERE id = $1`, [companyId]
+      );
+      const s = company?.settings || {};
+      ok(res, {
+        from_name:  s.edm_from_name  || process.env.EDM_FROM_NAME  || "",
+        from_email: s.edm_from_email || process.env.EDM_FROM_EMAIL || "",
+        reply_to:   s.edm_reply_to   || "",
+      });
+    } catch (e) { err(res, e.message, 500); }
+  });
+
   // ── Standalone test send ───────────────────────────────────────────────────
   router.post("/test-send", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const { test_email, subject, html_body, from_name, from_email, reply_to } = req.body;
     if (!test_email) return err(res, "test_email is required");
     if (!subject)    return err(res, "subject is required");
     if (!html_body)  return err(res, "html_body is required");
     try {
+      const { rows: [company] } = await pool.query(
+        `SELECT settings FROM app.companies WHERE id = $1`, [companyId]
+      );
+      const s = company?.settings || {};
+      const effectiveFromEmail = from_email || s.edm_from_email || process.env.EDM_FROM_EMAIL || "";
+      const effectiveFromName  = from_name  || s.edm_from_name  || process.env.EDM_FROM_NAME  || "";
       const testMember = {
         eng_first_name: "Test", eng_last_name: "Recipient",
         eng_full_name: "Test Recipient", email: test_email,
@@ -214,8 +308,8 @@ export function createEdmRouter(pool) {
         to: test_email,
         subject: `[TEST] ${subject}`,
         html: personalised,
-        fromEmail: from_email || process.env.EDM_FROM_EMAIL || "onboarding@resend.dev",
-        fromName: from_name || process.env.EDM_FROM_NAME || "Click AI",
+        fromEmail: effectiveFromEmail,
+        fromName: effectiveFromName,
         replyTo: reply_to || null,
       });
       ok(res, { success: true, message_id: result.id, simulated: result.simulated || false });
@@ -224,7 +318,7 @@ export function createEdmRouter(pool) {
 
   // ── Preview recipients before sending ─────────────────────────────────────
   router.get("/campaigns/:id/recipients/preview", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows: [campaign] } = await pool.query(
         `SELECT * FROM app.edm_campaigns WHERE id=$1 AND company_id=$2`, [req.params.id, companyId]
@@ -240,13 +334,7 @@ export function createEdmRouter(pool) {
         SELECT cp.member_id, cp.primary_email AS email, cp.eng_full_name AS name,
                cp.member_type, cp.is_opt_in_email
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL
-          AND cp.primary_email != ''
-          AND (cp.company_id IS NULL OR cp.company_id = $1)
-          AND cp.primary_email NOT IN (
-            SELECT email FROM app.edm_suppression WHERE company_id = $1
-          )
+        ${ELIGIBLE_RECIPIENTS_WHERE}
         ORDER BY cp.member_join_date DESC
         LIMIT 500
       `, [companyId]);
@@ -257,7 +345,7 @@ export function createEdmRouter(pool) {
 
   // ── SEND a campaign ────────────────────────────────────────────────────────
   router.post("/campaigns/:id/send", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -293,13 +381,7 @@ export function createEdmRouter(pool) {
                cp.eng_first_name, cp.eng_last_name, cp.eng_full_name,
                cp.display_name, cp.member_type, cp.member_no
         FROM app.customer_profiles cp
-        WHERE cp.is_opt_in_email = true
-          AND cp.primary_email IS NOT NULL
-          AND cp.primary_email != ''
-          AND (cp.company_id IS NULL OR cp.company_id = $1)
-          AND cp.primary_email NOT IN (
-            SELECT email FROM app.edm_suppression WHERE company_id = $1
-          )
+        ${ELIGIBLE_RECIPIENTS_WHERE}
         LIMIT 10000
       `, [companyId]);
 
@@ -374,6 +456,19 @@ export function createEdmRouter(pool) {
         [campaign.id]
       );
 
+      // In-app notification (best-effort; never blocks the send).
+      const failedCount = failedResults.length;
+      await notifyCompany(pool, {
+        companyId,
+        type: "campaign_completed",
+        title: `Campaign "${campaign.name}" sent`,
+        body: failedCount
+          ? `Delivered to ${sentIds.length} recipient${sentIds.length === 1 ? "" : "s"} · ${failedCount} failed.`
+          : `Delivered to ${sentIds.length} recipient${sentIds.length === 1 ? "" : "s"}.`,
+        link: "/edm",
+        metadata: { campaign_id: campaign.id, sent: sentIds.length, failed: failedCount },
+      });
+
     } catch (e) {
       try { await client.query("ROLLBACK"); } catch {}
       console.error("[EDM send error]", e);
@@ -384,7 +479,7 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/campaigns/:id/cancel", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       await pool.query(
         `UPDATE app.edm_campaigns SET status='cancelled'
@@ -396,7 +491,7 @@ export function createEdmRouter(pool) {
   });
 
   router.get("/campaigns/:id/stats", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows: [campaign] } = await pool.query(
         `SELECT id, name, status, total_recipients, sent_at FROM app.edm_campaigns WHERE id=$1 AND company_id=$2`,
@@ -441,7 +536,7 @@ export function createEdmRouter(pool) {
   });
 
   router.get("/campaigns/:id/sends", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       // Verify campaign belongs to this company first
       const { rows: [cam] } = await pool.query(
@@ -466,7 +561,7 @@ export function createEdmRouter(pool) {
   // ══════════════════════════════════════════════════════════════════════════
 
   router.get("/suppression", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(
         `SELECT * FROM app.edm_suppression WHERE company_id=$1 ORDER BY added_at DESC LIMIT 500`,
@@ -477,7 +572,7 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/suppression", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const { email, reason = "manual" } = req.body;
     if (!email) return err(res, "email is required");
     try {
@@ -493,7 +588,7 @@ export function createEdmRouter(pool) {
   });
 
   router.delete("/suppression/:email", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       await pool.query(
         `DELETE FROM app.edm_suppression WHERE email=$1 AND company_id=$2`,
@@ -503,12 +598,62 @@ export function createEdmRouter(pool) {
     } catch (e) { err(res, e.message, 500); }
   });
 
+  // POST /suppression/bulk  (body: { entries: [{ email, reason }] })
+  router.post("/suppression/bulk", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    const { entries } = req.body;
+    if (!Array.isArray(entries) || !entries.length) return err(res, "entries array required");
+
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const seen = new Set();
+    const valid = [];
+    const invalid = [];
+
+    for (const e of entries) {
+      const email = String(e.email || "").trim().toLowerCase();
+      if (!email || !EMAIL_RE.test(email)) { invalid.push(e.email || "(empty)"); continue; }
+      if (seen.has(email)) continue;         // dedup within file
+      seen.add(email);
+      valid.push({ email, reason: String(e.reason || "manual").trim() || "manual" });
+    }
+
+    if (!valid.length) return err(res, "No valid email addresses found in the file");
+
+    try {
+      // Batch upsert using unnest - single round-trip regardless of size
+      const emails  = valid.map(v => v.email);
+      const reasons = valid.map(v => v.reason);
+      await pool.query(
+        `INSERT INTO app.edm_suppression (company_id, email, reason)
+         SELECT $1, unnest($2::text[]), unnest($3::text[])
+         ON CONFLICT (company_id, email) WHERE company_id IS NOT NULL
+         DO UPDATE SET reason = EXCLUDED.reason, added_at = NOW()`,
+        [companyId, emails, reasons]
+      );
+      ok(res, { added: valid.length, invalid_count: invalid.length, invalid });
+    } catch (e) { err(res, e.message, 500); }
+  });
+
+  // DELETE /suppression  (bulk - body: { emails: string[] })
+  router.delete("/suppression", authenticate, async (req, res) => {
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
+    const { emails } = req.body;
+    if (!Array.isArray(emails) || !emails.length) return err(res, "emails array is required");
+    try {
+      await pool.query(
+        `DELETE FROM app.edm_suppression WHERE company_id=$1 AND email = ANY($2::text[])`,
+        [companyId, emails.map(e => e.toLowerCase())]
+      );
+      ok(res, { success: true, removed: emails.length });
+    } catch (e) { err(res, e.message, 500); }
+  });
+
   // ══════════════════════════════════════════════════════════════════════════
   // AUTOMATIONS
   // ══════════════════════════════════════════════════════════════════════════
 
   router.get("/automations", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows } = await pool.query(
         `SELECT * FROM app.edm_automations WHERE company_id=$1 ORDER BY created_date DESC LIMIT 100`,
@@ -519,7 +664,7 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/automations", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const { name, trigger_type = "manual", trigger_config = {}, status = "draft" } = req.body;
     if (!name) return err(res, "name is required");
     try {
@@ -533,7 +678,7 @@ export function createEdmRouter(pool) {
   });
 
   router.patch("/automations/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const allowed = ["name","trigger_type","trigger_config","status"];
     const keys = Object.keys(req.body).filter(k => allowed.includes(k));
     if (!keys.length) return err(res, "No valid fields");
@@ -549,7 +694,7 @@ export function createEdmRouter(pool) {
   });
 
   router.delete("/automations/:id", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       await pool.query(
         `DELETE FROM app.edm_automations WHERE id=$1 AND company_id=$2`,
@@ -560,7 +705,7 @@ export function createEdmRouter(pool) {
   });
 
   router.get("/automations/:id/steps", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       // Verify automation belongs to this company
       const { rows: [auto] } = await pool.query(
@@ -577,7 +722,7 @@ export function createEdmRouter(pool) {
   });
 
   router.post("/automations/:id/steps", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     const { step_order = 0, step_type = "send_email", step_config = {} } = req.body;
     try {
       // Verify automation belongs to this company
@@ -596,7 +741,7 @@ export function createEdmRouter(pool) {
   });
 
   router.get("/automations/:id/enrollments", authenticate, async (req, res) => {
-    const companyId = getCompanyId(req, res); if (!companyId) return;
+    const companyId = await getCompanyId(req, res); if (!companyId) return;
     try {
       const { rows: [auto] } = await pool.query(
         `SELECT id FROM app.edm_automations WHERE id=$1 AND company_id=$2`,
@@ -684,3 +829,5 @@ export function createEdmRouter(pool) {
 
   return router;
 }
+
+

@@ -5,23 +5,38 @@ import {
   UserCheck, Ghost, Search, ChevronLeft, ChevronRight,
   Mail, Phone, Calendar, MapPin, Globe, BookOpen,
   Activity, ExternalLink, Filter, X,
-  Star, MousePointer, Clock, MessageCircle,
+  Star, MousePointer, Clock, MessageCircle, Eye, Copy,
   TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users,
-  Upload, Download, Trash2, FileText, AlertCircle, CheckCircle2,
+  Upload, Trash2,
+  ShoppingBag, Hash, BarChart2, ArrowUp, ArrowDown,
 } from "lucide-react";
+import { useStickyState } from "@/lib/useStickyState";
+import ProfilesAnalyticsPanel from "@/components/profiles/ProfilesAnalyticsPanel";
+import ProfileImportDialog from "@/components/import/ProfileImportDialog";
 import { Button } from "@/components/ui/button";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { format, parseISO, isValid } from "date-fns";
+import { format, parseISO, isValid, differenceInCalendarDays } from "date-fns";
 
 const TABS = [
   { key: "customer", label: "Customers", icon: UserCheck },
   { key: "anonymous", label: "Anonymous", icon: Ghost },
+  { key: "analytics", label: "Analytics", icon: BarChart2 },
 ];
+
+// Sort fields (resolved server-side) + group dimensions (applied to the current page).
+const CUST_SORT_OPTS  = [["join_date", "Join date"], ["name", "Name"], ["orders", "Orders"], ["spend", "Spend"], ["last_order", "Last order"], ["sessions", "Web sessions"], ["last_seen", "Last seen"]];
+const ANON_SORT_OPTS  = [["events", "Events"], ["page_views", "Page views"], ["sessions", "Sessions"], ["last_seen", "Last seen"], ["first_seen", "First seen"]];
+const CUST_GROUP_OPTS = [["none", "None"], ["channel", "Reg. channel"], ["source", "Source"], ["age_group", "Age group"], ["purchases", "Has purchases"]];
+const ANON_GROUP_OPTS = [["none", "None"], ["source_medium", "Source / Medium"], ["intent", "Form completed"]];
+
+// Percent-decode URLs for display so Chinese (and any non-ASCII) reads naturally.
+const decodeUrl = (u) => { try { return decodeURIComponent(u || ""); } catch { return u || ""; } };
 
 function safeDate(val, fmt = "MMM d, yyyy") {
   if (!val) return null;
@@ -30,6 +45,19 @@ function safeDate(val, fmt = "MMM d, yyyy") {
       ? parseISO(val.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3"))
       : parseISO(val);
     return isValid(d) ? format(d, fmt) : null;
+  } catch { return null; }
+}
+
+// "today" / "yesterday" / "N days ago" relative to now, for a timestamp value.
+function daysAgoLabel(val) {
+  if (!val) return null;
+  try {
+    const d = parseISO(val);
+    if (!isValid(d)) return null;
+    const n = differenceInCalendarDays(new Date(), d);
+    if (n <= 0) return "today";
+    if (n === 1) return "yesterday";
+    return `${n} days ago`;
   } catch { return null; }
 }
 
@@ -54,6 +82,265 @@ function Pill({ children, active }) {
   );
 }
 
+// How a profile got tagged - shown so users can see the value's origin.
+const AFFINITY_SOURCE_LABEL = { web_content: "content", rule: "rule", manual: "manual" };
+
+function AffinitiesBlock({ entityType, entityId }) {
+  const { data = [] } = useQuery({
+    queryKey: ["profile-affinities", entityType, entityId],
+    queryFn: () => appClient.attributes.profileAttributes(entityType, entityId),
+    enabled: !!entityId,
+  });
+  if (!data.length) return null;
+  // Flat "(source) Attribute: Value" chips. Dedupe identical
+  // (source, attribute, value): the same value from the same source AND attribute
+  // never repeats, but the same value is kept when the source differs OR the
+  // attribute differs - e.g. (content) Country: Australia next to both
+  // (rule) University Country: Australia and (content) University Country: Australia.
+  const seen = new Set();
+  const tags = [];
+  for (const a of data) {
+    const key = `${a.source}|${a.attribute_name}|${String(a.value ?? "").toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(a);
+  }
+  return (
+    <div>
+      <SectionTitle>Affinities & Attributes</SectionTitle>
+      <div className="flex flex-wrap gap-1">
+        {tags.map((a, i) => (
+          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/40 border border-border">
+            <span className="text-muted-foreground">({AFFINITY_SOURCE_LABEL[a.source] || a.source}) {a.attribute_name}: </span>
+            <strong>{a.value}</strong>
+            {a.score > 1 && <span className="text-muted-foreground"> ·{a.score}</span>}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const ORDER_STATUS_STYLE = {
+  completed: "bg-foreground text-background",
+  confirmed: "border border-border text-foreground",
+  cancelled: "border border-border text-muted-foreground line-through",
+  draft:     "border border-border text-muted-foreground",
+};
+
+// Lazily fetches a member's Shopify orders (only mounts when the card is expanded).
+function TransactionsBlock({ memberId, fmtMoney }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["profile-transactions", memberId],
+    queryFn: () => appClient.profiles.transactions(memberId),
+    enabled: !!memberId,
+  });
+  const orders = data?.orders || [];
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">Loading orders…</p>;
+  if (!orders.length) return null;
+  return (
+    <div>
+      <SectionTitle>Recent Orders ({orders.length})</SectionTitle>
+      <div className="space-y-1.5">
+        {orders.slice(0, 10).map(o => {
+          const items = Array.isArray(o.items) ? o.items : [];
+          return (
+            <div key={o.trxn_id} className="rounded-md border border-border bg-secondary/30 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium font-mono">{o.trxn_ref || o.trxn_id}</span>
+                <span className="text-[11px] font-semibold">{fmtMoney(o.amount, o.currency)}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                {o.trxn_date && <span>{safeDate(o.trxn_date)}</span>}
+                <span className={`px-1.5 py-px rounded-full text-[9px] ${ORDER_STATUS_STYLE[o.trxn_order_status] || "border border-border text-muted-foreground"}`}>
+                  {o.trxn_order_status}
+                </span>
+                {o.trxn_channel && <span>· {o.trxn_channel}</span>}
+              </div>
+              {items.length > 0 && (
+                <div className="mt-1.5 space-y-0.5">
+                  {items.slice(0, 4).map((it, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                      <span className="truncate">{it.qty}× {it.name || it.sku || "Item"}</span>
+                      <span className="flex-shrink-0">{fmtMoney(it.unit_price, o.currency)}</span>
+                    </div>
+                  ))}
+                  {items.length > 4 && <p className="text-[10px] text-muted-foreground">+{items.length - 4} more item{items.length - 4 !== 1 ? "s" : ""}</p>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InsightRow({ label, value, sub }) {
+  if (value == null || value === "") return null;
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-[11px]">
+      <span className="text-muted-foreground flex-shrink-0">{label}</span>
+      <span className="text-foreground font-medium text-right truncate">
+        {value}{sub != null && <span className="text-muted-foreground font-normal"> {sub}</span>}
+      </span>
+    </div>
+  );
+}
+
+// Lazily-loaded "Top" web/transaction values + marketing touchpoints for a profile.
+function InsightsBlock({ type, id }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["profile-insights", type, id],
+    queryFn: () => type === "customer" ? appClient.profiles.insights(id) : appClient.profiles.anonymousInsights(id),
+    enabled: !!id,
+  });
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">Loading insights…</p>;
+  if (!data) return null;
+  const web = data.web || {};
+  const tx = data.transactions || {};
+  const tp = data.touchpoints || {};
+  const clip = (u) => { const d = decodeUrl(u); return d.length > 46 ? d.slice(0, 46) + "…" : d; };
+
+  const webItems = [
+    web.top_page && { label: "Top page", value: clip(web.top_page.value), sub: `·${web.top_page.count}` },
+    web.top_outbound_link && { label: "Top outbound link", value: clip(web.top_outbound_link.value), sub: `·${web.top_outbound_link.count}` },
+    web.engagement_events > 0 && { label: "Engagement", value: `${web.engagement_events.toLocaleString()} events` },
+    web.top_content_attribute && { label: `Top ${web.top_content_attribute.name}`, value: web.top_content_attribute.value, sub: web.top_content_attribute.score > 1 ? `·${web.top_content_attribute.score}` : null },
+  ].filter(Boolean);
+
+  const txItems = [
+    tx.top_product && { label: "Top product", value: tx.top_product.value, sub: `·${tx.top_product.qty}` },
+    tx.top_category && { label: "Top category", value: tx.top_category.value, sub: `·${tx.top_category.qty}` },
+    tx.top_channel && { label: "Top channel", value: tx.top_channel.value },
+  ].filter(Boolean);
+
+  const emails = tp.emails || [];
+  const popups = tp.popups || [];          // pop-ups whose form they submitted
+  const popupsSeen = tp.popups_seen || []; // pop-ups they were shown / clicked
+  const utm = tp.utm_links || [];
+  const segments = data.segments || [];
+
+  // Compose the full UTM string for display from the campaign's parts.
+  const utmFull = (u) => {
+    const parts = [
+      u.utm_source && `source=${u.utm_source}`,
+      u.utm_medium && `medium=${u.utm_medium}`,
+      u.utm_campaign && `campaign=${u.utm_campaign}`,
+      u.utm_term && `term=${u.utm_term}`,
+      u.utm_content && `content=${u.utm_content}`,
+    ].filter(Boolean);
+    return parts.join(" · ");
+  };
+  const utmHref = (u) => {
+    if (!u.base_url) return null;
+    const qs = [
+      u.utm_source && `utm_source=${encodeURIComponent(u.utm_source)}`,
+      u.utm_medium && `utm_medium=${encodeURIComponent(u.utm_medium)}`,
+      u.utm_campaign && `utm_campaign=${encodeURIComponent(u.utm_campaign)}`,
+      u.utm_term && `utm_term=${encodeURIComponent(u.utm_term)}`,
+      u.utm_content && `utm_content=${encodeURIComponent(u.utm_content)}`,
+    ].filter(Boolean).join("&");
+    const base = /^https?:\/\//i.test(u.base_url) ? u.base_url : `https://${u.base_url}`;
+    return qs ? `${base}${base.includes("?") ? "&" : "?"}${qs}` : base;
+  };
+
+  const hasTouchpoints = emails.length || popups.length || popupsSeen.length || utm.length;
+  if (!webItems.length && !txItems.length && !hasTouchpoints && !segments.length) return null;
+
+  return (
+    <>
+      {webItems.length > 0 && (
+        <div>
+          <SectionTitle>Top Web Activity</SectionTitle>
+          <div className="space-y-1">{webItems.map((it, i) => <InsightRow key={i} {...it} />)}</div>
+        </div>
+      )}
+      {txItems.length > 0 && (
+        <div>
+          <SectionTitle>Top Purchases</SectionTitle>
+          <div className="space-y-1">{txItems.map((it, i) => <InsightRow key={i} {...it} />)}</div>
+        </div>
+      )}
+      {segments.length > 0 && (
+        <div>
+          <SectionTitle>Segments</SectionTitle>
+          <div className="flex flex-wrap gap-1">
+            {segments.map((s) => (
+              <span key={s.id} className="text-[10px] px-2 py-0.5 rounded-full border border-border bg-secondary/40 text-foreground flex items-center gap-1">
+                <Users className="w-2.5 h-2.5" /> {s.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {hasTouchpoints > 0 && (
+        <div>
+          <SectionTitle>Touchpoints</SectionTitle>
+          <div className="space-y-2.5">
+            {emails.length > 0 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Mail className="w-3 h-3" /> Email campaigns sent</p>
+                <div className="space-y-1">
+                  {emails.map((e, i) => (
+                    <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="truncate">{e.campaign}</span>
+                      <span className="flex-shrink-0">
+                        {e.clicked ? <Badge variant="secondary" className="text-[9px] h-4 px-1">clicked</Badge>
+                          : e.opened ? <Badge variant="secondary" className="text-[9px] h-4 px-1">opened</Badge>
+                          : <span className="text-[10px] text-muted-foreground">{e.status}</span>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {utm.length > 0 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><ExternalLink className="w-3 h-3" /> UTM links</p>
+                <div className="space-y-1">
+                  {utm.map((u, i) => {
+                    const href = utmHref(u);
+                    return (
+                      <div key={i} className="text-[11px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium truncate">{u.name || u.utm_campaign}</span>
+                          {href && <button onClick={() => { navigator.clipboard.writeText(href); toast.success("UTM link copied"); }} title="Copy UTM link" className="text-muted-foreground hover:text-foreground flex-shrink-0"><Copy className="w-2.5 h-2.5" /></button>}
+                        </div>
+                        {utmFull(u) && <p className="text-[10px] text-muted-foreground truncate">{utmFull(u)}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {popupsSeen.length > 0 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Eye className="w-3 h-3" /> Pop-ups seen</p>
+                <div className="flex flex-wrap gap-1">
+                  {popupsSeen.map((p, i) => (
+                    <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground flex items-center gap-1">
+                      {p.name}{p.clicked && <Badge variant="secondary" className="text-[9px] h-3.5 px-1">clicked</Badge>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {popups.length > 0 && (
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><MessageCircle className="w-3 h-3" /> Pop-up forms submitted</p>
+                <div className="flex flex-wrap gap-1">
+                  {popups.map((p, i) => <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground">{p.name}</span>)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function CustomerCard({ profile, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -63,6 +350,16 @@ function CustomerCard({ profile, onDelete }) {
   const joinDate = safeDate(profile.member_join_date);
   const gaFirstSeen = safeDate(profile.ga_first_seen);
   const gaLastSeen = safeDate(profile.ga_last_seen);
+  // Purchase aggregates (from commerce."order" + manual.sale, joined server-side)
+  const orderCount = Number(profile.order_count) || 0;
+  const totalSpend = Number(profile.total_spend) || 0;
+  const hasOrders = orderCount > 0;
+  const lastOrder = safeDate(profile.last_order_date);
+  const firstOrder = safeDate(profile.first_order_date);
+  const currency = profile.order_currency || "";
+  const fmtMoney = (n, cur) => `${(cur || currency) ? (cur || currency) + " " : ""}${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  const money = (n) => fmtMoney(n);
+  const avgOrder = hasOrders ? totalSpend / orderCount : 0;
 
   const initials = (profile.eng_first_name?.[0] || profile.display_name?.[0] || "?").toUpperCase();
   const attrs = profile.attributes && typeof profile.attributes === "object" ? profile.attributes : {};
@@ -87,6 +384,11 @@ function CustomerCard({ profile, onDelete }) {
                   <Activity className="w-2.5 h-2.5" /> Web active
                 </Badge>
               )}
+              {hasOrders && (
+                <Badge className="text-[10px] h-4 px-1.5 gap-0.5 bg-foreground text-background">
+                  <ShoppingBag className="w-2.5 h-2.5" /> {orderCount} order{orderCount !== 1 ? "s" : ""}
+                </Badge>
+              )}
               {profile.is_opt_in_email && (
                 <Badge variant="outline" className="text-[10px] h-4 px-1.5">Email opt-in</Badge>
               )}
@@ -97,6 +399,11 @@ function CustomerCard({ profile, onDelete }) {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5">{profile.primary_email}</p>
+            {profile.member_id && (
+              <p className="text-[10px] text-muted-foreground/70 font-mono mt-0.5 flex items-center gap-1">
+                <Hash className="w-2.5 h-2.5" />{profile.member_id}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
             {profile.is_imported && (
@@ -165,6 +472,17 @@ function CustomerCard({ profile, onDelete }) {
             )}
           </div>
         )}
+
+        {/* Purchase summary strip */}
+        {hasOrders && (
+          <div className="mt-3 text-[11px] text-muted-foreground leading-relaxed border-t border-border pt-3 flex flex-wrap items-center gap-x-1">
+            <span className="font-medium text-foreground inline-flex items-center gap-1"><ShoppingBag className="w-3 h-3" /> Purchases:</span>
+            <span>
+              {orderCount} order{orderCount !== 1 ? "s" : ""} · <strong className="text-foreground">{money(totalSpend)}</strong> total
+              {lastOrder && <> · last order {lastOrder}{profile.last_order_date && <span className="opacity-70"> ({daysAgoLabel(profile.last_order_date)})</span>}</>}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Expanded detail */}
@@ -198,6 +516,9 @@ function CustomerCard({ profile, onDelete }) {
             </div>
           </div>
 
+          {/* Top web/transaction values + marketing touchpoints (lazy-loaded) */}
+          <InsightsBlock type="customer" id={profile.member_id} />
+
           {/* Membership attributes (intended year, year group, etc.) */}
           {hasAttributes && (
             <div>
@@ -212,6 +533,33 @@ function CustomerCard({ profile, onDelete }) {
               </div>
             </div>
           )}
+
+          {/* Purchases (Shopify) */}
+          {hasOrders && (
+            <div>
+              <SectionTitle>Purchases</SectionTitle>
+              <div className="grid grid-cols-3 gap-1.5 mb-2">
+                <StatBox label="Orders" value={orderCount} />
+                <div className="rounded-md px-3 py-2 text-center bg-secondary/50">
+                  <p className="text-sm font-semibold">{money(totalSpend)}</p>
+                  <p className="text-[10px] text-muted-foreground">Total spend</p>
+                </div>
+                <div className="rounded-md px-3 py-2 text-center bg-secondary/50">
+                  <p className="text-sm font-semibold">{money(avgOrder)}</p>
+                  <p className="text-[10px] text-muted-foreground">Avg order</p>
+                </div>
+              </div>
+              <div className="text-[11px] space-y-0.5 text-muted-foreground">
+                {firstOrder && <p>First order: <strong className="text-foreground">{firstOrder}</strong>{lastOrder && firstOrder !== lastOrder && <> · Last order: <strong className="text-foreground">{lastOrder}</strong></>}</p>}
+              </div>
+            </div>
+          )}
+
+          {/* Order history (lazy-loaded) */}
+          {hasOrders && <TransactionsBlock memberId={profile.member_id} fmtMoney={fmtMoney} />}
+
+          {/* Behavioral / custom attributes */}
+          <AffinitiesBlock entityType="customer" entityId={profile.member_id} />
 
           {/* GA web activity */}
           {hasGa && (
@@ -240,7 +588,7 @@ function CustomerCard({ profile, onDelete }) {
                     {profile.ga_pages_visited.slice(0, 6).map(p => (
                       <div key={p} className="flex items-center gap-1 text-[10px] text-muted-foreground">
                         <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
-                        <span className="truncate">{p}</span>
+                        <span className="truncate">{decodeUrl(p)}</span>
                       </div>
                     ))}
                   </div>
@@ -345,6 +693,9 @@ function AnonymousCard({ profile }) {
       {expanded && (
         <div className="border-t border-border px-5 py-4 space-y-4">
 
+          {/* Top web values + marketing touchpoints (lazy-loaded) */}
+          <InsightsBlock type="anonymous" id={profile.visitor_id} />
+
           {/* Extended metrics */}
           <div>
             <SectionTitle>All Behaviour Signals</SectionTitle>
@@ -400,7 +751,7 @@ function AnonymousCard({ profile }) {
                 {profile.pages_visited.slice(0, 8).map(p => (
                   <div key={p} className="flex items-center gap-1 text-[10px] text-muted-foreground">
                     <MousePointer className="w-2.5 h-2.5 flex-shrink-0" />
-                    <span className="truncate">{p}</span>
+                    <span className="truncate">{decodeUrl(p)}</span>
                   </div>
                 ))}
                 {profile.pages_visited.length > 8 && (
@@ -409,6 +760,9 @@ function AnonymousCard({ profile }) {
               </div>
             </div>
           )}
+
+          {/* Behavioral / custom attributes */}
+          <AffinitiesBlock entityType="anonymous" entityId={profile.visitor_id} />
 
           <div className="text-[10px] text-muted-foreground font-mono break-all pt-1">
             Visitor ID: {profile.visitor_id}
@@ -419,41 +773,44 @@ function AnonymousCard({ profile }) {
   );
 }
 
-function ActiveFilters({ filters, labels, onRemove }) {
-  const active = Object.entries(filters).filter(([, v]) => v);
-  if (!active.length) return null;
-  return (
-    <div className="flex flex-wrap gap-1.5 mt-2">
-      {active.map(([key, value]) => (
-        <span key={key} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-          {labels[key] || key}: <strong>{value === "true" ? "Yes" : value}</strong>
-          <button onClick={() => onRemove(key)} className="hover:text-foreground text-muted-foreground ml-0.5">
-            <X className="w-3 h-3" />
-          </button>
-        </span>
-      ))}
-    </div>
+function ActiveFilters({ filters, labels, onRemove, inline }) {
+  const chip = (key, value, display) => (
+    <span key={`${key}:${value}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+      {labels[key] || key}: <strong>{display}</strong>
+      <button onClick={() => onRemove(key, value)} className="hover:text-foreground text-muted-foreground ml-0.5">
+        <X className="w-3 h-3" />
+      </button>
+    </span>
   );
+  const chips = [];
+  for (const [key, value] of Object.entries(filters)) {
+    if (Array.isArray(value)) value.forEach(v => chips.push(chip(key, v, v)));
+    else if (value) chips.push(chip(key, value, value === "true" ? "Yes" : value));
+  }
+  if (!chips.length) return null;
+  if (inline) return <>{chips}</>;
+  return <div className="flex flex-wrap gap-1.5 mt-2">{chips}</div>;
 }
 
 function filtersToSegmentCriteria(filters, isCustomer) {
   if (!isCustomer) {
     return {
-      source_medium: filters.source_medium || "",
+      source: filters.source || [],
+      medium: filters.medium || [],
       has_form_complete: filters.has_form_complete === "true" ? "true" : "",
     };
   }
   return {
-    reg_channel:       filters.reg_channel || "",
-    education_level:   filters.education_level || "",
-    age_group:         filters.age_group || "",
-    gender:            filters.gender || "",
-    nationality:       filters.nationality || "",
-    preferred_language: filters.preferred_language || "",
-    employment_status: filters.employment_status || "",
-    income_level:      filters.income_level || "",
-    member_type:       filters.member_type || "",
-    preferred_channel: filters.preferred_channel || "",
+    reg_channel:       filters.reg_channel || [],
+    education_level:   filters.education_level || [],
+    age_group:         filters.age_group || [],
+    gender:            filters.gender || [],
+    nationality:       filters.nationality || [],
+    preferred_language: filters.preferred_language || [],
+    employment_status: filters.employment_status || [],
+    income_level:      filters.income_level || [],
+    member_type:       filters.member_type || [],
+    preferred_channel: filters.preferred_channel || [],
     is_opt_in_email:   filters.opt_in_email === "true" ? "true" : "",
     opt_in_sms:        filters.opt_in_sms === "true" ? "true" : "",
     is_subscriber:     filters.is_subscriber === "true" ? "true" : "",
@@ -461,6 +818,10 @@ function filtersToSegmentCriteria(filters, isCustomer) {
     min_ga_sessions:   filters.min_ga_sessions || "",
     has_seminars:      filters.has_seminars === "true" ? "true" : "",
     has_attributes:    filters.has_attributes === "true" ? "true" : "",
+    has_transactions:  filters.has_transactions === "true" ? "true" : "",
+    min_orders:        filters.min_orders || "",
+    min_spend:         filters.min_spend || "",
+    ordered_within:    filters.ordered_within || "",
   };
 }
 
@@ -483,11 +844,17 @@ function criteriaToChips(crit) {
     min_ga_sessions:    v => `${v}+ GA sessions`,
     has_seminars:       () => `attended seminar`,
     has_attributes:     () => `has study intentions`,
-    source_medium:      v => `source: ${v}`,
+    has_transactions:   () => `has purchases`,
+    min_orders:         v => `${v}+ orders`,
+    min_spend:          v => `${v}+ spend`,
+    ordered_within:     v => `ordered in last ${v} days`,
+    source_medium:      v => `source/medium: ${v}`,
+    source:             v => `source: ${v}`,
+    medium:             v => `medium: ${v}`,
     has_form_complete:  () => `completed a form`,
   };
   return Object.entries(crit)
-    .filter(([, v]) => v)
+    .filter(([k, v]) => k !== "attribute_value_ids" && (Array.isArray(v) ? v.length : v))
     .map(([k, v]) => labels[k]?.(v) || `${k}: ${v}`);
 }
 
@@ -499,18 +866,27 @@ export default function Profiles() {
   const [saveSegmentOpen, setSaveSegmentOpen] = useState(false);
   const [segmentName, setSegmentName] = useState("");
   const [segmentDesc, setSegmentDesc] = useState("");
+  // Multi-select demographic fields hold arrays; boolean/threshold fields stay scalar strings.
   const [custFilters, setCustFilters] = useState({
-    reg_channel: "", education_level: "", age_group: "", gender: "", nationality: "", preferred_language: "",
-    employment_status: "", income_level: "", member_type: "", preferred_channel: "",
+    reg_channel: [], education_level: [], age_group: [], gender: [], nationality: [], preferred_language: [],
+    employment_status: [], income_level: [], member_type: [], preferred_channel: [],
     has_ga: "", min_ga_sessions: "", has_seminars: "", has_attributes: "",
     opt_in_email: "", opt_in_sms: "", is_subscriber: "", is_imported: "",
+    has_transactions: "", min_orders: "", min_spend: "", ordered_within: "",
   });
-  const [anonFilters, setAnonFilters] = useState({ source_medium: "", has_form_complete: "" });
-  // Import dialog state
+  const [anonFilters, setAnonFilters] = useState({ source: [], medium: [], has_form_complete: "" });
+  // Sort (server-side) + group (current page) per tab; persisted across refreshes.
+  const [custSort, setCustSort] = useStickyState("join_date", "prof.custSort");
+  const [custDir, setCustDir] = useStickyState("desc", "prof.custDir");
+  const [custGroup, setCustGroup] = useStickyState("none", "prof.custGroup");
+  const [anonSort, setAnonSort] = useStickyState("events", "prof.anonSort");
+  const [anonDir, setAnonDir] = useStickyState("desc", "prof.anonDir");
+  const [anonGroup, setAnonGroup] = useStickyState("none", "prof.anonGroup");
+  // Applied-attribute filters, keyed by attribute id → selected value id (AND across attributes).
+  const [attrFilters, setAttrFilters] = useState({});
+  // Import dialog (UI lives in the shared ProfileImportDialog)
   const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState(null);
-  const [importResults, setImportResults] = useState(null);
-  const fileInputRef = useRef(null);
+  const filterRef = useRef(null);
   const queryClient = useQueryClient();
   const LIMIT = 20;
 
@@ -535,22 +911,13 @@ export default function Profiles() {
     onError: (err) => toast.error(err.message || "Failed to delete profile"),
   });
 
-  const importMutation = useMutation({
-    mutationFn: (file) => appClient.profiles.importProfiles(file),
-    onSuccess: (data) => {
-      setImportResults(data);
-      setImportFile(null);
-      queryClient.invalidateQueries({ queryKey: ["profiles-customers"] });
-    },
-    onError: (err) => toast.error(err.message || "Import failed"),
-  });
-
   const handleSaveSegment = () => {
     const isCustomer = activeTab === "customer";
     const filters = isCustomer ? custFilters : anonFilters;
     const crit = filtersToSegmentCriteria(filters, isCustomer);
-    const chips = criteriaToChips(crit);
-    const activeCrit = Object.fromEntries(Object.entries(crit).filter(([, v]) => v));
+    if (attrValueIds.length) crit.attribute_value_ids = attrValueIds;
+    const chips = [...criteriaToChips(crit), ...attrChips];
+    const activeCrit = Object.fromEntries(Object.entries(crit).filter(([, v]) => (Array.isArray(v) ? v.length : v)));
     const descParts = chips.length ? `Criteria: ${chips.join(", ")}.` : "";
     const description = segmentDesc
       ? (chips.length ? `${segmentDesc} ${descParts}` : segmentDesc)
@@ -568,22 +935,54 @@ export default function Profiles() {
     });
   };
 
-  useEffect(() => { setPage(1); }, [activeTab, search, custFilters, anonFilters]);
+  useEffect(() => { setPage(1); }, [activeTab, search, custFilters, anonFilters, attrFilters, custSort, custDir, anonSort, anonDir]);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.target.closest?.("[data-multiselect-popover]")) return; if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilters(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const { data: custFilterOpts } = useQuery({ queryKey: ["profiles-cust-filters"], queryFn: () => appClient.profiles.customerFilters() });
   const { data: anonFilterOpts } = useQuery({ queryKey: ["profiles-anon-filters"], queryFn: () => appClient.profiles.anonymousFilters() });
+  // Active attributes (with applied values) available to filter by, scoped per tab.
+  const { data: attrOptions = [] } = useQuery({ queryKey: ["attribute-options"], queryFn: () => appClient.attributes.options() });
+
+  // Lightweight total counts per tab (unfiltered) for the tab labels.
+  const { data: custCount } = useQuery({ queryKey: ["profiles-customers-count"], queryFn: () => appClient.profiles.listCustomers({ page: 1, limit: 1 }) });
+  const { data: anonCount } = useQuery({ queryKey: ["profiles-anonymous-count"], queryFn: () => appClient.profiles.listAnonymous({ page: 1, limit: 1 }) });
+  const tabCounts = { customer: custCount?.total, anonymous: anonCount?.total };
 
   const isCustomer = activeTab === "customer";
 
+  // Attributes relevant to the current tab (scope "both" applies to either).
+  const scopedAttrs = attrOptions.filter(a => a.scope === "both" || a.scope === activeTab);
+  // attrFilters: { [attributeId]: valueId[] }. Within an attribute the values are OR'd;
+  // across attributes they're AND'd, encoded as `attr_groups` = "v1,v2;v3" (";"-separated groups).
+  const attrValueIds = Object.values(attrFilters).flat().filter(Boolean);
+  const attr_groups = Object.values(attrFilters)
+    .map(vals => (vals || []).filter(Boolean).join(","))
+    .filter(Boolean)
+    .join(";");
+  // attribute id → value id → human label, for chips and segment descriptions.
+  const attrLabel = (attrId, valId) => {
+    const a = attrOptions.find(x => String(x.id) === String(attrId));
+    const v = a?.values.find(x => String(x.id) === String(valId));
+    return a && v ? `${a.name}: ${v.value}` : null;
+  };
+  const attrChips = Object.entries(attrFilters)
+    .flatMap(([aid, vals]) => (vals || []).map(vid => attrLabel(aid, vid)))
+    .filter(Boolean);
+
   const { data: custData, isLoading: custLoading } = useQuery({
-    queryKey: ["profiles-customers", search, page, custFilters],
-    queryFn: () => appClient.profiles.listCustomers({ search, page, limit: LIMIT, ...custFilters }),
+    queryKey: ["profiles-customers", search, page, custFilters, attr_groups, custSort, custDir],
+    queryFn: () => appClient.profiles.listCustomers({ search, page, limit: LIMIT, ...custFilters, attr_groups, sort: custSort, dir: custDir }),
     enabled: isCustomer,
     keepPreviousData: true,
   });
   const { data: anonData, isLoading: anonLoading } = useQuery({
-    queryKey: ["profiles-anonymous", search, page, anonFilters],
-    queryFn: () => appClient.profiles.listAnonymous({ search, page, limit: LIMIT, ...anonFilters }),
+    queryKey: ["profiles-anonymous", search, page, anonFilters, attr_groups, anonSort, anonDir],
+    queryFn: () => appClient.profiles.listAnonymous({ search, page, limit: LIMIT, ...anonFilters, attr_groups, sort: anonSort, dir: anonDir }),
     enabled: !isCustomer,
     keepPreviousData: true,
   });
@@ -593,12 +992,66 @@ export default function Profiles() {
   const isLoading = isCustomer ? custLoading : anonLoading;
   const totalPages = Math.ceil(total / LIMIT);
 
+  // Group the current page's profiles (server already sorted them). null = no grouping.
+  const groupKey = isCustomer ? custGroup : anonGroup;
+  const groupOf = (p) => {
+    if (isCustomer) {
+      if (groupKey === "channel")   return p.member_reg_channel || "Unknown channel";
+      if (groupKey === "source")    return p.member_source || "ga";
+      if (groupKey === "age_group") return p.age_group || "Unknown age";
+      if (groupKey === "purchases") return Number(p.order_count) > 0 ? "Has purchases" : "No purchases";
+    } else {
+      if (groupKey === "source_medium") return p.top_source_medium || "Unknown source";
+      if (groupKey === "intent")        return Number(p.form_completes) > 0 ? "Completed a form" : "No form";
+    }
+    return null;
+  };
+  const groupedProfiles = (() => {
+    if (groupKey === "none") return null;
+    const map = new Map();
+    for (const p of profiles) {
+      const k = groupOf(p) ?? "Other";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(p);
+    }
+    return [...map.entries()].map(([label, items]) => ({ label, items }));
+  })();
+  const renderCard = (p) => isCustomer
+    ? <CustomerCard key={p.member_id} profile={p} onDelete={deleteProfileMutation.mutate} />
+    : <AnonymousCard key={p.visitor_id} profile={p} />;
+
   const setCustFilter = (k, v) => setCustFilters(f => ({ ...f, [k]: v }));
   const setAnonFilter = (k, v) => setAnonFilters(f => ({ ...f, [k]: v }));
+  const setAttrFilter = (attrId, vals) => setAttrFilters(f => {
+    const next = { ...f };
+    if (vals && vals.length) next[attrId] = vals; else delete next[attrId];
+    return next;
+  });
 
-  const hasActiveFilters = isCustomer
-    ? Object.values(custFilters).some(Boolean)
-    : Object.values(anonFilters).some(Boolean);
+  // A filter is active if any array field has entries or any scalar field is set.
+  const anyFilterSet = (obj) => Object.values(obj).some(v => Array.isArray(v) ? v.length > 0 : !!v);
+  const hasActiveFilters = (isCustomer ? anyFilterSet(custFilters) : anyFilterSet(anonFilters)) || attrValueIds.length > 0;
+
+  // "Applied attributes" filter section - one dropdown per active attribute that
+  // applies to the current tab. Picking a value narrows the list to profiles tagged with it.
+  const attrFilterSection = scopedAttrs.length > 0 && (
+    <div className="p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Applied attributes</p>
+      <div className="grid grid-cols-3 gap-3">
+        {scopedAttrs.map(a => (
+          <div key={a.id}>
+            <p className="text-[10px] text-muted-foreground mb-1 truncate" title={a.name}>{a.name}</p>
+            <MultiSelect
+              value={attrFilters[a.id] || []}
+              onChange={v => setAttrFilter(a.id, v)}
+              options={a.values.map(v => ({ value: v.id, label: `${v.value}${v.profile_count > 0 ? ` (${v.profile_count})` : ""}` }))}
+              placeholder="All"
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -613,12 +1066,8 @@ export default function Profiles() {
           </div>
           {activeTab === "customer" && (
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="h-9 gap-1.5"
-                onClick={() => appClient.profiles.downloadTemplate()}>
-                <Download className="w-3.5 h-3.5" /> Template
-              </Button>
               <Button size="sm" className="h-9 gap-1.5"
-                onClick={() => { setImportOpen(true); setImportResults(null); setImportFile(null); }}>
+                onClick={() => setImportOpen(true)}>
                 <Upload className="w-3.5 h-3.5" /> Import Profiles
               </Button>
             </div>
@@ -629,14 +1078,16 @@ export default function Profiles() {
         <div className="flex border-b border-border gap-6">
           {TABS.map(tab => {
             const Icon = tab.icon;
+            const count = tabCounts[tab.key];
             return (
               <button key={tab.key}
-                onClick={() => { setActiveTab(tab.key); setSearch(""); setPage(1); }}
+                onClick={() => { setActiveTab(tab.key); setSearch(""); setPage(1); setAttrFilters({}); }}
                 className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
                   activeTab === tab.key ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" /> {tab.label}
+                {count > 0 && <span className="text-[10px] text-muted-foreground">{count.toLocaleString()}</span>}
               </button>
             );
           })}
@@ -644,7 +1095,9 @@ export default function Profiles() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-8 py-6">
+      <div className="flex-1 overflow-auto">
+        {activeTab === "analytics" ? <ProfilesAnalyticsPanel /> : (
+        <div className="px-8 py-6">
         {/* Search + filters */}
         <div className="mb-4">
           <div className="flex items-center gap-3">
@@ -653,22 +1106,218 @@ export default function Profiles() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder={isCustomer ? "Search name, email, or member no…" : "Search visitor ID…"}
+                placeholder={isCustomer ? "Search name, email, member ID or no…" : "Search visitor ID…"}
                 className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
-            <Button
-              variant="outline" size="sm" className="h-9 gap-1.5"
-              onClick={() => setShowFilters(f => !f)}
-            >
-              <Filter className="w-3.5 h-3.5" /> Filters
-              {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground" />}
-            </Button>
+            <div ref={filterRef} className="relative">
+              <Button
+                variant="outline" size="sm" className="h-9 gap-1.5"
+                onClick={() => setShowFilters(f => !f)}
+              >
+                <Filter className="w-3.5 h-3.5" /> Filters
+                {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
+              </Button>
+              {showFilters && (
+                <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg overflow-hidden w-[540px] max-h-[480px] overflow-y-auto">
+                  <div className="flex items-center justify-between px-4 pt-4 pb-2">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                    {hasActiveFilters && (
+                      <button
+                        onClick={() => {
+                          setCustFilters({ reg_channel: [], education_level: [], age_group: [], gender: [], nationality: [], preferred_language: [], employment_status: [], income_level: [], member_type: [], preferred_channel: [], has_ga: "", min_ga_sessions: "", has_seminars: "", has_attributes: "", opt_in_email: "", opt_in_sms: "", is_subscriber: "", is_imported: "", has_transactions: "", min_orders: "", min_spend: "", ordered_within: "" });
+                          setAnonFilters({ source: [], medium: [], has_form_complete: "" });
+                          setAttrFilters({});
+                        }}
+                        className="text-[11px] text-muted-foreground hover:text-foreground"
+                      >Clear all</button>
+                    )}
+                  </div>
+                  {isCustomer ? (
+                    <div className="divide-y divide-border">
+                      <div className="p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Demographics</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          {[
+                            { key: "reg_channel",       label: "Channel",     opts: custFilterOpts?.reg_channels },
+                            { key: "age_group",          label: "Age group",   opts: custFilterOpts?.age_groups },
+                            { key: "gender",             label: "Gender",      opts: custFilterOpts?.genders },
+                            { key: "nationality",        label: "Nationality", opts: custFilterOpts?.nationalities },
+                            { key: "education_level",    label: "Education",   opts: custFilterOpts?.education_levels },
+                            { key: "employment_status",  label: "Employment",  opts: custFilterOpts?.employment_statuses },
+                            { key: "income_level",       label: "Income",      opts: custFilterOpts?.income_levels },
+                            { key: "member_type",        label: "Member type", opts: custFilterOpts?.member_types },
+                            { key: "preferred_language", label: "Language",    opts: custFilterOpts?.languages },
+                          ].map(f => (
+                            <div key={f.key}>
+                              <p className="text-[10px] text-muted-foreground mb-1">{f.label}</p>
+                              <MultiSelect value={custFilters[f.key]} onChange={v => setCustFilter(f.key, v)} options={f.opts || []} placeholder="All" />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Communication</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Email opt-in</p>
+                            <select value={custFilters.opt_in_email} onChange={e => setCustFilter("opt_in_email", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Opted in</option>
+                              <option value="false">Not opted in</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">SMS opt-in</p>
+                            <select value={custFilters.opt_in_sms} onChange={e => setCustFilter("opt_in_sms", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Opted in</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Subscriber only</p>
+                            <select value={custFilters.is_subscriber} onChange={e => setCustFilter("is_subscriber", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Subscriber only</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Preferred channel</p>
+                            <MultiSelect value={custFilters.preferred_channel} onChange={v => setCustFilter("preferred_channel", v)} options={custFilterOpts?.preferred_channels || []} placeholder="All" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Activity</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Web activity</p>
+                            <select value={custFilters.has_ga} onChange={e => setCustFilter("has_ga", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Has web data</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Min. GA sessions</p>
+                            <input type="number" min="0" inputMode="numeric" value={custFilters.min_ga_sessions} onChange={e => setCustFilter("min_ga_sessions", e.target.value)}
+                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Seminars</p>
+                            <select value={custFilters.has_seminars} onChange={e => setCustFilter("has_seminars", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Attended seminar</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Attributes</p>
+                            <select value={custFilters.has_attributes} onChange={e => setCustFilter("has_attributes", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Has study intentions</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Source</p>
+                            <select value={custFilters.is_imported} onChange={e => setCustFilter("is_imported", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Imported only</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Purchases</p>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Has purchases</p>
+                            <select value={custFilters.has_transactions} onChange={e => setCustFilter("has_transactions", e.target.value)}
+                              className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                              <option value="">All</option>
+                              <option value="true">Has orders</option>
+                            </select>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Min. orders</p>
+                            <input type="number" min="0" inputMode="numeric" value={custFilters.min_orders} onChange={e => setCustFilter("min_orders", e.target.value)}
+                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Min. spend</p>
+                            <input type="number" min="0" inputMode="numeric" value={custFilters.min_spend} onChange={e => setCustFilter("min_spend", e.target.value)}
+                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-muted-foreground mb-1">Ordered within (days)</p>
+                            <input type="number" min="0" inputMode="numeric" value={custFilters.ordered_within} onChange={e => setCustFilter("ordered_within", e.target.value)}
+                              placeholder="Any time" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                          </div>
+                        </div>
+                      </div>
+                      {attrFilterSection}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-border">
+                      <div className="p-4">
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-1">Source</p>
+                          <MultiSelect value={anonFilters.source} onChange={v => setAnonFilter("source", v)} options={anonFilterOpts?.sources || []} placeholder="All" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-1">Medium</p>
+                          <MultiSelect value={anonFilters.medium} onChange={v => setAnonFilter("medium", v)} options={anonFilterOpts?.mediums || []} placeholder="All" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-1">Intent level</p>
+                          <select value={anonFilters.has_form_complete} onChange={e => setAnonFilter("has_form_complete", e.target.value)}
+                            className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                            <option value="">All visitors</option>
+                            <option value="true">Completed a form (high intent)</option>
+                          </select>
+                        </div>
+                      </div>
+                      </div>
+                      {attrFilterSection}
+                    </div>
+                  )}
+                  {/* Sort + Group (applies to the active tab; mirrors Attributes) */}
+                  <div className="p-4 border-t border-border space-y-3">
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                      <div className="flex items-center gap-2">
+                        <select value={isCustomer ? custSort : anonSort} onChange={e => (isCustomer ? setCustSort : setAnonSort)(e.target.value)}
+                          className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          {(isCustomer ? CUST_SORT_OPTS : ANON_SORT_OPTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                        <button type="button" onClick={() => (isCustomer ? setCustDir : setAnonDir)(d => d === "asc" ? "desc" : "asc")}
+                          className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
+                          {(isCustomer ? custDir : anonDir) === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                      <select value={isCustomer ? custGroup : anonGroup} onChange={e => (isCustomer ? setCustGroup : setAnonGroup)(e.target.value)}
+                        className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                        {(isCustomer ? CUST_GROUP_OPTS : ANON_GROUP_OPTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
             {hasActiveFilters && (
               <Button
                 variant="outline" size="sm" className="h-9 gap-1.5"
                 onClick={() => {
-                  const chips = criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer));
+                  const chips = [...criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)), ...attrChips];
                   setSegmentDesc(chips.length ? `Criteria: ${chips.join(", ")}.` : "");
                   setSegmentName("");
                   setSaveSegmentOpen(true);
@@ -679,161 +1328,31 @@ export default function Profiles() {
             )}
           </div>
 
-          {showFilters && (
-            <div className="mt-3 border border-border rounded-lg bg-secondary/20 overflow-hidden">
-              {isCustomer ? (
-                <div className="divide-y divide-border">
-                  {/* Demographics */}
-                  <div className="p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Demographics</p>
-                    <div className="flex flex-wrap gap-3">
-                      {[
-                        { key: "reg_channel",       label: "Channel",     opts: custFilterOpts?.reg_channels },
-                        { key: "age_group",          label: "Age group",   opts: custFilterOpts?.age_groups },
-                        { key: "gender",             label: "Gender",      opts: custFilterOpts?.genders },
-                        { key: "nationality",        label: "Nationality", opts: custFilterOpts?.nationalities },
-                        { key: "education_level",    label: "Education",   opts: custFilterOpts?.education_levels },
-                        { key: "employment_status",  label: "Employment",  opts: custFilterOpts?.employment_statuses },
-                        { key: "income_level",       label: "Income",      opts: custFilterOpts?.income_levels },
-                        { key: "member_type",        label: "Member type", opts: custFilterOpts?.member_types },
-                        { key: "preferred_language", label: "Language",    opts: custFilterOpts?.languages },
-                      ].map(f => (
-                        <div key={f.key}>
-                          <p className="text-[10px] text-muted-foreground mb-1">{f.label}</p>
-                          <select value={custFilters[f.key]} onChange={e => setCustFilter(f.key, e.target.value)}
-                            className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                            <option value="">All</option>
-                            {(f.opts || []).map(o => <option key={o} value={o}>{o}</option>)}
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Communication */}
-                  <div className="p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Communication</p>
-                    <div className="flex flex-wrap gap-3">
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Email opt-in</p>
-                        <select value={custFilters.opt_in_email} onChange={e => setCustFilter("opt_in_email", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Opted in</option>
-                          <option value="false">Not opted in</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">SMS opt-in</p>
-                        <select value={custFilters.opt_in_sms} onChange={e => setCustFilter("opt_in_sms", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Opted in</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Subscriber only</p>
-                        <select value={custFilters.is_subscriber} onChange={e => setCustFilter("is_subscriber", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Subscriber only</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Preferred channel</p>
-                        <select value={custFilters.preferred_channel} onChange={e => setCustFilter("preferred_channel", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          {(custFilterOpts?.preferred_channels || []).map(o => <option key={o} value={o}>{o}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Activity */}
-                  <div className="p-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Activity</p>
-                    <div className="flex flex-wrap gap-3">
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Web activity</p>
-                        <select value={custFilters.has_ga} onChange={e => setCustFilter("has_ga", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Has web data</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Min. GA sessions</p>
-                        <select value={custFilters.min_ga_sessions} onChange={e => setCustFilter("min_ga_sessions", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">Any</option>
-                          <option value="1">1+ sessions</option>
-                          <option value="3">3+ sessions</option>
-                          <option value="5">5+ sessions</option>
-                          <option value="10">10+ sessions</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Seminars</p>
-                        <select value={custFilters.has_seminars} onChange={e => setCustFilter("has_seminars", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Attended seminar</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Attributes</p>
-                        <select value={custFilters.has_attributes} onChange={e => setCustFilter("has_attributes", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Has study intentions</option>
-                        </select>
-                      </div>
-                      <div>
-                        <p className="text-[10px] text-muted-foreground mb-1">Source</p>
-                        <select value={custFilters.is_imported} onChange={e => setCustFilter("is_imported", e.target.value)}
-                          className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          <option value="">All</option>
-                          <option value="true">Imported only</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="p-4 flex flex-wrap gap-3">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Source / Medium</p>
-                    <select value={anonFilters.source_medium} onChange={e => setAnonFilter("source_medium", e.target.value)}
-                      className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                      <option value="">All</option>
-                      {(anonFilterOpts?.source_mediums || []).map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Intent level</p>
-                    <select value={anonFilters.has_form_complete} onChange={e => setAnonFilter("has_form_complete", e.target.value)}
-                      className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                      <option value="">All visitors</option>
-                      <option value="true">Completed a form (high intent)</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+          {(hasActiveFilters) && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {isCustomer
+                ? <ActiveFilters inline filters={custFilters} labels={{
+                    reg_channel: "Channel", education_level: "Education", age_group: "Age", gender: "Gender",
+                    nationality: "Nationality", preferred_language: "Language", employment_status: "Employment",
+                    income_level: "Income", member_type: "Member type", preferred_channel: "Pref. channel",
+                    has_ga: "Web data", min_ga_sessions: "Min sessions", has_seminars: "Seminars",
+                    has_attributes: "Attributes", opt_in_email: "Email opt-in", opt_in_sms: "SMS opt-in",
+                    is_subscriber: "Subscriber", is_imported: "Source",
+                    has_transactions: "Purchases", min_orders: "Min orders", min_spend: "Min spend",
+                    ordered_within: "Ordered within (days)",
+                  }} onRemove={(k, v) => setCustFilter(k, Array.isArray(custFilters[k]) ? custFilters[k].filter(x => x !== v) : "")} />
+                : <ActiveFilters inline filters={anonFilters} labels={{ source: "Source", medium: "Medium", has_form_complete: "Form completed" }} onRemove={(k, v) => setAnonFilter(k, Array.isArray(anonFilters[k]) ? anonFilters[k].filter(x => x !== v) : "")} />
+              }
+              {Object.entries(attrFilters).filter(([, v]) => v).map(([aid, vid]) => (
+                <span key={aid} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+                  {attrLabel(aid, vid) || "Attribute"}
+                  <button onClick={() => setAttrFilter(aid, "")} className="hover:text-foreground text-muted-foreground ml-0.5">
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
             </div>
           )}
-
-          {isCustomer
-            ? <ActiveFilters filters={custFilters} labels={{
-                reg_channel: "Channel", education_level: "Education", age_group: "Age", gender: "Gender",
-                nationality: "Nationality", preferred_language: "Language", employment_status: "Employment",
-                income_level: "Income", member_type: "Member type", preferred_channel: "Pref. channel",
-                has_ga: "Web data", min_ga_sessions: "Min sessions", has_seminars: "Seminars",
-                has_attributes: "Attributes", opt_in_email: "Email opt-in", opt_in_sms: "SMS opt-in",
-                is_subscriber: "Subscriber", is_imported: "Source",
-              }} onRemove={k => setCustFilter(k, "")} />
-            : <ActiveFilters filters={anonFilters} labels={{ source_medium: "Source/Medium", has_form_complete: "Form completed" }} onRemove={k => setAnonFilter(k, "")} />
-          }
         </div>
 
         {/* Grid */}
@@ -851,12 +1370,18 @@ export default function Profiles() {
               {isCustomer ? "Try adjusting your filters." : "No anonymous visitors matched the current filters."}
             </p>
           </div>
+        ) : groupedProfiles ? (
+          <div className="space-y-6">
+            {groupedProfiles.map(g => (
+              <div key={g.label}>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{g.label} · {g.items.length}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{g.items.map(renderCard)}</div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {profiles.map(p => isCustomer
-              ? <CustomerCard key={p.member_id} profile={p} onDelete={deleteProfileMutation.mutate} />
-              : <AnonymousCard key={p.visitor_id} profile={p} />
-            )}
+            {profiles.map(renderCard)}
           </div>
         )}
 
@@ -877,99 +1402,12 @@ export default function Profiles() {
             </div>
           </div>
         )}
+        </div>
+        )}
       </div>
 
-      {/* Import Profiles dialog */}
-      <Dialog open={importOpen} onOpenChange={v => { setImportOpen(v); if (!v) { setImportResults(null); setImportFile(null); } }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="font-heading">Import Customer Profiles</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            {!importResults ? (
-              <>
-                <div className="rounded-md border border-border bg-secondary/20 p-4 space-y-2">
-                  <p className="text-xs font-semibold flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Step 1 - Download the template</p>
-                  <p className="text-[11px] text-muted-foreground">Fill in your profile data using the template. The <strong>primary_email</strong> column is required. Leave <strong>member_id</strong> blank to auto-generate one.</p>
-                  <Button variant="outline" size="sm" className="gap-1.5"
-                    onClick={() => appClient.profiles.downloadTemplate()}>
-                    <Download className="w-3.5 h-3.5" /> Download Template CSV
-                  </Button>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Step 2 - Upload your filled template</p>
-                  <div
-                    className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-foreground/40 transition-colors"
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setImportFile(f); }}
-                  >
-                    <input
-                      ref={fileInputRef} type="file" accept=".csv" className="hidden"
-                      onChange={e => setImportFile(e.target.files[0] || null)}
-                    />
-                    {importFile ? (
-                      <div className="flex items-center justify-center gap-2 text-sm">
-                        <FileText className="w-4 h-4 text-foreground" />
-                        <span className="font-medium">{importFile.name}</span>
-                        <button onClick={e => { e.stopPropagation(); setImportFile(null); }} className="text-muted-foreground hover:text-foreground">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="text-muted-foreground text-xs">
-                        <Upload className="w-5 h-5 mx-auto mb-1 opacity-40" />
-                        Click to select CSV or drag and drop
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
-                  Profiles with the same email, member ID, or phone as existing profiles will be skipped.
-                </div>
-
-                <Button
-                  className="w-full gap-1.5"
-                  disabled={!importFile || importMutation.isPending}
-                  onClick={() => importMutation.mutate(importFile)}
-                >
-                  {importMutation.isPending ? "Importing…" : <><Upload className="w-3.5 h-3.5" /> Import Profiles</>}
-                </Button>
-              </>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-5 h-5 text-green-500" />
-                  <span className="font-medium text-sm">Import complete</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
-                    <p className="text-2xl font-bold">{importResults.imported}</p>
-                    <p className="text-[11px] text-muted-foreground">Profiles imported</p>
-                  </div>
-                  <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
-                    <p className="text-2xl font-bold">{importResults.skipped}</p>
-                    <p className="text-[11px] text-muted-foreground">Skipped</p>
-                  </div>
-                </div>
-                {importResults.errors?.length > 0 && (
-                  <div className="rounded-md border border-border bg-secondary/20 p-3 space-y-1 max-h-40 overflow-auto">
-                    <p className="text-[11px] font-semibold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Skipped rows</p>
-                    {importResults.errors.map((e, i) => (
-                      <p key={i} className="text-[11px] text-muted-foreground">Row {e.row}: {e.error}</p>
-                    ))}
-                  </div>
-                )}
-                <Button className="w-full" onClick={() => { setImportOpen(false); setImportResults(null); }}>
-                  Done
-                </Button>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Import Profiles dialog (shared component, also used on the Import Data page) */}
+      <ProfileImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
       {/* Save as Segment dialog */}
       <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>
@@ -999,7 +1437,7 @@ export default function Profiles() {
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Applied criteria</p>
               <div className="flex flex-wrap gap-1.5">
-                {criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)).map((chip, i) => (
+                {[...criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)), ...attrChips].map((chip, i) => (
                   <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/60 border border-border text-muted-foreground">{chip}</span>
                 ))}
               </div>

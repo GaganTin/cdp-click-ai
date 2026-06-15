@@ -19,14 +19,38 @@ function buildUTMUrl(form) {
 
 export { buildUTMUrl };
 
+// Split a stored URL into its protocol and the remainder so the protocol can be
+// edited via a dropdown. Anything without a recognised protocol defaults to https://.
+function splitUrl(url = "") {
+  const m = /^(https?:\/\/)(.*)$/i.exec(url);
+  if (m) return { protocol: m[1].toLowerCase(), rest: m[2] };
+  return { protocol: "https://", rest: url };
+}
+
 export default function UTMForm({ initialValues, onSubmit, isPending, submitLabel = "Save" }) {
   const [form, setForm] = useState(initialValues || EMPTY);
+  const initUrl = splitUrl((initialValues || EMPTY).base_url);
+  const [protocol, setProtocol] = useState(initUrl.protocol);
+  const [urlRest, setUrlRest] = useState(initUrl.rest);
+  const wasActive = initialValues?.status && initialValues.status !== "draft";
 
   useEffect(() => {
-    if (initialValues) setForm(initialValues);
+    if (initialValues) {
+      setForm(initialValues);
+      const { protocol: p, rest } = splitUrl(initialValues.base_url);
+      setProtocol(p);
+      setUrlRest(rest);
+    }
   }, [initialValues]);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
+
+  // Keep protocol + remainder in sync and recombine into the full base_url.
+  const applyUrl = (proto, rest) => {
+    setProtocol(proto);
+    setUrlRest(rest);
+    set("base_url", rest ? `${proto}${rest}` : "");
+  };
 
   return (
     <div className="space-y-4">
@@ -36,7 +60,23 @@ export default function UTMForm({ initialValues, onSubmit, isPending, submitLabe
       </div>
       <div>
         <Label className="text-xs">Base URL</Label>
-        <Input value={form.base_url} onChange={e => set("base_url", e.target.value)} placeholder="https://yoursite.com/landing" className="mt-1" />
+        <div className="mt-1 flex">
+          <Select value={protocol} onValueChange={v => applyUrl(v, urlRest)}>
+            <SelectTrigger className="w-[104px] flex-shrink-0 rounded-r-none border-r-0 font-mono">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="https://">https://</SelectItem>
+              <SelectItem value="http://">http://</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            value={urlRest}
+            onChange={e => applyUrl(protocol, e.target.value.replace(/^https?:\/\//i, ""))}
+            placeholder="yoursite.com/landing"
+            className="rounded-l-none"
+          />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -56,13 +96,16 @@ export default function UTMForm({ initialValues, onSubmit, isPending, submitLabe
           <Select value={form.status} onValueChange={v => set("status", v)}>
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
+              {!wasActive && <SelectItem value="draft">Draft</SelectItem>}
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="paused">Paused</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
               <SelectItem value="archived">Archived</SelectItem>
             </SelectContent>
           </Select>
+          {wasActive && (
+            <p className="text-[10px] text-muted-foreground mt-1">Only draft campaigns can be edited.</p>
+          )}
         </div>
         <div>
           <Label className="text-xs">Term (optional)</Label>

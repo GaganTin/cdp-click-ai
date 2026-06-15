@@ -1,9 +1,8 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
-import {
-  MessageSquare, LayoutDashboard, Mail, Users,
-  Target, Zap, Shield, ArrowRight, Check, ChevronRight,
+import { Mail, Users,
+  Target, ArrowRight, Check, ChevronRight,
   BarChart2, Brain, Globe, Loader2,
 } from "lucide-react";
 
@@ -105,9 +104,9 @@ function Hero() {
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background/60 pointer-events-none z-10" />
           {/* Fake browser chrome */}
           <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-secondary/30">
-            <div className="w-3 h-3 rounded-full bg-red-400/70" />
-            <div className="w-3 h-3 rounded-full bg-yellow-400/70" />
-            <div className="w-3 h-3 rounded-full bg-green-400/70" />
+            <div className="w-3 h-3 rounded-full bg-muted-foreground/30" />
+            <div className="w-3 h-3 rounded-full bg-muted-foreground/20" />
+            <div className="w-3 h-3 rounded-full bg-muted-foreground/10" />
             <div className="flex-1 mx-4 h-6 rounded-md bg-background/80 border border-border" />
           </div>
           {/* Mock app UI */}
@@ -283,7 +282,7 @@ function Pricing() {
             <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
             {plans.map((p) => (
               <div
                 key={p.id}
@@ -302,7 +301,7 @@ function Pricing() {
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className={`font-semibold text-lg ${p.is_highlighted ? "text-primary-foreground" : ""}`}>{p.name}</h3>
                     {p.badge && (
-                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-secondary text-muted-foreground border border-border">
                         {p.badge}
                       </span>
                     )}

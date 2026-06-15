@@ -1,0 +1,193 @@
+// Managed test-link set for the Content-tab "Test" tab.
+//  • Manual: users upload up to MAX_TEST_LINKS URLs.
+//  • Auto (GA): top pages by traffic over the last 30 days. The expensive GROUP BY
+//    over event-level ga_landing.path_exploration is precomputed into the
+//    app.web_content_page_rank rollup (nightly / on rebuild); reads + the daily
+//    sync hit the rollup, never re-aggregating on the click path.
+// The set is a sample pool; users tick a subset to dry-run an attribute against.
+
+import { normUrl, decodeUrl, matchesExclusion } from "./webCrawler.js";
+
+export const MAX_TEST_LINKS = 50;
+const GA_TEST_LOOKBACK_DAYS = 30;
+const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".pdf"];
+
+function yyyymmdd(d) {
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+const RANK_KEEP = 500;   // how many top pages to cache in the rollup
+
+// HEAVY: aggregate the event-level path_exploration once and cache the top pages
+// in app.web_content_page_rank. Run nightly (all companies) or on explicit rebuild
+// (one company). Keeping this off the per-click path is the whole point of 1.b.
+export async function refreshPageRank(pool, companyId) {
+  const { rows: cfgRows } = await pool.query(
+    `SELECT url_pattern, excluded_url_patterns
+     FROM app.web_content_html_elements WHERE company_id = $1
+     ORDER BY created_date ASC LIMIT 1`,
+    [companyId]
+  );
+  const cfg = cfgRows[0] || {};
+  const excluded = cfg.excluded_url_patterns || [];
+
+  const params = [companyId, yyyymmdd(new Date(Date.now() - GA_TEST_LOOKBACK_DAYS * 86_400_000))];
+  let where = "company_id = $1 AND date >= $2 AND page_location IS NOT NULL AND page_location <> ''";
+  if (cfg.url_pattern) { params.push(`%${cfg.url_pattern}%`); where += ` AND page_location ILIKE $${params.length}`; }
+
+  const { rows } = await pool.query(
+    `SELECT page_location, COUNT(*) AS hits
+     FROM ga_landing.path_exploration
+     WHERE ${where}
+     GROUP BY page_location
+     ORDER BY hits DESC
+     LIMIT $${params.length + 1}`,
+    [...params, RANK_KEEP]
+  );
+
+  // Clean + dedupe in JS (globs/images), then replace the company's rollup.
+  const picked = [];
+  const seen = new Set();
+  for (const r of rows) {
+    const raw = String(r.page_location || "").trim();
+    if (!/^https?:\/\//i.test(raw)) continue;
+    const noQuery = raw.split("?")[0];
+    if (IMAGE_EXTS.some((e) => noQuery.toLowerCase().endsWith(e))) continue;
+    if (matchesExclusion(raw, excluded)) continue;
+    const key = normUrl(raw);
+    if (!key || key.length < 12 || seen.has(key)) continue;
+    seen.add(key);
+    picked.push({ url: decodeUrl(noQuery), hits: Number(r.hits) || 0 });
+  }
+
+  await pool.query(`DELETE FROM app.web_content_page_rank WHERE company_id = $1`, [companyId]);
+  for (const p of picked) {
+    await pool.query(
+      `INSERT INTO app.web_content_page_rank (company_id, url, hits, window_days, refreshed_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (company_id, url) DO UPDATE SET hits = EXCLUDED.hits, refreshed_at = NOW()`,
+      [companyId, p.url, p.hits, GA_TEST_LOOKBACK_DAYS]
+    );
+  }
+  return picked.length;
+}
+
+// CHEAP: read the cached rollup, drop known-bad/excluded pages, and replace the
+// 'ga' rows in the test set (manual rows untouched). Returns links stored.
+export async function syncTestLinksFromRank(pool, companyId) {
+  const { rows } = await pool.query(
+    `SELECT url, hits FROM app.web_content_page_rank
+     WHERE company_id = $1 ORDER BY hits DESC LIMIT $2`,
+    [companyId, RANK_KEEP]
+  );
+  const { rows: badRows } = await pool.query(
+    `SELECT url FROM app.web_pages
+     WHERE company_id = $1 AND (is_excluded = true OR is_valid = false)`,
+    [companyId]
+  );
+  const bad = new Set(badRows.map((r) => normUrl(r.url)));
+
+  const picked = [];
+  for (const r of rows) {
+    const key = normUrl(r.url);
+    if (bad.has(key)) continue;
+    picked.push(r);
+    if (picked.length >= MAX_TEST_LINKS) break;
+  }
+
+  await pool.query(`DELETE FROM app.web_content_test_links WHERE company_id = $1 AND source = 'ga'`, [companyId]);
+  for (const p of picked) {
+    await pool.query(
+      `INSERT INTO app.web_content_test_links (company_id, url, source, hits, is_selected)
+       VALUES ($1, $2, 'ga', $3, true)
+       ON CONFLICT (company_id, url) DO UPDATE SET hits = EXCLUDED.hits, updated_date = NOW()`,
+      [companyId, p.url, p.hits]
+    );
+  }
+  await pool.query(
+    `UPDATE app.web_content_html_elements SET test_links_refreshed_at = NOW() WHERE company_id = $1`,
+    [companyId]
+  );
+  // belt-and-suspenders: also clear any manual rows that went bad
+  await pruneBadTestLinks(pool, companyId);
+  return picked.length;
+}
+
+// Public "Load top 50 from GA" action: reads the rollup (cheap); lazily builds it
+// once if it has never been computed for this company. Repeat clicks stay cheap.
+export async function refreshGaTestLinks(pool, companyId) {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM app.web_content_page_rank WHERE company_id = $1 LIMIT 1`, [companyId]
+  );
+  if (!rows.length) await refreshPageRank(pool, companyId);
+  return syncTestLinksFromRank(pool, companyId);
+}
+
+// Nightly cron: rebuild every GA-connected company's rollup once, then re-sync the
+// test set for companies whose test_links_refresh_mode = 'daily'. Static companies
+// keep their frozen set (and read the fresh rollup only when they click refresh).
+export async function runDailyTestLinkRefresh(pool) {
+  const { rows: companies } = await pool.query(
+    `SELECT DISTINCT w.company_id, w.test_links_refresh_mode
+     FROM app.web_content_html_elements w
+     JOIN app.data_integrations di
+       ON di.company_id = w.company_id AND di.integration_type = 'googleAnalytics' AND di.is_connected = true`
+  );
+  let ranked = 0, synced = 0;
+  for (const c of companies) {
+    try {
+      await refreshPageRank(pool, c.company_id);
+      ranked++;
+      if (c.test_links_refresh_mode === "daily") { await syncTestLinksFromRank(pool, c.company_id); synced++; }
+    } catch (e) {
+      console.error(`[test-links cron] ${c.company_id} failed:`, e.message);
+    }
+  }
+  return { ranked, synced };
+}
+
+// Remove any test link whose URL is now a failed (is_valid=false) or excluded page.
+// Test links must NEVER reference a failed/excluded URL, so this is enforced on
+// every read + upload + sync, and whenever a page is excluded or scrape-fails.
+// Returns the number pruned. (Manual URLs not yet crawled are kept - they're
+// neither failed nor excluded until a scrape says otherwise.)
+export async function pruneBadTestLinks(pool, companyId) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM app.web_content_test_links tl
+     USING app.web_pages wp
+     WHERE tl.company_id = $1 AND wp.company_id = $1
+       AND app.norm_url(wp.url) = app.norm_url(tl.url)
+       AND (wp.is_excluded = true OR wp.is_valid = false)`,
+    [companyId]
+  );
+  return rowCount;
+}
+
+// Add manual URLs (deduped, capped at the pool size across all manual rows).
+export async function addManualTestLinks(pool, companyId, urls) {
+  const { rows: existing } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM app.web_content_test_links WHERE company_id = $1 AND source = 'manual'`,
+    [companyId]
+  );
+  let room = MAX_TEST_LINKS - (existing[0]?.n || 0);
+  let added = 0;
+  const seen = new Set();
+  for (const raw of urls) {
+    if (room <= 0) break;
+    const u = decodeUrl(String(raw || "").trim()).split("?")[0];
+    if (!/^https?:\/\//i.test(u)) continue;
+    const key = normUrl(u);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const { rowCount } = await pool.query(
+      `INSERT INTO app.web_content_test_links (company_id, url, source, is_selected)
+       VALUES ($1, $2, 'manual', true)
+       ON CONFLICT (company_id, url) DO NOTHING`,
+      [companyId, u]
+    );
+    if (rowCount) { added++; room--; }
+  }
+  // Drop anything that's already a failed/excluded page.
+  const pruned = await pruneBadTestLinks(pool, companyId);
+  return Math.max(0, added - pruned);
+}

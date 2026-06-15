@@ -159,389 +159,6 @@
     ]
   },
   {
-    "table": "membership",
-    "use_case": "Canonical member profile table used for audience segmentation, identity resolution, consent analysis, and downstream mapping joins.",
-    "granularity": "One row per primary_email after consolidation of prelanding mem files; latest profile fields with first-join identity anchors retained.",
-    "fields": [
-      {
-        "name": "primary_email",
-        "type": "string",
-        "description": "Primary email from LinkedU submission (lead_email); used as the consolidation key when deduplicating member profiles across files."
-      },
-      {
-        "name": "member_id",
-        "type": "string",
-        "description": "Canonical membership identifier generated as linkedu_mem_{lead_id}."
-      },
-      {
-        "name": "member_no",
-        "type": "string",
-        "description": "Raw LinkedU lead ID persisted as string."
-      },
-      {
-        "name": "member_join_date",
-        "type": "datetime",
-        "description": "Member join timestamp parsed from submission create_date and normalized to Asia/Hong_Kong timezone in ETL preprocessing."
-      },
-      {
-        "name": "member_last_update",
-        "type": "datetime",
-        "description": "Latest update timestamp carried in the consolidated profile record for the member."
-      },
-      {
-        "name": "member_reg_location",
-        "type": "string",
-        "description": "Registration location field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "member_reg_channel",
-        "type": "string",
-        "description": "Registration acquisition channel from source field how_did_they_hear_about_us."
-      },
-      {
-        "name": "member_type",
-        "type": "string",
-        "description": "Member type classification field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "is_company",
-        "type": "string",
-        "description": "Boolean-style company-account indicator; pipeline currently sets this to false for LinkedU records."
-      },
-      {
-        "name": "has_email",
-        "type": "string",
-        "description": "Boolean-style email availability indicator; pipeline currently sets this to true for LinkedU submissions."
-      },
-      {
-        "name": "secondary_email",
-        "type": "string",
-        "description": "Secondary email field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "has_phone",
-        "type": "string",
-        "description": "Boolean-style phone availability indicator; schema field is present but currently set as false in pipeline output."
-      },
-      {
-        "name": "primary_phone",
-        "type": "string",
-        "description": "Primary phone normalized from phone_sanitized (plus signs removed) when present."
-      },
-      {
-        "name": "secondary_phone",
-        "type": "string",
-        "description": "Secondary phone field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "gender",
-        "type": "string",
-        "description": "Gender field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "nationality",
-        "type": "string",
-        "description": "Nationality field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "age",
-        "type": "string",
-        "description": "Age field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "age_group",
-        "type": "string",
-        "description": "Age group field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "birthday_year",
-        "type": "string",
-        "description": "Birth year field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "birthday_month",
-        "type": "string",
-        "description": "Birth month field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "birthday_day",
-        "type": "string",
-        "description": "Birth day field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "marital_status",
-        "type": "string",
-        "description": "Marital status field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "education_level",
-        "type": "string",
-        "description": "Education/year-group value mapped from source field student_current_year_group."
-      },
-      {
-        "name": "income_level",
-        "type": "string",
-        "description": "Income level field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "employment_status",
-        "type": "string",
-        "description": "Employment status field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "title",
-        "type": "string",
-        "description": "Honorific/title field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "eng_first_name",
-        "type": "string",
-        "description": "English first name from lead_first_name after right-trim cleanup."
-      },
-      {
-        "name": "eng_last_name",
-        "type": "string",
-        "description": "English last name from lead_last_name when provided."
-      },
-      {
-        "name": "eng_full_name",
-        "type": "string",
-        "description": "Display-ready full English name built from first and last name when last name exists."
-      },
-      {
-        "name": "chi_first_name",
-        "type": "string",
-        "description": "Chinese first name field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "chi_last_name",
-        "type": "string",
-        "description": "Chinese last name field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "chi_full_name",
-        "type": "string",
-        "description": "Chinese full name field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "display_name",
-        "type": "string",
-        "description": "Preferred display name; pipeline currently mirrors eng_full_name."
-      },
-      {
-        "name": "is_subscriber_only",
-        "type": "string",
-        "description": "Boolean-style subscriber-only flag; pipeline currently sets this to false for LinkedU records."
-      },
-      {
-        "name": "is_opt_in_email",
-        "type": "string",
-        "description": "Email consent indicator derived from do_not_spam (true when do_not_spam is false)."
-      },
-      {
-        "name": "is_opt_in_call",
-        "type": "string",
-        "description": "Call consent field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "is_opt_in_dm",
-        "type": "string",
-        "description": "Direct-message consent field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "is_opt_in_sms",
-        "type": "string",
-        "description": "SMS consent field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "preferred_channel",
-        "type": "string",
-        "description": "Preferred contact channel; pipeline sets default value to email."
-      },
-      {
-        "name": "preferred_language",
-        "type": "string",
-        "description": "Preferred language locale; pipeline sets default value to en_US."
-      },
-      {
-        "name": "tags",
-        "type": "string",
-        "description": "Flexible tagging field reserved in schema; currently not populated by LinkedU ingestion."
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
-      }
-    ]
-  },
-  {
-    "table": "membership_ap_mapping",
-    "use_case": "Bridges known members to anonymous web tracking IDs for stitching behavioral events to member profiles.",
-    "granularity": "One row per unique (capsuite_ref, membership_id, sid) mapping between member identity and anonymous tracking SID/APID.",
-    "fields": [
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
-      },
-      {
-        "name": "membership_id",
-        "type": "string",
-        "description": "Resolved membership ID looked up from memberships collection using lead_email."
-      },
-      {
-        "name": "sid",
-        "type": "string",
-        "description": "Anonymous SID sourced from tracking_id in prelanding tracking parquet files."
-      },
-      {
-        "name": "capsuite_apid",
-        "type": "string",
-        "description": "Capsuite Anonymous ID; pipeline sets this equal to tracking_id/SID."
-      },
-      {
-        "name": "capsuite_sid",
-        "type": "string",
-        "description": "Reserved alternate SID field in target schema; currently not populated by pipeline."
-      }
-    ]
-  },
-  {
-    "table": "membership_attributes",
-    "use_case": "Dictionary of normalized custom attribute values used to assign stable attribute IDs before member-level mapping.",
-    "granularity": "One row per unique custom attribute name/value pair available for the client.",
-    "fields": [
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
-      },
-      {
-        "name": "attribute_id",
-        "type": "string",
-        "description": "Deterministic attribute identifier generated from attribute_name::attribute_value during Neon normalization."
-      },
-      {
-        "name": "attribute_name",
-        "type": "string",
-        "description": "Custom attribute key from LinkedU set (e.g., intended_year_of_entry, intended_month_of_entry, intended_year_group, applicant_current_school)."
-      },
-      {
-        "name": "attribute_value",
-        "type": "string",
-        "description": "Custom attribute value retained from latest record per lead_email in prelanding custom_attributes files."
-      }
-    ]
-  },
-  {
-    "table": "membership_attributes_mapping",
-    "use_case": "Bridge table that links each member to resolved custom attribute IDs for many-to-many profiling and targeting use cases.",
-    "granularity": "One row per unique (capsuite_ref, membership_id, attribute_id) relationship.",
-    "fields": [
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
-      },
-      {
-        "name": "membership_id",
-        "type": "string",
-        "description": "Resolved membership ID associated with the member that owns the attribute value."
-      },
-      {
-        "name": "attribute_id",
-        "type": "string",
-        "description": "Attribute dictionary ID linked to membership_attributes.attribute_id for member-to-attribute bridging."
-      }
-    ]
-  },
-  {
-    "table": "membership_custom_activity",
-    "use_case": "Member event timeline table for registered-event submissions, used for engagement and conversion attribution analyses.",
-    "granularity": "One row per deduplicated member event action by date and event reference.",
-    "fields": [
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client reference namespace (linkedu) used for tenant-level partitioning."
-      },
-      {
-        "name": "membership_id",
-        "type": "string",
-        "description": "Membership identifier used as top-level key in processed custom_activity JSON output."
-      },
-      {
-        "name": "event_date",
-        "type": "datetime",
-        "description": "Event date bucket derived from submission filename_time date key during custom activity transformation."
-      },
-      {
-        "name": "event_ref_id",
-        "type": "string",
-        "description": "Event reference ID from registered_event_id (stored as refId in process JSON)."
-      },
-      {
-        "name": "event_name",
-        "type": "string",
-        "description": "Human-readable event name from registered_event (stored as name in process JSON)."
-      },
-      {
-        "name": "action",
-        "type": "string",
-        "description": "Event action verb from process JSON; LinkedU pipeline currently emits submit."
-      }
-    ]
-  },
-  {
-    "table": "outbound_links_attributes",
-    "use_case": "Outbound link click attributes for click-through analysis.",
-    "granularity": "One row per outbound link click event at minute precision",
-    "fields": [
-      {
-        "name": "event_name",
-        "type": "string",
-        "description": "GA4 event name, usually click/outbound click variants."
-      },
-      {
-        "name": "date_hour_minute",
-        "type": "datetime",
-        "description": "Timestamp of the event at minute precision."
-      },
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date partition key.",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "page_location",
-        "type": "string",
-        "description": "Full URL of the page where the outbound click happened."
-      },
-      {
-        "name": "link_url",
-        "type": "string",
-        "description": "Outbound URL clicked by the user."
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ]
-  },
-  {
     "table": "page_metrics",
     "use_case": "Daily page-level performance metrics. Used for content performance analysis and identifying high/low engagement pages",
     "granularity": "One row per unique combination of (date, page_path)",
@@ -1082,6 +699,70 @@
     ]
   },
   {
+    "table": "utm_daily_utm_id_performance",
+    "use_case": "Day-level campaign performance grouped only by UTM ID (utm_id). Use to compare performance across paid ad IDs",
+    "granularity": "One row per unique combination of (date, utm_id)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the sessions",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM ID (utm_id parameter)"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Number of distinct active users"
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "Number of first-time users"
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate"
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate"
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration in seconds",
+        "unit": "seconds"
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Total number of sessions"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "Google Analytics 4 property ID"
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "Google Analytics 4 property display name"
+      }
+    ]
+  },
+  {
     "table": "utm_performance",
     "use_case": "Hourly/minute-level campaign performance with full UTM parameters. Use for intraday campaign monitoring",
     "granularity": "One row per unique combination of (minute, source, medium, campaign, content, term, utm_id, country, device)",
@@ -1289,6 +970,11 @@
         "description": "Timestamp of the last update to this record, auto-maintained by trigger"
       },
       {
+        "name": "created_by",
+        "type": "uuid",
+        "description": "ID of the app.users member who connected this integration. Null for records created before creator attribution existed or when the creating user has been deleted (ON DELETE SET NULL)."
+      },
+      {
         "name": "integration_type",
         "type": "string",
         "description": "Identifier for the integration. One of: googleAnalytics, googleSearchConsole, shopify, shopifyCustomApp, wordpress"
@@ -1362,6 +1048,11 @@
         "description": "Timestamp of the last update, auto-maintained by trigger"
       },
       {
+        "name": "created_by",
+        "type": "uuid",
+        "description": "ID of the app.users member who created/last owns this config row. Null for the system-seeded default row or when the creating user has been deleted (ON DELETE SET NULL)."
+      },
+      {
         "name": "capsuite_ref",
         "type": "string",
         "description": "Client reference slug used to namespace data across pipeline jobs"
@@ -1415,6 +1106,11 @@
         "description": "Timestamp of the last update, auto-maintained by trigger"
       },
       {
+        "name": "created_by",
+        "type": "uuid",
+        "description": "ID of the app.users member who created/last owns this scraper config row. Null for the system-seeded default row or when the creating user has been deleted (ON DELETE SET NULL)."
+      },
+      {
         "name": "capsuite_ref",
         "type": "string",
         "description": "Client reference slug used to namespace data across pipeline jobs"
@@ -1448,6 +1144,851 @@
         "name": "url_pattern",
         "type": "string",
         "description": "Subdomain slug extracted from the GA property URL, used to identify pages belonging to this client during scraping. For example, propertyName 'https://www.mrmiles.hk' produces url_pattern 'mrmiles'. Set automatically on GA connect, cleared on GA disconnect."
+      }
+    ]
+  },
+  {
+    "table": "companies",
+    "schema": "app",
+    "use_case": "Core multi-tenant entity. Each company is an isolated workspace. Created at user registration or via the Companies API. Automatically linked to the interaction-service microservice at creation time so popup targeting and analytics work from day one.",
+    "granularity": "One row per company (workspace)",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Primary key, auto-generated UUID. This is the CDP company ID shown in the WordPress plugin integration panel."
+      },
+      {
+        "name": "created_date",
+        "type": "datetime",
+        "description": "Timestamp when the company was created (i.e. when the first user registered)."
+      },
+      {
+        "name": "updated_date",
+        "type": "datetime",
+        "description": "Timestamp of the last update, auto-maintained by trigger."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Display name of the company, entered at registration."
+      },
+      {
+        "name": "slug",
+        "type": "string",
+        "description": "URL-safe unique identifier derived from the company name. Used in API paths."
+      },
+      {
+        "name": "logo_url",
+        "type": "string",
+        "description": "Optional company logo URL shown in the sidebar."
+      },
+      {
+        "name": "website",
+        "type": "string",
+        "description": "Company website URL, optional."
+      },
+      {
+        "name": "industry",
+        "type": "string",
+        "description": "Industry classification, optional."
+      },
+      {
+        "name": "company_size",
+        "type": "string",
+        "description": "Headcount band: 1-10 | 11-50 | 51-200 | 201-1000 | 1000+."
+      },
+      {
+        "name": "plan",
+        "type": "string",
+        "description": "Subscription plan: free | starter | pro | enterprise."
+      },
+      {
+        "name": "plan_expires_at",
+        "type": "datetime",
+        "description": "When the current plan expires. Null for free tier."
+      },
+      {
+        "name": "is_active",
+        "type": "boolean",
+        "description": "Whether the company workspace is active. Setting false blocks all access."
+      },
+      {
+        "name": "interaction_service_company_id",
+        "type": "uuid",
+        "description": "UUID assigned by the interaction-service microservice when the company is registered. Set automatically at company creation (registration, Google OAuth, or Companies API). Used as the company reference for all popup targeting, activity tracking, and analytics queries against the interaction service. Null only for companies created before this feature was deployed (will be back-filled on first popup operation)."
+      },
+      {
+        "name": "interaction_service_synced_at",
+        "type": "datetime",
+        "description": "Timestamp of when the company was last successfully registered or synced with the interaction service."
+      },
+      {
+        "name": "settings",
+        "type": "jsonb",
+        "description": "Freeform key-value settings for the company. Previously stored interaction_service_company_id here; now uses the dedicated column instead."
+      },
+      {
+        "name": "metadata",
+        "type": "jsonb",
+        "description": "Additional metadata for the company, reserved for future use."
+      }
+    ]
+  },
+  {
+    "table": "funnel_report",
+    "use_case": "Monthly conversion funnel (Session start -> Page view -> Scroll -> Purchase), broken down by source/medium and by campaign. Use for drop-off and funnel-completion analysis.",
+    "granularity": "One row per funnel step per breakdown (source_medium or campaign) per month",
+    "fields": [
+      {
+        "name": "funnel_step",
+        "type": "string",
+        "description": "Funnel step order/number"
+      },
+      {
+        "name": "funnel_step_name",
+        "type": "string",
+        "description": "Step label: Session start, Page view, Page scroll, Purchase"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "Traffic source (when tracking_type=source_medium)"
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "Traffic medium (when tracking_type=source_medium)"
+      },
+      {
+        "name": "session_campaign",
+        "type": "string",
+        "description": "Campaign name (when tracking_type=campaign)"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Users reaching this step"
+      },
+      {
+        "name": "funnel_step_completion_rate",
+        "type": "float",
+        "description": "Completion rate at this step"
+      },
+      {
+        "name": "funnel_step_abandonments",
+        "type": "int",
+        "description": "Users who abandoned at this step"
+      },
+      {
+        "name": "funnel_step_abandonment_rate",
+        "type": "float",
+        "description": "Abandonment rate at this step"
+      },
+      {
+        "name": "tracking_type",
+        "type": "string",
+        "description": "Breakdown dimension: source_medium or campaign"
+      },
+      {
+        "name": "tracking_period",
+        "type": "string",
+        "description": "Month of the funnel",
+        "format": "YYYY-MM"
+      }
+    ]
+  },
+  {
+    "table": "purchase_list",
+    "use_case": "Individual purchase transactions from GA (event_name=purchase), stamped with visitor/customer identity ids. Use for purchase counts, revenue-to-session attribution, and identity stitching.",
+    "granularity": "One row per purchase transaction",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Date of the purchase",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "trxn_id",
+        "type": "string",
+        "description": "Transaction id"
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Session id"
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Anonymous/visitor id (links to path_exploration and profiles)"
+      },
+      {
+        "name": "capsuite_uid",
+        "type": "string",
+        "description": "Known user id"
+      },
+      {
+        "name": "capsuite_identifier",
+        "type": "string",
+        "description": "Additional identifier"
+      }
+    ]
+  },
+  {
+    "table": "customer",
+    "schema": "commerce",
+    "use_case": "Unified eCommerce customers synced from the connected store platforms (Shopify today). Source feed for app.customer_profiles - prefer customer_profiles for audience analytics; query this for raw store-level customer detail",
+    "granularity": "One row per store customer per platform. customer_id = {capsuite_ref}_cust_{nativeId}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "customer_id",
+        "type": "string",
+        "description": "Unified customer id; equals app.customer_profiles.member_id for synced members"
+      },
+      {
+        "name": "customer_no",
+        "type": "string",
+        "description": "Customer number in the source system (may be null)"
+      },
+      {
+        "name": "join_date",
+        "type": "timestamptz",
+        "description": "When the customer was created in the store"
+      },
+      {
+        "name": "last_update",
+        "type": "timestamptz",
+        "description": "Last update in the store"
+      },
+      {
+        "name": "customer_type",
+        "type": "string",
+        "description": "Customer type (default 'Customer')"
+      },
+      {
+        "name": "is_company",
+        "type": "boolean",
+        "description": "True when the customer is a company (B2B platforms)"
+      },
+      {
+        "name": "has_email",
+        "type": "boolean",
+        "description": "Customer has an email on file"
+      },
+      {
+        "name": "primary_email",
+        "type": "string",
+        "description": "Email address"
+      },
+      {
+        "name": "has_phone",
+        "type": "boolean",
+        "description": "Customer has a phone on file"
+      },
+      {
+        "name": "primary_phone",
+        "type": "string",
+        "description": "Phone, normalized, '+' stripped"
+      },
+      {
+        "name": "first_name",
+        "type": "string",
+        "description": "First name"
+      },
+      {
+        "name": "last_name",
+        "type": "string",
+        "description": "Last name"
+      },
+      {
+        "name": "full_name",
+        "type": "string",
+        "description": "Full name"
+      },
+      {
+        "name": "display_name",
+        "type": "string",
+        "description": "Display name"
+      },
+      {
+        "name": "is_opt_in_email",
+        "type": "boolean",
+        "description": "Email marketing consent"
+      },
+      {
+        "name": "is_opt_in_sms",
+        "type": "boolean",
+        "description": "SMS marketing consent"
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Comma-separated store tags"
+      }
+    ]
+  },
+  {
+    "table": "order",
+    "schema": "commerce",
+    "use_case": "Unified eCommerce order headers across platforms. Revenue, AOV, repeat-purchase and customer-lifetime analyses. NOTE: 'order' is a reserved word - always write commerce.\"order\" (quoted) in SQL",
+    "granularity": "One row per order per platform. order_id = {capsuite_ref}_order_{nativeId}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "order_id",
+        "type": "string",
+        "description": "Unified order id"
+      },
+      {
+        "name": "customer_id",
+        "type": "string",
+        "description": "Unified customer id (joins commerce.customer / app.customer_profiles.member_id); NULL for guest checkout"
+      },
+      {
+        "name": "order_ref",
+        "type": "string",
+        "description": "Human order reference, e.g. '#1001'"
+      },
+      {
+        "name": "channel",
+        "type": "string",
+        "description": "Sales channel (web, pos, ...)"
+      },
+      {
+        "name": "order_date",
+        "type": "timestamptz",
+        "description": "When the order was placed"
+      },
+      {
+        "name": "order_year",
+        "type": "int",
+        "description": "Year part of order_date"
+      },
+      {
+        "name": "order_month",
+        "type": "int",
+        "description": "Month part of order_date (1-12)"
+      },
+      {
+        "name": "order_day",
+        "type": "int",
+        "description": "Day part of order_date"
+      },
+      {
+        "name": "order_week",
+        "type": "int",
+        "description": "ISO week of order_date"
+      },
+      {
+        "name": "net_amount",
+        "type": "numeric",
+        "description": "Current order total in the order currency"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "description": "Currency code, e.g. HKD"
+      },
+      {
+        "name": "exchange_rate",
+        "type": "numeric",
+        "description": "Exchange rate to base currency (1 when same)"
+      },
+      {
+        "name": "order_status",
+        "type": "string",
+        "description": "Unified status: draft | confirmed | completed | cancelled. Use IN ('completed','confirmed') for real revenue"
+      },
+      {
+        "name": "total_refunded_amt",
+        "type": "numeric",
+        "description": "Total amount refunded on this order"
+      },
+      {
+        "name": "net_payment_amt",
+        "type": "numeric",
+        "description": "Net payment after refunds"
+      },
+      {
+        "name": "remark",
+        "type": "string",
+        "description": "Free-text remark"
+      }
+    ]
+  },
+  {
+    "table": "order_line",
+    "schema": "commerce",
+    "use_case": "Unified order line items (products + shipping lines) across platforms. Product/basket analyses, top sellers, category mix",
+    "granularity": "One row per order line per platform. order_line_id = {capsuite_ref}_orderline_{nativeId}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "order_line_id",
+        "type": "string",
+        "description": "Unified order line id"
+      },
+      {
+        "name": "order_id",
+        "type": "string",
+        "description": "Parent order (commerce.\"order\")"
+      },
+      {
+        "name": "customer_id",
+        "type": "string",
+        "description": "Unified customer id of the order"
+      },
+      {
+        "name": "order_date",
+        "type": "timestamptz",
+        "description": "Order date (denormalized from the header)"
+      },
+      {
+        "name": "line_type",
+        "type": "string",
+        "description": "line_item (product) or shipping"
+      },
+      {
+        "name": "product_id",
+        "type": "string",
+        "description": "Unified product id at variant grain (joins commerce.product)"
+      },
+      {
+        "name": "product_sku",
+        "type": "string",
+        "description": "SKU"
+      },
+      {
+        "name": "product_name",
+        "type": "string",
+        "description": "Product (and variant) name"
+      },
+      {
+        "name": "product_type",
+        "type": "string",
+        "description": "Product type/category from the product master"
+      },
+      {
+        "name": "qty",
+        "type": "numeric",
+        "description": "Current quantity (after removals/refunds)"
+      },
+      {
+        "name": "qty_ordered",
+        "type": "numeric",
+        "description": "Originally ordered quantity"
+      },
+      {
+        "name": "refunded_qty",
+        "type": "numeric",
+        "description": "Derived refunded/removed quantity (qty_ordered - qty)"
+      },
+      {
+        "name": "unit_price_net",
+        "type": "numeric",
+        "description": "Discounted unit price"
+      },
+      {
+        "name": "unit_price_gross",
+        "type": "numeric",
+        "description": "Original unit price before discounts"
+      },
+      {
+        "name": "discount_amt",
+        "type": "numeric",
+        "description": "Per-unit discount (gross - net)"
+      },
+      {
+        "name": "currency",
+        "type": "string",
+        "description": "Currency code"
+      },
+      {
+        "name": "channel",
+        "type": "string",
+        "description": "Sales channel"
+      },
+      {
+        "name": "bundle_id",
+        "type": "string",
+        "description": "Bundle id when the line belongs to a bundle"
+      },
+      {
+        "name": "bundle_name",
+        "type": "string",
+        "description": "Bundle name"
+      },
+      {
+        "name": "remark",
+        "type": "string",
+        "description": "Free-text remark"
+      }
+    ]
+  },
+  {
+    "table": "product",
+    "schema": "commerce",
+    "use_case": "Unified product master across platforms, at VARIANT grain. Catalog size, price-point and category analyses; join target for order_line.product_id",
+    "granularity": "One row per product variant per platform. product_id = {capsuite_ref}_product_{nativeVariantId}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "product_id",
+        "type": "string",
+        "description": "Unified product id (variant grain)"
+      },
+      {
+        "name": "product_temp_id",
+        "type": "string",
+        "description": "Secondary/template product id"
+      },
+      {
+        "name": "product_sku",
+        "type": "string",
+        "description": "SKU"
+      },
+      {
+        "name": "price",
+        "type": "numeric",
+        "description": "Current listed price"
+      },
+      {
+        "name": "category",
+        "type": "string",
+        "description": "Product category"
+      },
+      {
+        "name": "product_type",
+        "type": "string",
+        "description": "Product type"
+      },
+      {
+        "name": "product_name",
+        "type": "string",
+        "description": "Product name ('Product - Variant' when variant-titled)"
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Comma-separated store tags"
+      },
+      {
+        "name": "created_at",
+        "type": "timestamptz",
+        "description": "Created in the store"
+      },
+      {
+        "name": "updated_at",
+        "type": "timestamptz",
+        "description": "Last updated in the store"
+      }
+    ]
+  },
+  {
+    "table": "refund",
+    "schema": "commerce",
+    "use_case": "Order-level refunds across platforms. Refund-rate and revenue-quality analyses (pairs with commerce.\"order\".total_refunded_amt)",
+    "granularity": "One row per refund per platform. refund_id = {capsuite_ref}_refund_{nativeId}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "refund_id",
+        "type": "string",
+        "description": "Unified refund id"
+      },
+      {
+        "name": "order_id",
+        "type": "string",
+        "description": "Refunded order (commerce.\"order\")"
+      },
+      {
+        "name": "refund_date",
+        "type": "timestamptz",
+        "description": "When the refund was created"
+      },
+      {
+        "name": "refund_amount",
+        "type": "numeric",
+        "description": "Total refunded amount"
+      },
+      {
+        "name": "refund_currency",
+        "type": "string",
+        "description": "Currency code"
+      },
+      {
+        "name": "note",
+        "type": "string",
+        "description": "Refund note"
+      }
+    ]
+  },
+  {
+    "table": "refund_line",
+    "schema": "commerce",
+    "use_case": "Refund line-item detail (which products were refunded/restocked). Product-level return-rate analyses",
+    "granularity": "One row per refunded line item per platform",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "refund_line_id",
+        "type": "string",
+        "description": "Unified refund line id"
+      },
+      {
+        "name": "refund_id",
+        "type": "string",
+        "description": "Parent refund (commerce.refund)"
+      },
+      {
+        "name": "order_id",
+        "type": "string",
+        "description": "Original order"
+      },
+      {
+        "name": "order_line_id",
+        "type": "string",
+        "description": "Original order line (commerce.order_line)"
+      },
+      {
+        "name": "product_id",
+        "type": "string",
+        "description": "Refunded product (variant grain)"
+      },
+      {
+        "name": "product_sku",
+        "type": "string",
+        "description": "SKU"
+      },
+      {
+        "name": "refunded_qty",
+        "type": "numeric",
+        "description": "Refunded quantity"
+      },
+      {
+        "name": "refund_subtotal",
+        "type": "numeric",
+        "description": "Refunded amount for this line"
+      },
+      {
+        "name": "refund_currency",
+        "type": "string",
+        "description": "Currency code"
+      },
+      {
+        "name": "restock_type",
+        "type": "string",
+        "description": "RETURN | CANCEL | NO_RESTOCK | LEGACY_RESTOCK"
+      }
+    ]
+  },
+  {
+    "table": "inventory_level",
+    "schema": "commerce",
+    "use_case": "Current stock snapshot per product variant per location across platforms (fully replaced on every sync - a snapshot, not history)",
+    "granularity": "One row per (product variant, location) per platform. inventory_level_id = {product_id}_{location_id}",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace (tenant) id - ALWAYS filter by this"
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug (mirrors company)"
+      },
+      {
+        "name": "source_platform",
+        "type": "string",
+        "description": "Origin platform of the row: shopify | shopline | odoo"
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Native id of the record in the source platform"
+      },
+      {
+        "name": "source_extra",
+        "type": "jsonb",
+        "description": "Platform-specific extra fields not in the neutral shape (NULL when none)"
+      },
+      {
+        "name": "inventory_level_id",
+        "type": "string",
+        "description": "Unified inventory row id"
+      },
+      {
+        "name": "product_id",
+        "type": "string",
+        "description": "Product (variant grain, joins commerce.product)"
+      },
+      {
+        "name": "location_id",
+        "type": "string",
+        "description": "Store location id"
+      },
+      {
+        "name": "quantity",
+        "type": "numeric",
+        "description": "Available quantity"
+      },
+      {
+        "name": "quantity_reserved",
+        "type": "numeric",
+        "description": "Reserved quantity (platforms that report it; NULL otherwise)"
+      },
+      {
+        "name": "snapshot_date",
+        "type": "timestamptz",
+        "description": "When this level was last reported"
       }
     ]
   }

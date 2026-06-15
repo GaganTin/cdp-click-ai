@@ -103,10 +103,9 @@ export default function Dashboard() {
   };
 
   const cycleSize = (chartId) => {
-    const order = ["medium", "small", "large", "wide"];
     setChartSizes(prev => {
       const current = prev[chartId] || "medium";
-      const next = order[(order.indexOf(current) + 1) % order.length];
+      const next = current === "large" ? "medium" : "large";
       return { ...prev, [chartId]: next };
     });
   };

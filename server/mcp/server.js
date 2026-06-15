@@ -7,8 +7,9 @@ import { databaseTools, handleDatabaseTool } from "./tools/database.js";
 import { segmentTools, handleSegmentTool } from "./tools/segments.js";
 import { utmTools, handleUtmTool } from "./tools/utm.js";
 import { edmTools, handleEdmTool } from "./tools/edm.js";
+import { analyticsTools, handleAnalyticsTool } from "./tools/analytics.js";
 
-const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...edmTools];
+const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...edmTools, ...analyticsTools];
 
 /**
  * Create a connected MCP server+client pair for in-process use.
@@ -18,6 +19,9 @@ const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...edmTools];
  *   DB Connector  - query_data, list_tables, describe_table
  *   Segments      - list_segments, preview_segment_size
  *   UTM           - list_campaigns, analyze_utm_performance
+ *   Analytics     - score_rfm, estimate_clv, score_churn_risk, analyze_cohort_retention,
+ *                   cluster_members, find_association_rules, predict_next_event,
+ *                   compute_channel_attribution, detect_anomalies, forecast_registrations
  *
  * The AI NEVER writes to the DB (no create tools). Users approve all saves via UI.
  */
@@ -43,6 +47,9 @@ export async function createAnalystMCPClient(pool, dataDictionary) {
     }
     if (edmTools.some((t) => t.name === name)) {
       return handleEdmTool(name, args, pool);
+    }
+    if (analyticsTools.some((t) => t.name === name)) {
+      return handleAnalyticsTool(name, args, pool);
     }
 
     return { content: [{ type: "text", text: JSON.stringify({ error: `Unknown tool: ${name}` }) }] };

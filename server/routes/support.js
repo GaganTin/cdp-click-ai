@@ -38,10 +38,12 @@ export function createSupportRouter(pool) {
     const companyId = req.headers["x-company-id"] || null;
 
     try {
+      // Stamp the account too so the platform-owner Studio can group tickets by
+      // client. Derived from the submitting user (every user belongs to one account).
       const { rows: [ticket] } = await pool.query(
         `INSERT INTO app.support_tickets
-           (company_id, user_id, type, subject, body, priority)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (account_id, company_id, user_id, type, subject, body, priority)
+         VALUES ((SELECT account_id FROM app.users WHERE id = $2), $1, $2, $3, $4, $5, $6)
          RETURNING id, type, subject, body, status, priority, created_date`,
         [companyId, req.user.id, safeType, subject.trim(), body.trim(), safePriority]
       );

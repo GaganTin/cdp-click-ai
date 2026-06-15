@@ -4,13 +4,16 @@ import { useAuth } from "@/lib/AuthContext";
 import { appClient } from "@/api/appClient";
 import { toast } from "sonner";
 import { Eye, EyeOff } from "lucide-react";
-import { AuthLayout, GoogleButton, OrDivider } from "@/components/layout/AuthLayout";
+import { AuthLayout, GoogleButton, MicrosoftButton, OrDivider } from "@/components/layout/AuthLayout";
 
 const ERROR_MESSAGES = {
   google_cancelled: "Google sign-in was cancelled.",
   google_not_configured: "Google sign-in is not available right now.",
-  oauth_failed: "Google sign-in failed. Please try again.",
+  oauth_failed: "Sign-in failed. Please try again.",
   google_no_email: "Couldn't retrieve your email from Google. Please try again.",
+  microsoft_cancelled: "Microsoft sign-in was cancelled.",
+  microsoft_not_configured: "Microsoft sign-in is not available right now.",
+  microsoft_no_email: "Couldn't retrieve your email from Microsoft. Please try again.",
   server_error: "Something went wrong. Please try again.",
 };
 
@@ -21,18 +24,11 @@ export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState(false);
-  const [googleAvailable, setGoogleAvailable] = useState(true);
 
   // Show any OAuth error from the URL
   useEffect(() => {
     const err = searchParams.get("error");
     if (err && ERROR_MESSAGES[err]) toast.error(ERROR_MESSAGES[err]);
-
-    // Check if Google OAuth is configured
-    fetch("/api/auth/google/status")
-      .then(r => r.json())
-      .then(d => setGoogleAvailable(d.configured))
-      .catch(() => setGoogleAvailable(false));
   }, []);
 
   const handle = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
@@ -45,6 +41,12 @@ export default function Login() {
       await checkUserAuth();
       navigate("/");
     } catch (err) {
+      // No account for this email → send them to sign-up with it pre-filled.
+      if (err.status === 404 || err.payload?.code === "no_account") {
+        toast.error("No account is associated with this email. Let's create one.");
+        navigate(`/register?email=${encodeURIComponent(form.email)}`);
+        return;
+      }
       toast.error(err.message);
     } finally {
       setLoading(false);
@@ -53,12 +55,11 @@ export default function Login() {
 
   return (
     <AuthLayout title="Welcome back" subtitle="Sign in to your workspace">
-      {googleAvailable && (
-        <>
-          <GoogleButton action="Sign in" />
-          <OrDivider />
-        </>
-      )}
+      <div className="space-y-3">
+        <GoogleButton action="Sign in" />
+        <MicrosoftButton action="Sign in" />
+      </div>
+      <OrDivider />
 
       <form onSubmit={submit} className="space-y-4">
         <div>

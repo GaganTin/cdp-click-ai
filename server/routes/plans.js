@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth.js";
+import { authenticate, requirePlatformAdmin } from "../middleware/auth.js";
 
-// Fallback used when DB is not available - mirrors the DB seed exactly
+// Fallback used when DB is not available - mirrors the DB seed exactly.
+// Only two plans exist: 'free' (30-day trial) and 'paid' (contact sales).
 export const FALLBACK_PLANS = [
   {
     id: "free", name: "Free", price_display: "$0", period: "1 month free",
@@ -10,27 +11,17 @@ export const FALLBACK_PLANS = [
     cta_label: "Start free trial", cta_href: "/register", cta_external: false,
     is_highlighted: false, sort_order: 1, trial_days: 30, warning_days: 7,
     features: ["Solo user only (no team members)", "1,000 customer profiles", "5 email campaigns", "1,000 AI tokens", "UTM tracking", "Read-only access after trial ends"],
-    limits: { profiles: 1000, campaigns: 5, ai_tokens: 1000, team_members: 1 },
+    limits: { profiles: 1000, campaigns: 5, ai_tokens: 1000, team_members: 1, workspaces: 1 },
     is_active: true,
   },
   {
-    id: "pro", name: "Pro", price_display: "$49", period: "per month",
+    id: "paid", name: "Paid", price_display: "Contact sales", period: "",
     badge: null,
-    description: "For growing teams that need more power and fewer limits.",
-    cta_label: "Get started", cta_href: "/register", cta_external: false,
+    description: "For growing teams that need more power and fewer limits. Talk to our team to get set up.",
+    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Upgrade to Paid", cta_external: true,
     is_highlighted: true, sort_order: 2, trial_days: null, warning_days: 7,
-    features: ["Up to 5 team members", "100,000 customer profiles", "Unlimited email campaigns", "Unlimited AI tokens", "Advanced segmentation", "Priority support"],
-    limits: { profiles: 100000, campaigns: null, ai_tokens: null, team_members: 5 },
-    is_active: true,
-  },
-  {
-    id: "enterprise", name: "Enterprise", price_display: "Custom", period: "",
-    badge: null,
-    description: "Dedicated infrastructure, SLAs, and white-glove onboarding.",
-    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Enterprise inquiry", cta_external: true,
-    is_highlighted: false, sort_order: 3, trial_days: null, warning_days: 7,
-    features: ["Everything in Pro", "Unlimited team members", "Dedicated database", "SSO / SAML", "99.99% uptime SLA", "Dedicated success manager"],
-    limits: { profiles: null, campaigns: null, ai_tokens: null, team_members: null },
+    features: ["Up to 5 team members", "5 workspaces", "100,000 customer profiles", "Unlimited email campaigns", "Unlimited AI tokens", "Advanced segmentation", "Priority support"],
+    limits: { profiles: 100000, campaigns: null, ai_tokens: null, team_members: 5, workspaces: 5 },
     is_active: true,
   },
 ];
@@ -50,8 +41,9 @@ export function createPlansRouter(pool) {
     }
   });
 
-  // PATCH /api/plans/:id - update plan config (requires auth + admin role)
-  router.patch("/:id", authenticate, async (req, res) => {
+  // PATCH /api/plans/:id - update plan config (platform owners only; the Studio
+  // console uses /api/admin/plans/:id, this hardens the legacy endpoint).
+  router.patch("/:id", authenticate, requirePlatformAdmin(pool), async (req, res) => {
     const allowed = ["name","price_display","period","badge","description","cta_label","cta_href","cta_external","is_highlighted","trial_days","warning_days","features","limits","is_active"];
     const sets = [];
     const vals = [];

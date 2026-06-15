@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { edmTools, handleEdmTool } from "../server/mcp/tools/edm.js";
 
 const EXPECTED_TOOLS = [
+  "suggest_edm_opportunities",
+  "get_member_profile_breakdown",
   "list_edm_campaigns",
   "preview_edm_recipients",
   "analyze_edm_performance",
@@ -15,7 +17,7 @@ function makePool(rows = []) {
 // ── Tool registration ─────────────────────────────────────────────────────────
 
 describe("EDM - tool registration", () => {
-  it("exports exactly the expected 4 tools", () => {
+  it("exports exactly the expected 6 tools", () => {
     expect(edmTools.map((t) => t.name)).toEqual(EXPECTED_TOOLS);
   });
 

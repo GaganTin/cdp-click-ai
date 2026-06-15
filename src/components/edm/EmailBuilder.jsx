@@ -1,12 +1,15 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ChevronUp, ChevronDown, Trash2, Copy, Eye, Code2,
   AlignCenter, AlignLeft, AlignRight, Monitor, Smartphone,
+  Upload, RefreshCw, X as XIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { appClient } from "@/api/appClient";
+import { toast } from "sonner";
 
 // ── Block definitions ──────────────────────────────────────────────────────────
 const BLOCK_DEFS = {
@@ -42,99 +45,10 @@ const BLOCK_DEFS = {
 
 const TOKENS = ["{{first_name}}", "{{last_name}}", "{{email}}", "{{member_type}}", "{{member_no}}"];
 
-const TEMPLATES = [
-  {
-    id: "welcome", name: "Welcome", description: "Greet new members", accent: "#2563eb",
-    blocks: [
-      { id: "tw1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "Welcome, {{first_name}}!", subtitle: "We're so glad you joined us.", bgColor: "#eff6ff", color: "#1d4ed8" } },
-      { id: "tw2", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "Thank you for becoming a member. We're excited to have you with us. Here's what you can do next to get started..." } },
-      { id: "tw3", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Get Started →", align: "center", bgColor: "#2563eb" } },
-      { id: "tw4", type: "spacer", config: { height: 24 } },
-    ],
-  },
-  {
-    id: "newsletter", name: "Newsletter", description: "Monthly digest", accent: "#7c3aed",
-    blocks: [
-      { id: "tn1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "Monthly Update", subtitle: "Here's what's happening this month", bgColor: "#f5f3ff", color: "#5b21b6" } },
-      { id: "tn2", type: "image", config: { ...BLOCK_DEFS.image.defaults } },
-      { id: "tn3", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "Welcome to our monthly digest. This month we've got exciting updates to share with you..." } },
-      { id: "tn4", type: "divider", config: { ...BLOCK_DEFS.divider.defaults } },
-      { id: "tn5", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Read the Full Story", align: "center", bgColor: "#7c3aed" } },
-    ],
-  },
-  {
-    id: "promo", name: "Promotion", description: "Special offer / sale", accent: "#dc2626",
-    blocks: [
-      { id: "tp1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "Special Offer Just for You", subtitle: "Limited time - don't miss out", bgColor: "#fef2f2", color: "#991b1b", align: "center" } },
-      { id: "tp2", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "As a valued member, you get exclusive access to our biggest offer. Use your member benefits today." } },
-      { id: "tp3", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Claim Your Offer", align: "center", bgColor: "#dc2626", paddingH: 36, paddingV: 14 } },
-      { id: "tp4", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "Offer expires soon. Terms apply.", color: "#9ca3af", fontSize: 12 } },
-    ],
-  },
-  {
-    id: "reengagement", name: "Re-engagement", description: "Win back inactive members", accent: "#059669",
-    blocks: [
-      { id: "tr1", type: "header", config: { ...BLOCK_DEFS.header.defaults, title: "We miss you, {{first_name}}", subtitle: "It's been a while - here's what's new", bgColor: "#f0fdf4", color: "#065f46", align: "center" } },
-      { id: "tr2", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "We noticed you haven't visited us recently. A lot has changed! Here's what's new since your last visit..." } },
-      { id: "tr3", type: "button", config: { ...BLOCK_DEFS.button.defaults, text: "Come Back & Explore", align: "center", bgColor: "#059669" } },
-      { id: "tr4", type: "divider", config: { ...BLOCK_DEFS.divider.defaults } },
-      { id: "tr5", type: "text", config: { ...BLOCK_DEFS.text.defaults, content: "Not interested? You can unsubscribe at any time.", color: "#9ca3af", fontSize: 12 } },
-    ],
-  },
-];
-
 // ── HTML Export ────────────────────────────────────────────────────────────────
-export function blocksToHtml(blocks, wrapEmail = true) {
-  const inner = blocks.map(b => renderBlockHtml(b)).join("\n");
-  if (!wrapEmail) return inner;
-  return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Email</title></head>
-<body style="margin:0;padding:0;background:#f9fafb;font-family:sans-serif">
-<div style="max-width:600px;margin:0 auto;background:#ffffff">
-${inner}
-</div></body></html>`;
-}
-
-function renderBlockHtml(block) {
-  const c = block.config;
-  switch (block.type) {
-    case "header":
-      return `<div style="background:${c.bgColor};padding:${c.padding}px;text-align:${c.align}">
-  <h1 style="font-family:sans-serif;font-size:${c.fontSize}px;font-weight:700;color:${c.color};margin:0;line-height:1.2">${c.title}</h1>
-  ${c.subtitle ? `<p style="font-family:sans-serif;font-size:15px;color:${c.subtitleColor};margin:8px 0 0;line-height:1.5">${c.subtitle}</p>` : ""}
-</div>`;
-    case "text":
-      return `<div style="padding:${c.padding}px">
-  <p style="font-family:sans-serif;font-size:${c.fontSize}px;line-height:${c.lineHeight};color:${c.color};margin:0">${c.content.replace(/\n/g, "<br>")}</p>
-</div>`;
-    case "button":
-      return `<div style="padding:${c.padding}px;text-align:${c.align}">
-  <a href="${c.url}" style="display:inline-block;background:${c.bgColor};color:${c.color};padding:${c.paddingV}px ${c.paddingH}px;text-decoration:none;border-radius:${c.radius}px;font-family:sans-serif;font-size:${c.fontSize}px;font-weight:600">${c.text}</a>
-</div>`;
-    case "image":
-      if (!c.url) return `<div style="padding:16px;text-align:center;background:#f8fafc;color:#94a3b8;font-family:sans-serif;font-size:13px">[ Image ]</div>`;
-      return `<div style="padding:${c.padding}px;text-align:${c.align}">
-  ${c.link ? `<a href="${c.link}">` : ""}
-  <img src="${c.url}" alt="${c.alt}" style="max-width:${c.width}%;border-radius:${c.radius}px;display:block;${c.align === "center" ? "margin:0 auto" : ""}"/>
-  ${c.link ? "</a>" : ""}
-</div>`;
-    case "divider":
-      return `<hr style="border:none;border-top:${c.thickness}px solid ${c.color};margin:${c.margin}px 24px"/>`;
-    case "spacer":
-      return `<div style="height:${c.height}px"></div>`;
-    case "columns":
-      return `<div style="padding:${c.padding}px">
-  <div style="display:inline-block;width:48%;vertical-align:top;padding-right:8px">
-    <p style="font-family:sans-serif;font-size:${c.fontSize}px;color:${c.color};margin:0;line-height:1.6">${c.leftContent.replace(/\n/g, "<br>")}</p>
-  </div>
-  <div style="display:inline-block;width:48%;vertical-align:top;padding-left:8px">
-    <p style="font-family:sans-serif;font-size:${c.fontSize}px;color:${c.color};margin:0;line-height:1.6">${c.rightContent.replace(/\n/g, "<br>")}</p>
-  </div>
-</div>`;
-    default: return "";
-  }
-}
+// The block→HTML generator lives in a framework-free module so it can be unit
+// tested and reused outside React. Re-exported here for existing call sites.
+export { blocksToHtml, renderBlockHtml } from "./emailHtml";
 
 // ── Inline-editable canvas blocks ──────────────────────────────────────────────
 function TokenBar({ value, onAppend }) {
@@ -218,7 +132,7 @@ function CanvasBlock({ block, isEditing, onUpdate }) {
     case "image":
       return !c.url ? (
         <div style={{ margin: `${c.padding}px`, border: "2px dashed #e2e8f0", borderRadius: 8, padding: "32px 16px", textAlign: "center", background: "#f8fafc", color: "#94a3b8", fontFamily: "sans-serif", fontSize: 13, cursor: "default" }}>
-          🖼 Set image URL in the properties panel →
+          🖼 Upload or paste an image URL in the panel →
         </div>
       ) : (
         <div style={{ padding: `${c.padding}px`, textAlign: c.align }}>
@@ -370,6 +284,72 @@ function AlignPicker({ value, onChange }) {
   );
 }
 
+// ── Image URL / Upload field ───────────────────────────────────────────────────
+function ImageUrlField({ value, onChange }) {
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    setUploading(true);
+    try {
+      const result = await appClient.integrations.Core.UploadFile({ file });
+      onChange(result.file_url);
+      toast.success("Image uploaded");
+    } catch (err) {
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-[11px] w-20 flex-shrink-0 text-slate-500">Image</Label>
+
+      {/* Preview thumbnail */}
+      {value && (
+        <div className="relative w-full h-20 rounded border border-slate-200 overflow-hidden bg-slate-50">
+          <img src={value} alt="" className="w-full h-full object-cover" />
+          <button
+            onClick={() => onChange("")}
+            className="absolute top-1 right-1 w-5 h-5 bg-white/80 hover:bg-white rounded-full flex items-center justify-center shadow-sm border border-slate-200 text-slate-500 hover:text-red-500 transition-colors"
+            title="Remove image"
+          >
+            <XIcon className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      {/* Upload button */}
+      <button
+        onClick={() => fileRef.current?.click()}
+        disabled={uploading}
+        className="w-full h-8 flex items-center justify-center gap-1.5 rounded border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-[11px] text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-60"
+      >
+        {uploading
+          ? <><RefreshCw className="w-3 h-3 animate-spin" /> Uploading…</>
+          : <><Upload className="w-3 h-3" /> Upload from computer</>}
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+
+      {/* URL input */}
+      <Input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="h-7 text-xs"
+        placeholder="Or paste image URL…"
+      />
+    </div>
+  );
+}
+
 // ── Style-only properties panel ────────────────────────────────────────────────
 function StylePanel({ block, onChange }) {
   const c = block.config;
@@ -414,17 +394,14 @@ function StylePanel({ block, onChange }) {
     case "image":
       return (
         <div className="space-y-3">
-          <div>
-            <Label className="text-[11px] mb-1 block text-slate-500">Image URL</Label>
-            <Input value={c.url} onChange={e => set("url", e.target.value)} className="h-7 text-xs" placeholder="https://..." />
-          </div>
+          <ImageUrlField value={c.url} onChange={v => set("url", v)} />
           <div>
             <Label className="text-[11px] mb-1 block text-slate-500">Alt text</Label>
             <Input value={c.alt} onChange={e => set("alt", e.target.value)} className="h-7 text-xs" />
           </div>
           <div>
             <Label className="text-[11px] mb-1 block text-slate-500">Click URL</Label>
-            <Input value={c.link} onChange={e => set("link", e.target.value)} className="h-7 text-xs font-mono" />
+            <Input value={c.link} onChange={e => set("link", e.target.value)} className="h-7 text-xs font-mono" placeholder="https://..." />
           </div>
           <AlignPicker value={c.align} onChange={v => set("align", v)} />
           <NumberInput label="Width" value={c.width} onChange={v => set("width", v)} min={20} max={100} unit="%" />
@@ -461,7 +438,7 @@ export function parseHtmlToBlocks() { return null; }
 const EDITABLE_TYPES = new Set(["header", "text", "button", "columns"]);
 const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
-export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeChange, rawHtml, onRawHtmlChange }) {
+export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeChange, rawHtml, onRawHtmlChange, onOpenTemplatePicker }) {
   const [selectedId, setSelectedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [preview, setPreview] = useState("desktop");
@@ -493,19 +470,13 @@ export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeCha
 
   const duplicateBlock = (id) => {
     const idx = blocks.findIndex(b => b.id === id);
-    if (idx === -1) return;
+    if (idx === - 1) return;
     const orig = blocks[idx];
     const copy = { ...orig, id: `${orig.type}_${uid()}`, config: { ...orig.config } };
     const arr = [...blocks];
     arr.splice(idx + 1, 0, copy);
     onChange(arr);
     setSelectedId(copy.id);
-    setEditingId(null);
-  };
-
-  const applyTemplate = (tpl) => {
-    onChange(tpl.blocks.map(b => ({ ...b, id: `${b.type}_${uid()}`, config: { ...b.config } })));
-    setSelectedId(null);
     setEditingId(null);
   };
 
@@ -580,25 +551,23 @@ export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeCha
               onClick={e => { if (e.target === e.currentTarget) { setSelectedId(null); setEditingId(null); } }}>
 
               {blocks.length === 0 ? (
-                /* Template gallery */
-                <div style={{ padding: 32 }}>
-                  <div style={{ textAlign: "center", marginBottom: 24 }}>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", margin: "0 0 4px" }}>Start with a template</p>
-                    <p style={{ fontSize: 12, color: "#94a3b8", margin: 0 }}>Or add blocks from the left panel</p>
+                /* Empty canvas - prompt to load a saved template or add blocks */
+                <div style={{ padding: 48, textAlign: "center" }}>
+                  <div style={{ width: 48, height: 48, borderRadius: 12, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+                    </svg>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    {TEMPLATES.map(tpl => (
-                      <button key={tpl.id} onClick={() => applyTemplate(tpl)}
-                        style={{ textAlign: "left", borderRadius: 10, border: "2px solid #e2e8f0", background: "#f8fafc", padding: "14px", cursor: "pointer", transition: "all 0.15s" }}
-                        onMouseEnter={e => { e.currentTarget.style.borderColor = "#93c5fd"; e.currentTarget.style.background = "#eff6ff"; }}
-                        onMouseLeave={e => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.background = "#f8fafc"; }}>
-                        <div style={{ height: 4, width: 28, borderRadius: 4, background: tpl.accent, marginBottom: 10 }} />
-                        <p style={{ fontSize: 12, fontWeight: 600, color: "#1e293b", margin: "0 0 3px" }}>{tpl.name}</p>
-                        <p style={{ fontSize: 11, color: "#94a3b8", margin: 0 }}>{tpl.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                  <p style={{ textAlign: "center", fontSize: 11, color: "#cbd5e1", marginTop: 20 }}>or drag blocks from the left panel</p>
+                  <p style={{ fontSize: 15, fontWeight: 600, color: "#1e293b", margin: "0 0 6px" }}>Empty canvas</p>
+                  <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 20px" }}>Load a saved template or add blocks from the left panel.</p>
+                  {onOpenTemplatePicker && (
+                    <button
+                      onClick={onOpenTemplatePicker}
+                      style={{ fontSize: 13, fontWeight: 600, color: "#fff", background: "#1e293b", border: "none", borderRadius: 8, padding: "9px 22px", cursor: "pointer" }}
+                    >
+                      Load Template
+                    </button>
+                  )}
                 </div>
               ) : (
                 blocks.map((block, i) => {
@@ -607,7 +576,7 @@ export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeCha
                   return (
                     <div key={block.id}
                       className="group"
-                      style={{ position: "relative", outline: isSelected ? "2px solid #3b82f6" : undefined, outlineOffset: -2, transition: "outline 0.1s" }}
+                      style={{ position: "relative", outline: isSelected ? "2px solid #3b82f6" : undefined, outlineOffset: - 2, transition: "outline 0.1s" }}
                       onClick={() => handleBlockClick(block)}>
 
                       {/* Floating toolbar */}
@@ -618,7 +587,7 @@ export default function EmailBuilder({ blocks, onChange, htmlMode, onHtmlModeCha
                         <span style={{ fontSize: 9, color: "#94a3b8", padding: "3px 7px", borderRight: "1px solid #f1f5f9", fontWeight: 600, whiteSpace: "nowrap" }}>
                           {BLOCK_DEFS[block.type]?.label}
                         </span>
-                        <button title="Move up" disabled={i === 0} onClick={() => moveBlock(block.id, -1)}
+                        <button title="Move up" disabled={i === 0} onClick={() => moveBlock(block.id, - 1)}
                           style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: i === 0 ? "not-allowed" : "pointer", opacity: i === 0 ? 0.3 : 1, display: "flex", alignItems: "center" }}>
                           <ChevronUp style={{ width: 12, height: 12, color: "#64748b" }} />
                         </button>

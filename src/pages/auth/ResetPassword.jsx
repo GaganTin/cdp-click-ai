@@ -43,7 +43,7 @@ export default function ResetPassword() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background px-4">
         <div className="w-full max-w-sm text-center space-y-4">
-          <CheckCircle className="w-12 h-12 text-green-500 mx-auto" />
+          <CheckCircle className="w-12 h-12 text-foreground mx-auto" />
           <h1 className="text-2xl font-bold">Password updated</h1>
           <p className="text-sm text-muted-foreground">
             Your password has been changed. You can now sign in with your new password.

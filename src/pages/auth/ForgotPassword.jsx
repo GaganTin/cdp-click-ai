@@ -44,11 +44,11 @@ export default function ForgotPassword() {
           </div>
 
           {debugToken && (
-            <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md space-y-2">
-              <p className="text-xs font-medium text-yellow-800 dark:text-yellow-200">Dev mode - reset token:</p>
+            <div className="p-3 bg-secondary border border-border rounded-md space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Dev mode - reset token:</p>
               <Link
                 to={`/reset-password?token=${debugToken}`}
-                className="block text-xs text-blue-600 dark:text-blue-400 break-all hover:underline font-mono"
+                className="block text-xs text-foreground break-all hover:underline font-mono"
               >
                 /reset-password?token={debugToken.slice(0, 20)}…
               </Link>

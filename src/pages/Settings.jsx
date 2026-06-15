@@ -1,18 +1,21 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "@/lib/AuthContext";
+import { usePreferences, DEFAULT_PREFS } from "@/lib/PreferencesContext";
 import { appClient } from "@/api/appClient";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePlan } from "@/lib/usePlan";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  User, Lock, Bell, Building2, Users, Key, ClipboardList,
-  Trash2, Plus, Copy, Check, Shield, Eye, EyeOff, AlertTriangle, Zap,
-  CreditCard, BarChart2, MessageCircle, CheckCircle2, Clock, XCircle,
-  ExternalLink, ChevronRight, Mail, Globe, Briefcase,
+  User, Lock, Bell, Building2, Users, ClipboardList,
+  Trash2, Plus, Shield, Eye, EyeOff, Zap,
+  CreditCard, MessageCircle, CheckCircle2,
+  ExternalLink, ChevronRight, ChevronDown, Mail, Globe, Briefcase,
+  Upload, RefreshCw, Link2, Image as ImageIcon, Search,
+  LogIn, LogOut, UserPlus, PenLine, UserMinus, KeyRound,
 } from "lucide-react";
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
@@ -50,16 +53,17 @@ function NativeSelect({ children, ...props }) {
   );
 }
 
-function Badge({ role }) {
+function RoleBadge({ role, isOwner }) {
   const styles = {
-    owner: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300",
-    admin: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300",
-    editor: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300",
+    owner: "bg-foreground text-background",
+    admin: "bg-secondary text-foreground border border-border",
+    contributor: "bg-secondary text-muted-foreground border border-border",
     viewer: "bg-secondary text-muted-foreground",
   };
+  const label = isOwner ? "owner" : role;
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${styles[role] || styles.viewer}`}>
-      {role}
+    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${styles[label] || styles.viewer}`}>
+      {label}
     </span>
   );
 }
@@ -68,6 +72,118 @@ function SideCard({ children }) {
   return (
     <div className="border border-border rounded-lg p-5 space-y-4 bg-secondary/20 sticky top-0">
       {children}
+    </div>
+  );
+}
+
+// ── Image Upload Field ─────────────────────────────────────────────────────────
+
+function normalizeImageUrl(url) {
+  if (!url) return url;
+  const driveMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (driveMatch) return `https://drive.google.com/uc?export=view&id=${driveMatch[1]}`;
+  if (url.includes("dropbox.com")) return url.replace(/[?&]dl=\d/, "").replace(/\?$/, "") + "?raw=1";
+  return url;
+}
+
+function ImageUploadField({ value, onChange, shape = "circle" }) {
+  const [uploading, setUploading] = useState(false);
+  const [showUrl, setShowUrl] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const fileRef = useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const result = await appClient.integrations.Core.UploadFile({ file });
+      onChange(result.file_url);
+      toast.success("Photo uploaded");
+    } catch (err) {
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+    e.target.value = "";
+  };
+
+  const applyUrl = () => {
+    const normalized = normalizeImageUrl(urlInput.trim());
+    if (normalized) onChange(normalized);
+    setShowUrl(false);
+    setUrlInput("");
+  };
+
+  const previewClass = shape === "circle"
+    ? "w-16 h-16 rounded-full object-cover border-2 border-border"
+    : "w-16 h-16 rounded-lg object-cover border border-border";
+
+  const placeholderClass = shape === "circle"
+    ? "w-16 h-16 rounded-full bg-secondary border-2 border-border flex items-center justify-center"
+    : "w-16 h-16 rounded-lg bg-secondary border border-border flex items-center justify-center";
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-4">
+        {value ? (
+          <img src={value} alt="" className={previewClass} />
+        ) : (
+          <div className={placeholderClass}>
+            <ImageIcon className="w-6 h-6 text-muted-foreground opacity-40" />
+          </div>
+        )}
+        <div className="flex flex-col gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            disabled={uploading}
+            onClick={() => fileRef.current?.click()}
+          >
+            {uploading
+              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
+              : <><Upload className="w-3.5 h-3.5" /> Upload from computer</>}
+          </Button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5 text-xs text-muted-foreground justify-start"
+            onClick={() => setShowUrl(v => !v)}
+          >
+            <Link2 className="w-3.5 h-3.5" />
+            {showUrl ? "Hide URL input" : "Paste URL (Drive / Dropbox)"}
+          </Button>
+        </div>
+      </div>
+
+      {showUrl && (
+        <div className="flex gap-2">
+          <Input
+            value={urlInput}
+            onChange={e => setUrlInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && applyUrl()}
+            placeholder="https://… or Google Drive / Dropbox share link"
+            className="h-8 text-xs"
+          />
+          <Button type="button" size="sm" className="h-8 text-xs flex-shrink-0" onClick={applyUrl}>
+            Apply
+          </Button>
+        </div>
+      )}
+
+      {value && (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+          onClick={() => onChange("")}
+        >
+          Remove photo
+        </button>
+      )}
     </div>
   );
 }
@@ -106,12 +222,11 @@ function ProfileTab({ user, onRefresh }) {
           <Field label="Email" hint="Email cannot be changed here.">
             <Input value={user?.email || ""} disabled className="opacity-60 cursor-not-allowed" />
           </Field>
-          <Field label="Avatar URL" hint="Link to a profile photo.">
-            <Input
-              name="avatar_url"
+          <Field label="Profile photo" hint="Upload from your computer or paste a Google Drive / Dropbox link.">
+            <ImageUploadField
               value={form.avatar_url}
-              onChange={e => setForm(f => ({ ...f, avatar_url: e.target.value }))}
-              placeholder="https://..."
+              onChange={url => setForm(f => ({ ...f, avatar_url: url }))}
+              shape="circle"
             />
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
@@ -243,22 +358,96 @@ function SecurityTab() {
   );
 }
 
+// ── Searchable Timezone Select ─────────────────────────────────────────────────
+
+const ALL_TIMEZONES = Intl.supportedValuesOf?.("timeZone") ?? ["UTC"];
+
+function TimezoneSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  const filtered = search
+    ? ALL_TIMEZONES.filter(tz => tz.toLowerCase().includes(search.toLowerCase()))
+    : ALL_TIMEZONES;
+
+  useEffect(() => {
+    const handler = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (open && inputRef.current) inputRef.current.focus();
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); setSearch(""); }}
+        className="w-full h-9 px-3 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 transition-colors text-left flex items-center justify-between"
+      >
+        <span className="truncate">{value || "UTC"}</span>
+        <ChevronDown className="w-4 h-4 text-muted-foreground flex-shrink-0 ml-2" />
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border border-border rounded-lg shadow-lg overflow-hidden">
+          <div className="p-2 border-b border-border">
+            <input
+              ref={inputRef}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search timezones…"
+              className="w-full h-8 px-3 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-3">No timezones found</p>
+            ) : filtered.map(tz => (
+              <button
+                key={tz}
+                type="button"
+                onClick={() => { onChange(tz); setOpen(false); setSearch(""); }}
+                className={`w-full text-left px-3 py-1.5 text-sm hover:bg-secondary transition-colors ${tz === value ? "font-medium bg-secondary/50" : ""}`}
+              >
+                {tz}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tab: Preferences ─────────────────────────────────────────────────────────
 
-function PreferencesTab({ companyId }) {
-  const [prefs, setPrefs] = useState(null);
+const LANG_LABELS = {
+  en: "English",
+  zh: "Chinese (Traditional)",
+  "zh-cn": "Chinese (Simplified)",
+};
+
+function PreferencesTab() {
+  const { prefs: contextPrefs, updatePrefs } = usePreferences();
+  const { currentCompany } = useAuth();
+  const [form, setForm] = useState(() => ({ ...DEFAULT_PREFS, ...contextPrefs }));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!companyId) return;
-    appClient.companies.getPreferences(companyId).then(setPrefs).catch(() => {});
-  }, [companyId]);
+    setForm({ ...DEFAULT_PREFS, ...contextPrefs });
+  }, [contextPrefs]);
 
   const save = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
-      await appClient.companies.updatePreferences(companyId, prefs);
+      // Preferences are per-workspace (user_preferences keyed by user+company).
+      await appClient.companies.updatePreferences(currentCompany.id, form);
+      updatePrefs(form);
       toast.success("Preferences saved");
     } catch (err) {
       toast.error(err.message);
@@ -267,36 +456,30 @@ function PreferencesTab({ companyId }) {
     }
   };
 
-  if (!prefs) return <p className="text-sm text-muted-foreground">Loading…</p>;
-
   return (
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
       <Section title="Preferences" description="Customize your workspace display and notification settings.">
         <form onSubmit={save} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <Field label="Theme">
-              <NativeSelect value={prefs.theme || "system"} onChange={e => setPrefs(p => ({ ...p, theme: e.target.value }))}>
+              <NativeSelect value={form.theme || "system"} onChange={e => setForm(p => ({ ...p, theme: e.target.value }))}>
                 <option value="system">System default</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
               </NativeSelect>
             </Field>
             <Field label="Language">
-              <NativeSelect value={prefs.language || "en"} onChange={e => setPrefs(p => ({ ...p, language: e.target.value }))}>
+              <NativeSelect value={form.language || "en"} onChange={e => setForm(p => ({ ...p, language: e.target.value }))}>
                 <option value="en">English</option>
-                <option value="zh">Chinese (Traditional)</option>
-                <option value="zh-cn">Chinese (Simplified)</option>
+                <option value="zh">Chinese (Traditional) 繁體中文</option>
+                <option value="zh-cn">Chinese (Simplified) 简体中文</option>
               </NativeSelect>
             </Field>
             <Field label="Timezone">
-              <NativeSelect value={prefs.timezone || "UTC"} onChange={e => setPrefs(p => ({ ...p, timezone: e.target.value }))}>
-                {Intl.supportedValuesOf?.("timeZone")?.map(tz => (
-                  <option key={tz} value={tz}>{tz}</option>
-                )) || <option value="UTC">UTC</option>}
-              </NativeSelect>
+              <TimezoneSelect value={form.timezone || "UTC"} onChange={tz => setForm(p => ({ ...p, timezone: tz }))} />
             </Field>
             <Field label="Date format">
-              <NativeSelect value={prefs.date_format || "MMM d, yyyy"} onChange={e => setPrefs(p => ({ ...p, date_format: e.target.value }))}>
+              <NativeSelect value={form.date_format || "MMM d, yyyy"} onChange={e => setForm(p => ({ ...p, date_format: e.target.value }))}>
                 <option value="MMM d, yyyy">Jan 15, 2025</option>
                 <option value="dd/MM/yyyy">15/01/2025</option>
                 <option value="MM/dd/yyyy">01/15/2025</option>
@@ -304,24 +487,27 @@ function PreferencesTab({ companyId }) {
               </NativeSelect>
             </Field>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <label className="block text-sm font-medium">Notifications</label>
             {[
-              { key: "email_digest",  label: "Email digest" },
-              { key: "member_joined", label: "When a member joins" },
-              { key: "report_ready",  label: "When a report is ready" },
-            ].map(({ key, label }) => (
-              <label key={key} className="flex items-center gap-2 text-sm cursor-pointer select-none">
+              { key: "campaign_completed", label: "Campaign sent",       hint: "When an email campaign finishes sending." },
+              { key: "sync_status",        label: "Data sync status",    hint: "When an integration sync completes or fails." },
+              { key: "new_leads",          label: "New leads captured",  hint: "When your pop-ups collect new contacts." },
+            ].map(({ key, label, hint }) => (
+              <label key={key} className="flex items-start gap-2.5 text-sm cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  className="rounded border-border"
-                  checked={prefs.notifications?.[key] !== false}
-                  onChange={e => setPrefs(p => ({
+                  className="rounded border-border mt-0.5"
+                  checked={form.notifications?.[key] !== false}
+                  onChange={e => setForm(p => ({
                     ...p,
                     notifications: { ...(p.notifications || {}), [key]: e.target.checked },
                   }))}
                 />
-                {label}
+                <span>
+                  <span className="font-medium">{label}</span>
+                  <span className="block text-xs text-muted-foreground">{hint}</span>
+                </span>
               </label>
             ))}
           </div>
@@ -335,14 +521,14 @@ function PreferencesTab({ companyId }) {
         <div>
           <p className="text-sm font-medium mb-1">About preferences</p>
           <p className="text-xs text-muted-foreground">
-            Display preferences apply to this workspace. Notification settings control what emails you receive.
+            Display preferences apply to your account and affect all workspaces. Notification settings control what emails you receive.
           </p>
         </div>
         <div className="pt-3 border-t border-border space-y-2 text-xs text-muted-foreground">
           <p className="font-medium text-foreground text-xs">Current settings</p>
-          <div className="flex justify-between"><span>Theme</span><span className="capitalize">{prefs.theme || "System"}</span></div>
-          <div className="flex justify-between"><span>Language</span><span>{prefs.language || "English"}</span></div>
-          <div className="flex justify-between"><span>Timezone</span><span className="truncate ml-2 text-right">{prefs.timezone || "UTC"}</span></div>
+          <div className="flex justify-between"><span>Theme</span><span className="capitalize">{form.theme || "System"}</span></div>
+          <div className="flex justify-between"><span>Language</span><span>{LANG_LABELS[form.language] || form.language || "English"}</span></div>
+          <div className="flex justify-between"><span>Timezone</span><span className="truncate ml-2 text-right max-w-[120px]">{form.timezone || "UTC"}</span></div>
         </div>
       </SideCard>
     </div>
@@ -352,6 +538,14 @@ function PreferencesTab({ companyId }) {
 // ── Tab: Company ──────────────────────────────────────────────────────────────
 
 function CompanyTab({ company, onRefresh }) {
+  // currentCompany (the `company` prop) is a slim record from /me and lacks
+  // website/industry/company_size/settings - fetch the full row so the form shows
+  // saved values (and doesn't overwrite them with blanks on save).
+  const { data: full } = useQuery({
+    queryKey: ["company-full", company?.id],
+    queryFn: () => appClient.companies.get(company.id),
+    enabled: !!company?.id,
+  });
   const [form, setForm] = useState({
     name: company?.name || "",
     website: company?.website || "",
@@ -359,7 +553,30 @@ function CompanyTab({ company, onRefresh }) {
     company_size: company?.company_size || "",
     logo_url: company?.logo_url || "",
   });
+  const [edmForm, setEdmForm] = useState({
+    edm_from_name:  company?.settings?.edm_from_name  || "",
+    edm_from_email: company?.settings?.edm_from_email || "",
+    edm_reply_to:   company?.settings?.edm_reply_to   || "",
+  });
   const [saving, setSaving] = useState(false);
+  const [savingEdm, setSavingEdm] = useState(false);
+
+  // Hydrate the forms once the full company record loads.
+  useEffect(() => {
+    if (!full) return;
+    setForm({
+      name: full.name || "",
+      website: full.website || "",
+      industry: full.industry || "",
+      company_size: full.company_size || "",
+      logo_url: full.logo_url || "",
+    });
+    setEdmForm({
+      edm_from_name:  full.settings?.edm_from_name  || "",
+      edm_from_email: full.settings?.edm_from_email || "",
+      edm_reply_to:   full.settings?.edm_reply_to   || "",
+    });
+  }, [full]);
 
   const save = async (e) => {
     e.preventDefault();
@@ -372,6 +589,20 @@ function CompanyTab({ company, onRefresh }) {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveEdm = async (e) => {
+    e.preventDefault();
+    setSavingEdm(true);
+    try {
+      await appClient.companies.update(company.id, { settings: edmForm });
+      await onRefresh();
+      toast.success("Email sending defaults saved");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingEdm(false);
     }
   };
 
@@ -403,14 +634,51 @@ function CompanyTab({ company, onRefresh }) {
               </NativeSelect>
             </Field>
           </div>
-          <Field label="Logo URL">
-            <Input type="url" value={form.logo_url} onChange={e => setForm(f => ({ ...f, logo_url: e.target.value }))} placeholder="https://..." />
+          <Field label="Company logo" hint="Upload from your computer or paste a Google Drive / Dropbox link.">
+            <ImageUploadField
+              value={form.logo_url}
+              onChange={url => setForm(f => ({ ...f, logo_url: url }))}
+              shape="square"
+            />
           </Field>
           <Field label="Plan" hint="Contact support to change your plan.">
             <Input value={company?.plan || "free"} disabled className="opacity-60 cursor-not-allowed capitalize" />
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
+          </Button>
+        </form>
+      </Section>
+
+      <Section title="Email sending defaults" description="Default sender used for EDM campaigns when no override is set on the campaign itself.">
+        <form onSubmit={saveEdm} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="From name" hint="Displayed as the sender name in recipients' inboxes.">
+              <Input
+                value={edmForm.edm_from_name}
+                onChange={e => setEdmForm(f => ({ ...f, edm_from_name: e.target.value }))}
+                placeholder="Acme Inc."
+              />
+            </Field>
+            <Field label="From email" hint="Must be a verified sender address with your ESP.">
+              <Input
+                type="email"
+                value={edmForm.edm_from_email}
+                onChange={e => setEdmForm(f => ({ ...f, edm_from_email: e.target.value }))}
+                placeholder="hello@yourdomain.com"
+              />
+            </Field>
+          </div>
+          <Field label="Reply-to" hint="Optional. Replies will go to this address instead of the from address.">
+            <Input
+              type="email"
+              value={edmForm.edm_reply_to}
+              onChange={e => setEdmForm(f => ({ ...f, edm_reply_to: e.target.value }))}
+              placeholder="replies@yourdomain.com"
+            />
+          </Field>
+          <Button type="submit" size="sm" disabled={savingEdm}>
+            {savingEdm ? "Saving…" : "Save email defaults"}
           </Button>
         </form>
       </Section>
@@ -449,34 +717,50 @@ function CompanyTab({ company, onRefresh }) {
   );
 }
 
-// ── Invite section - gated by plan ───────────────────────────────────────────
+// ── Invite section - gated by the live plan's team-member limit ──────────────
+// The limit comes straight from the plan catalog (planConfig.limits.team_members),
+// which a platform admin can change at any time - so this reflects whatever the
+// current plan allows, with no hardcoded per-plan rules. null = unlimited.
 
-function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRole, setInviteRole, inviting }) {
-  const { isFreePlan, upgradePlan, planConfig } = usePlan();
+function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRole, setInviteRole, inviting, activeMemberCount = 0 }) {
+  const { upgradePlan, planConfig, limits } = usePlan();
 
-  if (isFreePlan) {
+  const teamLimit = limits?.team_members ?? null;        // null = unlimited
+  const atLimit = teamLimit != null && activeMemberCount >= teamLimit;
+
+  if (atLimit) {
+    // Only surface an upgrade CTA if a higher tier actually grants more seats
+    // (a platform admin may have set both plans to the same limit).
+    const upgradeSeats = upgradePlan?.limits?.team_members;
+    const upgradeGivesMore = !!upgradePlan && (upgradeSeats == null || Number(upgradeSeats) > teamLimit);
     const upgradeLabel = upgradePlan
-      ? `Upgrade to ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+      ? (upgradePlan.period
+          ? `Upgrade to ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+          : `Upgrade to ${upgradePlan.name}`)
       : "Upgrade your plan";
-    const teamLimit = upgradePlan?.limits?.team_members;
-    const teamLimitText = teamLimit ? `up to ${teamLimit} team members` : "team members";
 
     return (
       <Section title="Invite member">
         <div className="flex items-start gap-3 p-4 rounded-lg border border-border bg-secondary/30">
           <Zap className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">Team members require {upgradePlan?.name ?? "a paid plan"}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              The {planConfig?.name ?? "Free"} plan is for solo users only. Upgrade to invite {teamLimitText}.
+            <p className="text-sm font-medium">
+              You've reached your plan's limit of {teamLimit} team member{teamLimit === 1 ? "" : "s"}
             </p>
-            <Link
-              to="/settings?tab=billing"
-              className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
-            >
-              <Zap className="w-3 h-3" />
-              {upgradeLabel}
-            </Link>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {upgradeGivesMore
+                ? `Upgrade to ${upgradePlan.name} to invite more, or contact support to raise the limit on your ${planConfig?.name ?? "current"} plan.`
+                : "Remove a member to free up a seat, or contact support to raise your team-member limit."}
+            </p>
+            {upgradeGivesMore && (
+              <Link
+                to="/settings?tab=billing"
+                className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
+              >
+                <Zap className="w-3 h-3" />
+                {upgradeLabel}
+              </Link>
+            )}
           </div>
         </div>
       </Section>
@@ -484,7 +768,12 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
   }
 
   return (
-    <Section title="Invite member">
+    <Section
+      title="Invite member"
+      description={teamLimit != null
+        ? `${activeMemberCount} of ${teamLimit} seats used on your ${planConfig?.name ?? "current"} plan.`
+        : "Invite teammates to this workspace by email."}
+    >
       <form onSubmit={invite} className="grid grid-cols-[1fr_160px_auto] gap-3 items-end">
         <Field label="Email">
           <Input
@@ -498,7 +787,7 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
         <Field label="Role">
           <NativeSelect value={inviteRole} onChange={e => setInviteRole(e.target.value)}>
             <option value="viewer">Viewer</option>
-            <option value="editor">Editor</option>
+            <option value="contributor">Contributor</option>
             <option value="admin">Admin</option>
           </NativeSelect>
         </Field>
@@ -587,6 +876,7 @@ function MembersTab({ company, currentUserId }) {
         inviteRole={inviteRole}
         setInviteRole={setInviteRole}
         inviting={inviting}
+        activeMemberCount={members.filter(m => m.status === "active").length}
       />
 
       <Section title="Team members" description={`${members.length} member${members.length !== 1 ? "s" : ""} in this workspace.`}>
@@ -608,23 +898,23 @@ function MembersTab({ company, currentUserId }) {
                 <p className="text-sm font-medium truncate">{m.full_name || "-"}</p>
                 <p className="text-sm text-muted-foreground truncate">{m.email}</p>
                 <div>
-                  {m.role !== "owner" && m.user_id !== currentUserId ? (
+                  {!m.is_account_owner && m.user_id !== currentUserId ? (
                     <select
                       value={m.role}
                       onChange={e => updateRole(m.id, e.target.value)}
                       className="text-xs border border-border rounded px-1.5 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring w-full"
                     >
                       <option value="admin">Admin</option>
-                      <option value="editor">Editor</option>
+                      <option value="contributor">Contributor</option>
                       <option value="viewer">Viewer</option>
                     </select>
                   ) : (
-                    <Badge role={m.role} />
+                    <RoleBadge role={m.role} isOwner={m.is_account_owner} />
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">{m.joined_at ? new Date(m.joined_at).toLocaleDateString() : "-"}</p>
                 <div className="flex justify-center">
-                  {m.role !== "owner" && m.user_id !== currentUserId && (
+                  {!m.is_account_owner && m.user_id !== currentUserId && (
                     <button
                       onClick={() => removeMember(m.id, m.full_name || m.email)}
                       className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded"
@@ -649,9 +939,9 @@ function MembersTab({ company, currentUserId }) {
               {invitations.map(inv => (
                 <div key={inv.id} className="grid grid-cols-[1fr_120px_160px_80px_40px] gap-3 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
                   <p className="text-sm truncate">{inv.email}</p>
-                  <Badge role={inv.role} />
+                  <RoleBadge role={inv.role} />
                   <p className="text-xs text-muted-foreground">{new Date(inv.expires_at).toLocaleDateString()}</p>
-                  <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 rounded-full font-medium w-fit">
+                  <span className="text-xs px-2 py-0.5 bg-secondary text-foreground border border-border rounded-full font-medium w-fit">
                     Pending
                   </span>
                   <div className="flex justify-center">
@@ -672,162 +962,58 @@ function MembersTab({ company, currentUserId }) {
   );
 }
 
-// ── Tab: API Keys ─────────────────────────────────────────────────────────────
-
-function ApiKeysTab({ company }) {
-  const [keys, setKeys] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ name: "", permissions: ["read"] });
-  const [creating, setCreating] = useState(false);
-  const [newKey, setNewKey] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  const load = async () => {
-    try {
-      const data = await appClient.companies.getApiKeys(company.id);
-      setKeys(data);
-    } catch { /* ignore */ }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [company.id]);
-
-  const create = async (e) => {
-    e.preventDefault();
-    setCreating(true);
-    try {
-      const result = await appClient.companies.createApiKey(company.id, form);
-      setNewKey(result.raw_key);
-      setForm({ name: "", permissions: ["read"] });
-      await load();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const revoke = async (keyId) => {
-    if (!confirm("Revoke this API key? This cannot be undone.")) return;
-    try {
-      await appClient.companies.revokeApiKey(company.id, keyId);
-      await load();
-      toast.success("API key revoked");
-    } catch (err) { toast.error(err.message); }
-  };
-
-  const copy = async (text) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const togglePerm = (perm) => {
-    setForm(f => ({
-      ...f,
-      permissions: f.permissions.includes(perm)
-        ? f.permissions.filter(p => p !== perm)
-        : [...f.permissions, perm],
-    }));
-  };
-
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
-
-  return (
-    <div className="space-y-8">
-      {newKey && (
-        <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg space-y-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-yellow-800 dark:text-yellow-200">
-            <AlertTriangle className="w-4 h-4" />
-            Copy this key now - it won&apos;t be shown again
-          </div>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs bg-background border border-border rounded px-3 py-2 font-mono break-all">
-              {newKey}
-            </code>
-            <button onClick={() => copy(newKey)} className="p-2 hover:bg-secondary rounded transition-colors flex-shrink-0">
-              {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-            </button>
-          </div>
-          <button onClick={() => setNewKey(null)} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-            I&apos;ve copied it
-          </button>
-        </div>
-      )}
-
-      <Section title="Create API key" description="Generate a key to authenticate API requests from your applications.">
-        <form onSubmit={create} className="grid grid-cols-[1fr_auto] gap-4 items-end">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Key name" hint="Describe what this key is used for.">
-              <Input
-                required
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. CI/CD Pipeline"
-              />
-            </Field>
-            <Field label="Permissions">
-              <div className="h-9 flex items-center gap-4">
-                {["read", "write", "admin"].map(perm => (
-                  <label key={perm} className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      className="rounded border-border"
-                      checked={form.permissions.includes(perm)}
-                      onChange={() => togglePerm(perm)}
-                    />
-                    <span className="capitalize">{perm}</span>
-                  </label>
-                ))}
-              </div>
-            </Field>
-          </div>
-          <Button type="submit" size="sm" disabled={creating || form.permissions.length === 0} className="gap-1.5 mb-px">
-            <Plus className="w-3.5 h-3.5" />
-            {creating ? "Creating…" : "Create key"}
-          </Button>
-        </form>
-      </Section>
-
-      <Section title="Active keys">
-        {keys.filter(k => k.is_active).length === 0 ? (
-          <div className="border border-dashed border-border rounded-lg px-6 py-8 text-center">
-            <Key className="w-6 h-6 text-muted-foreground mx-auto mb-2 opacity-40" />
-            <p className="text-sm text-muted-foreground">No active API keys yet.</p>
-          </div>
-        ) : (
-          <div className="border border-border rounded-lg overflow-hidden">
-            <div className="grid grid-cols-[1fr_120px_160px_120px_80px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
-              <span>Name</span><span>Prefix</span><span>Permissions</span><span>Created</span><span />
-            </div>
-            <div className="divide-y divide-border">
-              {keys.filter(k => k.is_active).map(k => (
-                <div key={k.id} className="grid grid-cols-[1fr_120px_160px_120px_80px] gap-3 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
-                  <p className="text-sm font-medium">{k.name}</p>
-                  <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}…</code>
-                  <p className="text-xs text-muted-foreground">{k.permissions?.join(", ")}</p>
-                  <p className="text-xs text-muted-foreground">{new Date(k.created_date).toLocaleDateString()}</p>
-                  <button
-                    onClick={() => revoke(k.id)}
-                    className="text-xs px-2.5 py-1 text-destructive border border-destructive/30 rounded-md hover:bg-destructive/10 transition-colors"
-                  >
-                    Revoke
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </Section>
-    </div>
-  );
-}
-
 // ── Tab: Audit Log ────────────────────────────────────────────────────────────
 
+const ACTION_META = {
+  login:            { label: "Signed in",       icon: LogIn,      color: "text-foreground",        bg: "bg-secondary" },
+  logout:           { label: "Signed out",      icon: LogOut,     color: "text-muted-foreground",  bg: "bg-secondary" },
+  register:         { label: "Registered",      icon: UserPlus,   color: "text-foreground",        bg: "bg-secondary" },
+  create:           { label: "Created",         icon: Plus,       color: "text-foreground",        bg: "bg-secondary" },
+  update:           { label: "Updated",         icon: PenLine,    color: "text-muted-foreground",  bg: "bg-secondary" },
+  delete:           { label: "Deleted",         icon: Trash2,     color: "text-destructive",       bg: "bg-destructive/10" },
+  invite_member:    { label: "Invited member",  icon: UserPlus,   color: "text-foreground",        bg: "bg-secondary" },
+  remove_member:    { label: "Removed member",  icon: UserMinus,  color: "text-destructive",       bg: "bg-destructive/10" },
+  password_changed: { label: "Changed password",icon: KeyRound,   color: "text-muted-foreground",  bg: "bg-secondary" },
+};
+
+const RESOURCE_LABELS = {
+  user: "profile",
+  company: "workspace",
+  campaign: "email campaign",
+  segment: "segment",
+  popup: "pop-up",
+  template: "template",
+  api_key: "API key",
+};
+
+function formatAuditAction(action, resourceType) {
+  const meta = ACTION_META[action];
+  const label = meta?.label ?? action.replace(/_/g, " ");
+  if (!resourceType || ["login", "logout", "register", "password_changed"].includes(action)) return label;
+  const resLabel = RESOURCE_LABELS[resourceType] ?? resourceType;
+  return `${label} ${resLabel}`;
+}
+
+function relativeTime(val) {
+  if (!val) return "-";
+  const diff = Date.now() - new Date(val).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins  < 1)  return "just now";
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  < 30) return `${days}d ago`;
+  return new Date(val).toLocaleDateString();
+}
+
 function AuditLogTab({ company }) {
+  const { formatDateTime } = usePreferences();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [actionFilter, setActionFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("all");
 
   useEffect(() => {
     appClient.companies.getAuditLog(company.id, 200)
@@ -836,52 +1022,96 @@ function AuditLogTab({ company }) {
       .finally(() => setLoading(false));
   }, [company.id]);
 
-  const actionColor = {
-    login: "text-green-600 dark:text-green-400",
-    logout: "text-muted-foreground",
-    register: "text-blue-600 dark:text-blue-400",
-    create: "text-blue-500",
-    update: "text-yellow-600 dark:text-yellow-400",
-    delete: "text-red-500",
-    invite_member: "text-purple-600 dark:text-purple-400",
-    remove_member: "text-red-600",
-    password_changed: "text-orange-600 dark:text-orange-400",
-  };
+  const uniqueActions = [...new Set(logs.map(l => l.action))];
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  const filtered = logs.filter(l => {
+    const desc = formatAuditAction(l.action, l.resource_type).toLowerCase();
+    const actor = (l.user_email || "system").toLowerCase();
+    if (search && !actor.includes(search.toLowerCase()) && !desc.includes(search.toLowerCase())) return false;
+    if (actionFilter && l.action !== actionFilter) return false;
+    if (dateFilter === "today") {
+      const today = new Date();
+      if (new Date(l.occurred_at).toDateString() !== today.toDateString()) return false;
+    }
+    if (dateFilter === "week" && Date.now() - new Date(l.occurred_at).getTime() > 7 * 86_400_000) return false;
+    if (dateFilter === "month" && Date.now() - new Date(l.occurred_at).getTime() > 30 * 86_400_000) return false;
+    return true;
+  });
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-12">
+      <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
+    </div>
+  );
 
   return (
-    <Section title="Audit log" description={`A record of all actions taken in this workspace. Showing last ${logs.length} entries.`}>
-      {logs.length === 0 ? (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-heading text-lg font-semibold tracking-tight">Audit log</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">Activity history for this workspace.</p>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search user or activity…"
+            className="pl-8 h-8 text-sm w-56"
+          />
+        </div>
+        <select
+          value={actionFilter}
+          onChange={e => setActionFilter(e.target.value)}
+          className="h-8 px-2.5 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="">All actions</option>
+          {uniqueActions.map(a => (
+            <option key={a} value={a}>{ACTION_META[a]?.label ?? a.replace(/_/g, " ")}</option>
+          ))}
+        </select>
+        <select
+          value={dateFilter}
+          onChange={e => setDateFilter(e.target.value)}
+          className="h-8 px-2.5 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All time</option>
+          <option value="today">Today</option>
+          <option value="week">Last 7 days</option>
+          <option value="month">Last 30 days</option>
+        </select>
+        <span className="text-xs text-muted-foreground ml-auto">{filtered.length} of {logs.length} entries</span>
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg px-6 py-8 text-center">
           <ClipboardList className="w-6 h-6 text-muted-foreground mx-auto mb-2 opacity-40" />
-          <p className="text-sm text-muted-foreground">No activity yet.</p>
+          <p className="text-sm text-muted-foreground">{logs.length === 0 ? "No activity yet." : "No entries match your filters."}</p>
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
-          <div className="grid grid-cols-[160px_120px_1fr_1fr_120px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
-            <span>Time</span><span>Action</span><span>User</span><span>Resource</span><span>IP Address</span>
+          <div className="grid grid-cols-[1fr_2fr_180px] gap-4 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
+            <span>User</span>
+            <span>Activity</span>
+            <span>Date &amp; Time</span>
           </div>
           <div className="divide-y divide-border">
-            {logs.map(l => (
-              <div key={l.id} className="grid grid-cols-[160px_120px_1fr_1fr_120px] gap-3 px-4 py-2.5 text-xs hover:bg-secondary/30 transition-colors">
-                <span className="text-muted-foreground">
-                  {new Date(l.occurred_at).toLocaleString()}
-                </span>
-                <span className={`font-mono ${actionColor[l.action] || "text-foreground"}`}>
-                  {l.action}
-                </span>
-                <span className="truncate text-muted-foreground">{l.user_email || l.user_id || "-"}</span>
-                <span className="truncate font-mono">
-                  {l.resource_type}{l.resource_id ? ` ${l.resource_id.slice(0, 8)}` : ""}
-                </span>
-                <span className="text-muted-foreground font-mono">{l.ip_address || "-"}</span>
-              </div>
-            ))}
+            {filtered.map(l => {
+              const desc = formatAuditAction(l.action, l.resource_type);
+              const actor = l.user_email || "System";
+              return (
+                <div key={l.id} className="grid grid-cols-[1fr_2fr_180px] gap-4 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
+                  <p className="text-sm font-medium truncate">{actor}</p>
+                  <p className="text-sm text-muted-foreground">{desc}</p>
+                  <p className="text-xs text-muted-foreground">{formatDateTime(l.occurred_at)}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
-    </Section>
+    </div>
   );
 }
 
@@ -903,7 +1133,7 @@ function UsageBar({ label, used, limit, unlimited }) {
         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${
-              danger ? "bg-destructive" : warn ? "bg-yellow-500" : "bg-primary"
+              danger ? "bg-destructive" : warn ? "bg-foreground/60" : "bg-foreground"
             }`}
             style={{ width: `${pct}%` }}
           />
@@ -914,7 +1144,7 @@ function UsageBar({ label, used, limit, unlimited }) {
 }
 
 function BillingTab({ company }) {
-  const { planConfig, upgradePlan, isFreePlan, isTrialExpired, daysLeft, plans } = usePlan();
+  const { planConfig, upgradePlan, isFreePlan, isPaidPlan, isTrialExpired, daysLeft, upgradedAt, plans } = usePlan();
 
   const { data: usage, isLoading: usageLoading } = useQuery({
     queryKey: ["billing-usage", company?.id],
@@ -923,27 +1153,17 @@ function BillingTab({ company }) {
     staleTime: 60_000,
   });
 
-  const { data: invoices = [], isLoading: invoicesLoading } = useQuery({
-    queryKey: ["billing-invoices", company?.id],
-    queryFn: appClient.billing.getInvoices,
-    enabled: !!company?.id,
-    staleTime: 60_000,
-  });
-
   const limits = planConfig?.limits ?? {};
 
+  const badgeClass = "text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground font-medium border border-border";
   const statusBadge = isTrialExpired
-    ? <span className="text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">Trial expired</span>
+    ? <span className={badgeClass}>Trial expired</span>
     : isFreePlan
-      ? <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 font-medium">{daysLeft}d left in trial</span>
-      : <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 font-medium">Active</span>;
+      ? <span className={badgeClass}>{daysLeft}d left in trial</span>
+      : <span className={badgeClass}>Active</span>;
 
-  const invoiceStatusColor = {
-    paid:     "text-green-600 dark:text-green-400",
-    pending:  "text-yellow-600 dark:text-yellow-400",
-    failed:   "text-destructive",
-    refunded: "text-muted-foreground",
-  };
+  // Free upgrades go through sales; surface the paid plan's contact link directly.
+  const isContactSales = upgradePlan?.cta_external;
 
   const usageItems = [
     { key: "team_members", label: "Team members",      limitKey: "team_members" },
@@ -955,75 +1175,48 @@ function BillingTab({ company }) {
   return (
     <div className="space-y-8">
 
-      {/* Current plan + upgrade */}
-      <div className="grid grid-cols-[1fr_280px] gap-6 items-start">
-        <Section title="Current plan" description="Your active subscription and trial status.">
-          <div className="border border-border rounded-lg p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-base">{planConfig?.name ?? "Free"}</p>
-                {planConfig?.badge && (
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-medium">
-                    {planConfig.badge}
-                  </span>
-                )}
-                {statusBadge}
-              </div>
-              {upgradePlan && (
-                <Link
-                  to="/settings?tab=billing"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
-                >
-                  <Zap className="w-3 h-3" />
-                  Upgrade to {upgradePlan.name}
-                </Link>
+      {/* Current plan */}
+      <Section title="Current plan" description="Your active plan and trial status.">
+        <div className="border border-border rounded-lg p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <p className="font-semibold text-base">{planConfig?.name ?? "Free"}</p>
+              {planConfig?.badge && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-medium">
+                  {planConfig.badge}
+                </span>
               )}
+              {statusBadge}
             </div>
-            {planConfig?.description && <p className="text-sm text-muted-foreground">{planConfig.description}</p>}
-            {planConfig?.price_display && (
-              <p className="text-sm font-medium">
-                {planConfig.price_display}
-                {planConfig.period && <span className="text-muted-foreground font-normal"> / {planConfig.period}</span>}
-              </p>
+            {upgradePlan && (
+              <a
+                href={isContactSales ? upgradePlan.cta_href : "/settings?tab=billing"}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
+              >
+                <Zap className="w-3 h-3" />
+                {isContactSales ? `Contact sales to upgrade` : `Upgrade to ${upgradePlan.name}`}
+              </a>
             )}
           </div>
-        </Section>
-
-        {/* Usage summary */}
-        <div className="mt-[52px] border border-border rounded-lg p-5 space-y-4">
-          <p className="text-sm font-medium">Quick usage summary</p>
-          {usageLoading ? (
-            <div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="h-5 bg-secondary animate-pulse rounded" />)}</div>
-          ) : (
-            <div className="space-y-3">
-              {usageItems.map(({ key, label, limitKey }) => {
-                const limit = limits[limitKey];
-                const used = usage?.[key] ?? 0;
-                const unlimited = limit === null || limit === undefined;
-                const pct = (!unlimited && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-                return (
-                  <div key={key} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">{label}</span>
-                      <span className={pct >= 90 ? "text-destructive font-medium" : "font-medium"}>
-                        {used.toLocaleString()}{!unlimited && ` / ${limit?.toLocaleString()}`}
-                      </span>
-                    </div>
-                    {!unlimited && (
-                      <div className="h-1 bg-secondary rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${pct >= 90 ? "bg-destructive" : pct >= 70 ? "bg-yellow-500" : "bg-primary"}`} style={{ width: `${pct}%` }} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          {planConfig?.description && <p className="text-sm text-muted-foreground">{planConfig.description}</p>}
+          {isPaidPlan ? (
+            <p className="text-sm font-medium">
+              Upgraded on{" "}
+              <span className="text-muted-foreground font-normal">
+                {upgradedAt ? upgradedAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "-"}
+              </span>
+            </p>
+          ) : planConfig?.price_display && (
+            <p className="text-sm font-medium">
+              {planConfig.price_display}
+              {planConfig.period && <span className="text-muted-foreground font-normal"> / {planConfig.period}</span>}
+            </p>
           )}
         </div>
-      </div>
+      </Section>
 
       {/* Detailed usage */}
-      <Section title="Usage this period" description="Full breakdown tracked against your plan limits.">
+      <Section title="Usage this period" description="Account-wide totals tracked against your plan limits.">
         {usageLoading ? (
           <div className="grid grid-cols-2 gap-4">
             {[1,2,3,4].map(i => <div key={i} className="h-14 bg-secondary animate-pulse rounded-lg" />)}
@@ -1047,9 +1240,51 @@ function BillingTab({ company }) {
         )}
       </Section>
 
+      {/* Usage by workspace */}
+      {usage?.workspaces?.length > 0 && (
+        <Section title="Usage by workspace" description="How the account total breaks down across your workspaces.">
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left font-medium px-4 py-2.5">Workspace</th>
+                  <th className="text-right font-medium px-4 py-2.5">Members</th>
+                  <th className="text-right font-medium px-4 py-2.5">Profiles</th>
+                  <th className="text-right font-medium px-4 py-2.5">Campaigns</th>
+                  <th className="text-right font-medium px-4 py-2.5">AI tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.workspaces.map((w) => (
+                  <tr key={w.id} className={`border-t border-border ${w.id === company?.id ? "bg-secondary/20" : ""}`}>
+                    <td className="px-4 py-2.5 font-medium">
+                      {w.name}
+                      {w.id === company?.id && <span className="ml-1.5 text-[10px] text-muted-foreground">(current)</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{w.team_members.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{w.profiles.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{w.campaigns.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{w.ai_tokens.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-border font-medium">
+                  <td className="px-4 py-2.5">Account total</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.team_members ?? usage.team_members ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.profiles ?? usage.profiles ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.campaigns ?? usage.campaigns ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.ai_tokens ?? usage.ai_tokens ?? 0).toLocaleString()}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </Section>
+      )}
+
       {/* All plans */}
       <Section title="All plans" description="Compare plans and upgrade at any time.">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           {plans.filter(p => p.is_active).map(p => (
             <div
               key={p.id}
@@ -1092,37 +1327,6 @@ function BillingTab({ company }) {
           ))}
         </div>
       </Section>
-
-      {/* Invoice history */}
-      <Section title="Billing history" description="Past invoices for this workspace.">
-        {invoicesLoading ? (
-          <div className="h-20 bg-secondary animate-pulse rounded-lg" />
-        ) : invoices.length === 0 ? (
-          <div className="border border-dashed border-border rounded-lg px-6 py-8 text-center">
-            <CreditCard className="w-6 h-6 text-muted-foreground mx-auto mb-2 opacity-40" />
-            <p className="text-sm text-muted-foreground">No invoices yet.</p>
-          </div>
-        ) : (
-          <div className="border border-border rounded-lg overflow-hidden">
-            <div className="grid grid-cols-[1fr_100px_140px_100px_80px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
-              <span>Description</span><span>Amount</span><span>Date</span><span>Period</span><span>Status</span>
-            </div>
-            <div className="divide-y divide-border">
-              {invoices.map(inv => (
-                <div key={inv.id} className="grid grid-cols-[1fr_100px_140px_100px_80px] gap-3 px-4 py-3 text-sm items-center hover:bg-secondary/30 transition-colors">
-                  <span className="truncate">{inv.description || "Subscription"}</span>
-                  <span className="font-medium">{inv.currency} {Number(inv.amount).toFixed(2)}</span>
-                  <span className="text-muted-foreground text-xs">{new Date(inv.invoice_date).toLocaleDateString()}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {inv.period_start ? new Date(inv.period_start).toLocaleDateString() : "-"}
-                  </span>
-                  <span className={`text-xs capitalize font-medium ${invoiceStatusColor[inv.status] || ""}`}>{inv.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </Section>
     </div>
   );
 }
@@ -1142,13 +1346,6 @@ const TICKET_PRIORITIES = [
   { value: "high",   label: "High" },
   { value: "urgent", label: "Urgent" },
 ];
-
-const ticketStatusIcon = {
-  open:        <Clock className="w-3.5 h-3.5 text-yellow-500" />,
-  in_progress: <BarChart2 className="w-3.5 h-3.5 text-blue-500" />,
-  resolved:    <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />,
-  closed:      <XCircle className="w-3.5 h-3.5 text-muted-foreground" />,
-};
 
 const ticketStatusLabel = {
   open: "Open", in_progress: "In progress", resolved: "Resolved", closed: "Closed",
@@ -1239,7 +1436,6 @@ function SupportTab() {
           <div className="border border-border rounded-lg divide-y divide-border">
             {tickets.map(t => (
               <div key={t.id} className="px-4 py-3 flex items-start gap-3">
-                <div className="mt-0.5 flex-shrink-0">{ticketStatusIcon[t.status] ?? ticketStatusIcon.open}</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{t.subject}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.body}</p>
@@ -1264,32 +1460,32 @@ function SupportTab() {
 // ── Settings page ─────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: "profile",     label: "Profile",      icon: User },
-  { id: "security",    label: "Security",     icon: Lock },
-  { id: "preferences", label: "Preferences",  icon: Bell },
-  { id: "billing",     label: "Billing",      icon: CreditCard },
-  { id: "company",     label: "Company",      icon: Building2,     adminOnly: true },
-  { id: "members",     label: "Members",      icon: Users,         adminOnly: true },
-  { id: "api-keys",    label: "API Keys",     icon: Key,           adminOnly: true },
-  { id: "audit-log",   label: "Audit Log",    icon: ClipboardList, adminOnly: true },
-  { id: "support",     label: "Support",      icon: MessageCircle },
+  { id: "profile",     label: "Profile",     icon: User },
+  { id: "security",    label: "Security",    icon: Lock },
+  { id: "preferences", label: "Preferences", icon: Bell },
+  { id: "billing",     label: "Billing",     icon: CreditCard },
+  { id: "company",     label: "Company",     icon: Building2,     adminOnly: true },
+  { id: "members",     label: "Members",     icon: Users,         adminOnly: true },
+  { id: "audit-log",   label: "Audit Log",   icon: ClipboardList, adminOnly: true },
+  { id: "support",     label: "Support",     icon: MessageCircle },
 ];
 
 export default function Settings() {
   const { user, currentCompany, refreshUser } = useAuth();
+  const { t } = usePreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
 
   const role = user?.companies?.find(c => c.id === currentCompany?.id)?.role;
-  const isAdmin = ["owner", "admin"].includes(role);
+  const isAdmin = role === "admin";
 
-  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin);
+  const visibleTabs = TABS.filter(tab => !tab.adminOnly || isAdmin);
   const setTab = (id) => setSearchParams({ tab: id });
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-8 pt-8 pb-6 flex-shrink-0 border-b border-border">
-        <h1 className="font-heading text-3xl font-semibold tracking-tight">Settings</h1>
+        <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Settings")}</h1>
         <p className="text-muted-foreground text-sm mt-1">
           Manage your account, workspace and preferences.
         </p>
@@ -1297,18 +1493,18 @@ export default function Settings() {
 
       <div className="flex flex-1 overflow-hidden">
         <aside className="w-52 flex-shrink-0 border-r border-border px-3 py-4 space-y-0.5 overflow-y-auto">
-          {visibleTabs.map(t => (
+          {visibleTabs.map(tab => (
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+              key={tab.id}
+              onClick={() => setTab(tab.id)}
               className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors text-left ${
-                activeTab === t.id
+                activeTab === tab.id
                   ? "bg-secondary text-foreground font-medium"
                   : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
               }`}
             >
-              <t.icon className="w-4 h-4 flex-shrink-0" />
-              {t.label}
+              <tab.icon className="w-4 h-4 flex-shrink-0" />
+              {t(tab.label)}
             </button>
           ))}
           {isAdmin && (
@@ -1322,10 +1518,9 @@ export default function Settings() {
         <main className="flex-1 overflow-y-auto px-8 py-6">
           {activeTab === "profile"     && <ProfileTab user={user} onRefresh={refreshUser} />}
           {activeTab === "security"    && <SecurityTab />}
-          {activeTab === "preferences" && <PreferencesTab companyId={currentCompany?.id} />}
+          {activeTab === "preferences" && <PreferencesTab />}
           {activeTab === "company"     && isAdmin && <CompanyTab company={currentCompany} onRefresh={refreshUser} />}
           {activeTab === "members"     && isAdmin && <MembersTab company={currentCompany} currentUserId={user?.id} />}
-          {activeTab === "api-keys"    && isAdmin && <ApiKeysTab company={currentCompany} />}
           {activeTab === "audit-log"   && isAdmin && <AuditLogTab company={currentCompany} />}
           {activeTab === "billing"     && <BillingTab company={currentCompany} />}
           {activeTab === "support"     && <SupportTab />}

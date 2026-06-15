@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""click_cdp_ai - GA landing orchestrator (the single, consolidated pipeline).
+
+This is the ONE GA landing orchestrator (the earlier duplicate family was removed
+and this consolidated pipeline uses the ``integration_ga_reports_*`` name). dag_id
+``click_cdp_ai_integration_ga_reports``.
+
+Two ways it runs:
+  - API / queue trigger with conf {str_client_name, company_id, job_id, ...}
+    -> syncs that one workspace (the "Sync Data" button / initial backfill) and
+       reports completion to Postgres via the dag-complete webhook.
+  - daily schedule (no conf) -> syncs every GA-connected workspace; the per-report
+    incremental watermark (lib/pg_state) keeps each daily run cheap.
+
+Broken down by purpose into chained child DAGs:
+    - click_cdp_ai_integration_ga_reports_path_funnel
+    - click_cdp_ai_integration_ga_reports_utm
+    - click_cdp_ai_integration_ga_reports_content
+    - click_cdp_ai_integration_ga_reports_purchase
+
+Config + run status live in Postgres (app.* tables); see lib/pg_config, lib/pg_state
+and lib/ga_reports. NOTE: keyword_performance is a Search Console report and is NOT
+run here - it lives in click_cdp_ai_gsc_keyword_performance, triggered by the GSC
+sync flow.
+"""
+
+import os
+from datetime import datetime
+
+from airflow.decorators import dag
+from airflow.models import Param
+from airflow.operators.python import PythonOperator
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from airflow.api.common.trigger_dag import trigger_dag
+from airflow.utils.state import State
+
+from dags.click_cdp_ai_dags.lib import ga_reports as tf
+from dags.click_cdp_ai_dags.lib.log import get_logger, ctx
+
+os.environ["no_proxy"] = "*"
+
+_log = get_logger("ga.orchestrator")
+
+# Pass-through conf templates so the child group DAGs receive the same trigger
+# parameters as this orchestrator (empty string when absent, never the literal "None").
+_CHILD_CONF = {
+    "str_client_name": "{{ (dag_run.conf.get('str_client_name') or '') if dag_run.conf else '' }}",
+    "is_debugging": "{{ (dag_run.conf.get('is_debugging', False) if dag_run.conf else False) }}",
+    "dag_run_id": "{{ (dag_run.conf.get('dag_run_id') or '') if dag_run.conf else '' }}",
+}
+
+
+def trigger_anonymous_profile_mapping_dag(**context):
+    """Trigger trial_flow_anonymous_profile_mapping with the run parameters."""
+    dag_run = context['dag_run']
+    params = dag_run.conf if dag_run.conf else {}
+    str_client_name = params.get("str_client_name")
+    triggered_dag_run_id = params.get("dag_run_id")
+
+    is_debugging_param = params.get("is_debugging", False)
+    if isinstance(is_debugging_param, str):
+        is_debugging = is_debugging_param.lower() == 'true'
+    else:
+        is_debugging = bool(is_debugging_param)
+
+    if str_client_name:
+        conf = {
+            "str_client_name": str_client_name,
+            "is_debugging": is_debugging,
+            "dag_run_id": triggered_dag_run_id,
+        }
+        triggered = trigger_dag(dag_id='trial_flow_anonymous_profile_mapping', conf=conf, execution_date=context['execution_date'])
+        _log.info(f"DAG triggered successfully: {triggered.run_id}")
+    else:
+        _log.warning("No client name provided, triggering trial_flow_anonymous_profile_mapping DAG without parameters")
+        triggered = trigger_dag(dag_id='trial_flow_anonymous_profile_mapping', execution_date=context['execution_date'])
+        _log.info(f"DAG triggered successfully: {triggered.run_id}")
+    return True
+
+
+def report_success(**context):
+    """On full success, tell the Node app so it flips the job + integration to
+    synced in Postgres (no-op for scheduled all-workspace runs without a job_id)."""
+    dag_run = context['dag_run']
+    params = dag_run.conf if dag_run.conf else {}
+    return tf.notify_dag_complete(params, is_synced=True)
+
+
+@dag(
+    # Daily auto-sync; API/queue triggers run on top of the schedule on demand.
+    schedule="@daily",
+    start_date=datetime(2024, 1, 1),
+    # Allow many per-workspace syncs (40-50 clients) to run concurrently instead
+    # of serialising them one-at-a-time. Real API concurrency is bounded inside
+    # the child report DAGs (max_active_tasks) and, in production, by Airflow
+    # pools sized to the GA quota (see module docstring / repo notes).
+    max_active_runs=16,
+    catchup=False,
+    tags=["cdp-click-ai", "data_extraction", "ga", "orchestrator", "integration"],
+    owner_links={"capsuite": "https://capsuite.co"},
+    params={
+        "str_client_name": Param(None, type=["string", "null"]),
+        "is_debugging": Param(False, type=["boolean", "string"]),
+        "dag_run_id": Param(None, type=["string", "null"]),
+        # Passed by the Node integration queue so the dag-complete webhook can
+        # update the right job / integration row.
+        "company_id": Param(None, type=["string", "null"]),
+        "job_id": Param(None, type=["string", "null"]),
+        "integration_type": Param("googleAnalytics", type=["string", "null"]),
+    },
+    on_failure_callback=tf.on_dag_failure_callback,
+)
+def click_cdp_ai_integration_ga_reports():
+
+    def _trigger(task_id, trigger_dag_id):
+        return TriggerDagRunOperator(
+            task_id=task_id,
+            trigger_dag_id=trigger_dag_id,
+            # Unique child run id per orchestrator run, so concurrent per-workspace
+            # syncs (and the daily run) never collide on the same child run id.
+            trigger_run_id="{{ run_id }}__" + task_id,
+            conf=_CHILD_CONF,
+            wait_for_completion=True,
+            poke_interval=20,
+            # run id is already unique -> no reset needed (reset would clobber a
+            # sibling run of the same child DAG).
+            reset_dag_run=False,
+            allowed_states=[State.SUCCESS],
+            failed_states=[State.FAILED],
+        )
+
+    task_dag_start = PythonOperator(
+        task_id='dag_start_monitor',
+        python_callable=tf.on_dag_start_callback,
+        provide_context=True,
+        trigger_rule='all_success',
+    )
+
+    task_path_funnel = _trigger('run_path_funnel', 'click_cdp_ai_integration_ga_reports_path_funnel')
+    task_utm = _trigger('run_utm', 'click_cdp_ai_integration_ga_reports_utm')
+    task_content = _trigger('run_content', 'click_cdp_ai_integration_ga_reports_content')
+    task_purchase = _trigger('run_purchase', 'click_cdp_ai_integration_ga_reports_purchase')
+
+    task_profile_mapping = PythonOperator(
+        task_id='trigger_anonymous_profile_mapping',
+        python_callable=trigger_anonymous_profile_mapping_dag,
+        provide_context=True,
+    )
+
+    # Fires only when every report group succeeded -> reports completion to Postgres.
+    task_report_success = PythonOperator(
+        task_id='report_success',
+        python_callable=report_success,
+        provide_context=True,
+        trigger_rule='all_success',
+    )
+
+    task_dag_start >> [task_path_funnel, task_utm, task_content, task_purchase]
+    [task_path_funnel, task_purchase] >> task_profile_mapping
+    [task_utm, task_content, task_profile_mapping] >> task_report_success
+
+
+click_cdp_ai_integration_ga_reports()

@@ -12,7 +12,7 @@ export default function ChartExplainer({ chart, config, chartKey }) {
   const handleExplain = async (e) => {
     e.stopPropagation();
     setOpen(true);
-    if (explanation) return;
+    setExplanation(null);
     setLoading(true);
     try {
       if (chartKey) {

@@ -18,7 +18,9 @@ export default function PlanGate({ children = null, feature = "this feature", in
   if (canUseFeatures) return children;
 
   const upgradeLabel = upgradePlan
-    ? `Upgrade to ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+    ? (upgradePlan.period
+        ? `Upgrade to ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+        : `Upgrade to ${upgradePlan.name}`)
     : "Upgrade your plan";
 
   if (inline) {
@@ -52,10 +54,10 @@ export default function PlanGate({ children = null, feature = "this feature", in
           </Link>
         )}
         <a
-          href="mailto:support@clickcdp.com?subject=Enterprise inquiry"
+          href={upgradePlan?.cta_external ? upgradePlan.cta_href : "mailto:support@clickcdp.com?subject=Upgrade to Paid"}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          Contact us for Enterprise
+          Contact sales
         </a>
       </div>
     </div>

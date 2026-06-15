@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import {
   Users, AlertCircle, Send, Clock, Zap, FlaskConical, Calendar, Plus, Trash2, Layout,
+  Eye, Code2,
 } from "lucide-react";
 import { appClient } from "@/api/appClient";
 import { useQuery } from "@tanstack/react-query";
@@ -93,57 +94,107 @@ const TOKENS = ["{{first_name}}", "{{last_name}}", "{{full_name}}", "{{email}}",
 
 // ── Template picker ───────────────────────────────────────────────────────────
 function TemplatePicker({ open, onClose, onApply }) {
+  const [previewTemplate, setPreviewTemplate] = useState(null);
+
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ["edm-templates"],
     queryFn: () => appClient.edm.listTemplates(),
     enabled: open,
   });
 
+  // Reset preview when dialog closes
+  useEffect(() => {
+    if (!open) setPreviewTemplate(null);
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[70vh] flex flex-col p-0 gap-0" aria-describedby={undefined}>
+      <DialogContent className="max-w-3xl max-h-[75vh] flex flex-col p-0 gap-0" aria-describedby={undefined}>
         <DialogHeader className="px-5 py-4 border-b border-border flex-shrink-0">
           <DialogTitle className="text-sm font-semibold">Load from Template</DialogTitle>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto p-4">
-          {isLoading && (
-            <div className="flex items-center justify-center py-10">
-              <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
-            </div>
-          )}
+        <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
+          {/* Left panel: template list */}
+          <div className="w-56 flex-shrink-0 border-r border-border flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-3">
+              {isLoading && (
+                <div className="flex items-center justify-center py-10">
+                  <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
+                </div>
+              )}
 
-          {!isLoading && templates.length === 0 && (
-            <div className="text-center py-10 text-sm text-muted-foreground">
-              <Layout className="w-8 h-8 mx-auto mb-2 opacity-20" />
-              <p>No templates yet.</p>
-              <p className="text-xs mt-1">Go to Email → Templates to create reusable templates.</p>
-            </div>
-          )}
+              {!isLoading && templates.length === 0 && (
+                <div className="text-center py-10 text-sm text-muted-foreground">
+                  <Layout className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                  <p>No templates yet.</p>
+                  <p className="text-xs mt-1">Go to Email &rarr; Templates to create reusable templates.</p>
+                </div>
+              )}
 
-          {templates.map(t => (
-            <button
-              key={t.id}
-              onClick={() => onApply(t)}
-              className="w-full flex items-start gap-3 p-3 rounded-lg border border-border hover:border-foreground/40 hover:bg-secondary/30 transition-all text-left mb-2 last:mb-0 group"
-            >
-              <div className="w-8 h-8 rounded-md bg-gradient-to-br from-violet-100 to-indigo-100 border border-violet-200 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <Layout className="w-4 h-4 text-violet-500" />
+              {templates.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => onApply(t)}
+                  onMouseEnter={() => setPreviewTemplate(t)}
+                  className={cn(
+                    "w-full flex items-start gap-2 p-2.5 rounded-lg border transition-all text-left mb-1.5 last:mb-0 group",
+                    previewTemplate?.id === t.id
+                      ? "border-foreground/40 bg-secondary/40"
+                      : "border-border hover:border-foreground/30 hover:bg-secondary/20"
+                  )}
+                >
+                  <div className="w-7 h-7 rounded-md bg-secondary border border-border flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Layout className="w-3.5 h-3.5 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium group-hover:text-foreground truncate">{t.name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate mt-0.5">{t.subject || "No subject"}</p>
+                    {t.variables?._blocks && (
+                      <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                        {t.variables._blocks.length} block{t.variables._blocks.length !== 1 ? "s" : ""}
+                      </p>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Right panel: preview */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {previewTemplate ? (
+              <>
+                <div className="px-4 py-3 border-b border-border flex-shrink-0">
+                  <p className="text-sm font-semibold truncate">{previewTemplate.name}</p>
+                  {previewTemplate.subject && (
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">Subject: {previewTemplate.subject}</p>
+                  )}
+                </div>
+                <div className="flex-1 overflow-hidden p-3">
+                  <iframe
+                    srcDoc={previewTemplate.html_body || "<p style='font-family:sans-serif;color:#888;padding:24px;font-size:13px;'>No preview available</p>"}
+                    title={`Preview: ${previewTemplate.name}`}
+                    className="w-full h-full border border-border rounded-lg bg-white"
+                    sandbox="allow-same-origin"
+                  />
+                </div>
+                <div className="px-4 py-3 border-t border-border flex-shrink-0">
+                  <Button size="sm" className="w-full h-8 text-xs" onClick={() => onApply(previewTemplate)}>
+                    Use this template
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-center px-6">
+                <div>
+                  <Layout className="w-10 h-10 mx-auto mb-3 opacity-15" />
+                  <p className="text-sm text-muted-foreground">Hover over a template to preview it</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">Click to apply it to your campaign</p>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium group-hover:text-foreground">{t.name}</p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{t.subject}</p>
-                {t.variables?._blocks && (
-                  <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                    {t.variables._blocks.length} block{t.variables._blocks.length !== 1 ? "s" : ""}
-                  </p>
-                )}
-              </div>
-              <span className="text-xs text-muted-foreground group-hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 self-center">
-                Use →
-              </span>
-            </button>
-          ))}
+            )}
+          </div>
         </div>
 
         <div className="px-4 py-3 border-t border-border flex-shrink-0">
@@ -227,6 +278,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   const isEdit = !!initial?.id;
 
   const [activeTab, setActiveTab] = useState("email");
+  // "build" | "preview" - only applies when activeTab === "email"
+  const [viewMode, setViewMode] = useState("build");
 
   // Email builder state
   const [blocks, setBlocks] = useState(DEFAULT_BLOCKS);
@@ -270,9 +323,17 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     queryFn: () => appClient.entities.Campaign.list("-created_date"),
   });
 
+  const { data: edmSettings } = useQuery({
+    queryKey: ["edm-settings"],
+    queryFn: () => appClient.edm.getSettings(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Reset / populate when dialog opens or initial changes
   useEffect(() => {
     if (!open) return;
+    const defaultFromName  = edmSettings?.from_name  || "";
+    const defaultFromEmail = edmSettings?.from_email || "";
     if (initial) {
       const saved = initial.ab_test_config || {};
       setBlocks(saved._blocks || DEFAULT_BLOCKS);
@@ -289,8 +350,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
         name: initial.name || "New Campaign",
         subject: initial.subject || "",
         preview_text: initial.preview_text || "",
-        from_name: initial.from_name || "Click AI",
-        from_email: initial.from_email || "onboarding@resend.dev",
+        from_name: initial.from_name || defaultFromName,
+        from_email: initial.from_email || defaultFromEmail,
         reply_to: initial.reply_to || "",
         segment_id: initial.segment_id || "",
         utm_campaign_id: initial.utm_campaign_id || "",
@@ -306,8 +367,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
         name: "New Campaign",
         subject: "",
         preview_text: "",
-        from_name: "Click AI",
-        from_email: "onboarding@resend.dev",
+        from_name: defaultFromName,
+        from_email: defaultFromEmail,
         reply_to: "",
         segment_id: "",
         utm_campaign_id: "",
@@ -315,16 +376,23 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     }
     setRecipientCount(null);
     setActiveTab("email");
+    setViewMode("build");
     setTestOpen(false);
-  }, [initial, open]);
+  }, [initial, open, edmSettings]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
+  // ── Recipient preview ─────────────────────────────────────────────────────
   const previewRecipients = async () => {
     setLoadingRecipients(true);
     try {
-      const data = await appClient.edm.previewRecipientsBySegment();
-      setRecipientCount(data.count);
+      if (isEdit && initial?.id) {
+        const data = await appClient.edm.getRecipientsPreview(initial.id);
+        setRecipientCount(data.count);
+      } else {
+        const data = await appClient.edm.previewRecipientsBySegment();
+        setRecipientCount(data.count);
+      }
     } catch {
       toast.error("Could not preview recipients");
     } finally {
@@ -353,8 +421,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   const applyTemplate = (template) => {
     const vars = template.variables || {};
     if (vars._blocks) {
-      const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      setBlocks(vars._blocks.map(b => ({ ...b, id: `${b.type}_${uid()}`, config: { ...b.config } })));
+      const uid2 = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      setBlocks(vars._blocks.map(b => ({ ...b, id: `${b.type}_${uid2()}`, config: { ...b.config } })));
       setHtmlMode(vars._html_mode || false);
     }
     if (template.subject && !form.subject) {
@@ -393,12 +461,18 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
         _schedules: schedules,
         _events: events,
       };
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const uuidOrNull = (v) => (v && UUID_RE.test(v)) ? v : null;
       await onSave({
-        ...form,
-        html_body,
-        segment_id: form.segment_id || null,
-        utm_campaign_id: form.utm_campaign_id || null,
+        name: form.name,
+        subject: form.subject,
+        preview_text: form.preview_text || null,
+        from_name: form.from_name || null,
+        from_email: form.from_email,
         reply_to: form.reply_to || null,
+        html_body,
+        segment_id: uuidOrNull(form.segment_id),
+        utm_campaign_id: uuidOrNull(form.utm_campaign_id),
         status: triggerType === "scheduled" ? "scheduled" : "draft",
         scheduled_at: primaryScheduledAt,
         ab_test_config,
@@ -420,7 +494,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className="w-[96vw] max-w-6xl h-[92vh] p-0 flex flex-col overflow-hidden gap-0" aria-describedby={undefined}>
+        <DialogContent className="w-[96vw] max-w-6xl h-[92vh] p-0 flex flex-col overflow-hidden gap-0" aria-describedby={undefined} hideClose>
           <DialogTitle className="sr-only">
             {isEdit ? "Edit Campaign" : "New Email Campaign"}
           </DialogTitle>
@@ -433,12 +507,37 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
               className="text-base font-semibold border-none shadow-none focus-visible:ring-0 h-8 px-0 max-w-xs bg-transparent"
               placeholder="Campaign name..."
             />
-            {isEdit && initial?.status && (
-              <Badge variant="outline" className="text-[11px] capitalize flex-shrink-0">
-                {initial.status}
-              </Badge>
-            )}
             <div className="ml-auto flex items-center gap-2">
+              {isEdit && initial?.status && (
+                <Badge variant="outline" className="text-[11px] capitalize flex-shrink-0">
+                  {initial.status}
+                </Badge>
+              )}
+              {/* Build / Preview toggle - only relevant on the Email tab */}
+              {activeTab === "email" && (
+                <div className="flex items-center border border-border rounded-md overflow-hidden">
+                  <button
+                    onClick={() => setViewMode("build")}
+                    className={`h-8 px-3 text-xs flex items-center gap-1.5 transition-colors ${
+                      viewMode === "build"
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Code2 className="w-3.5 h-3.5" /> Build
+                  </button>
+                  <button
+                    onClick={() => setViewMode("preview")}
+                    className={`h-8 px-3 text-xs flex items-center gap-1.5 border-l border-border transition-colors ${
+                      viewMode === "preview"
+                        ? "bg-foreground text-background"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> Preview
+                  </button>
+                </div>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -497,7 +596,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                         className="h-8 text-sm"
                       />
                       {form.subject.length > 50 && (
-                        <p className="text-[11px] text-amber-500 mt-0.5 flex items-center gap-1">
+                        <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" /> Over 50 chars - may be clipped in inbox
                         </p>
                       )}
@@ -534,30 +633,68 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                     </div>
                   </div>
                 </div>
-                {/* Template load bar */}
-                <div className="px-5 py-1.5 border-b border-border flex items-center gap-2 flex-shrink-0 bg-secondary/10">
-                  <Layout className="w-3 h-3 text-muted-foreground" />
-                  <span className="text-[11px] text-muted-foreground">Start from a template or build from scratch below</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 text-[11px] gap-1 ml-auto px-2"
-                    onClick={() => setTemplatePickerOpen(true)}
-                  >
-                    Load Template
-                  </Button>
-                </div>
-                {/* Email builder fills remaining space */}
-                <div className="flex-1 min-h-0 p-3">
-                  <EmailBuilder
-                    blocks={blocks}
-                    onChange={setBlocks}
-                    htmlMode={htmlMode}
-                    onHtmlModeChange={setHtmlMode}
-                    rawHtml={rawHtml}
-                    onRawHtmlChange={setRawHtml}
-                  />
-                </div>
+
+                {/* Template load bar - only shown in build mode */}
+                {viewMode === "build" && (
+                  <div className="px-5 py-1.5 border-b border-border flex items-center gap-2 flex-shrink-0 bg-secondary/10">
+                    <Layout className="w-3 h-3 text-muted-foreground" />
+                    <span className="text-[11px] text-muted-foreground">Start from a template or build from scratch below</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 text-[11px] gap-1 px-2 ml-auto"
+                      onClick={() => setTemplatePickerOpen(true)}
+                    >
+                      Load Template
+                    </Button>
+                  </div>
+                )}
+
+                {/* Build view */}
+                {viewMode === "build" && (
+                  <div className="flex-1 min-h-0 p-3">
+                    <EmailBuilder
+                      blocks={blocks}
+                      onChange={setBlocks}
+                      htmlMode={htmlMode}
+                      onHtmlModeChange={setHtmlMode}
+                      rawHtml={rawHtml}
+                      onRawHtmlChange={setRawHtml}
+                      onOpenTemplatePicker={() => setTemplatePickerOpen(true)}
+                    />
+                  </div>
+                )}
+
+                {/* Preview view */}
+                {viewMode === "preview" && (
+                  <div className="flex-1 min-h-0 overflow-auto bg-secondary/10">
+                    <div className="min-h-full flex flex-col items-center py-8 px-4">
+                      <div className="w-full max-w-[650px]">
+                        <div className="flex items-center justify-between mb-4">
+                          <div>
+                            <p className="text-sm font-medium">{form.name || "Untitled"}</p>
+                            {form.subject && <p className="text-xs text-muted-foreground mt-0.5">Subject: {form.subject}</p>}
+                          </div>
+                          <span className="text-[11px] text-muted-foreground bg-background border border-border rounded px-2 py-1">
+                            Desktop - 650px
+                          </span>
+                        </div>
+                        <div className="rounded-xl overflow-hidden border border-border shadow-md bg-white">
+                          <iframe
+                            srcDoc={currentState.html_body || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content yet - switch to Build and add blocks.</p>"}
+                            className="w-full"
+                            style={{ height: "680px", display: "block" }}
+                            title="Email preview"
+                            sandbox="allow-same-origin"
+                          />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground text-center mt-3">
+                          Personalisation tokens will be replaced with real member values on send.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -588,6 +725,11 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                         }
                       </button>
                     </div>
+                    {!isEdit && recipientCount !== null && (
+                      <p className="text-[11px] text-muted-foreground mb-2">
+                        Count across all opted-in customers; segment filtering applied at send time.
+                      </p>
+                    )}
                     <Select
                       value={form.segment_id || "__none__"}
                       onValueChange={v => { set("segment_id", v === "__none__" ? "" : v); setRecipientCount(null); }}
@@ -816,7 +958,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                       ))}
 
                       {events.length > 0 && (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700 dark:bg-amber-950/20 dark:border-amber-900 dark:text-amber-400">
+                        <div className="bg-secondary border border-border rounded-lg p-3 text-xs text-muted-foreground">
                           <strong>Note:</strong> Event triggers require an active Automation to fire. Save as draft, then link this campaign to an Automation on the Email page.
                         </div>
                       )}

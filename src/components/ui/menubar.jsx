@@ -85,7 +85,7 @@ const MenubarSubContent = React.forwardRef(({ className, ...props }, ref) => (
 MenubarSubContent.displayName = MenubarPrimitive.SubContent.displayName
 
 const MenubarContent = React.forwardRef((
-  { className, align = "start", alignOffset = -4, sideOffset = 8, ...props },
+  { className, align = "start", alignOffset = - 4, sideOffset = 8, ...props },
   ref
 ) => (
   <MenubarPrimitive.Portal>

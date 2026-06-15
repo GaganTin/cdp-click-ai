@@ -1,32 +1,9 @@
 import { Router } from "express";
-import { authenticate } from "../middleware/auth.js";
+import crypto from "crypto";
+import { authenticate, resolveCompanyId } from "../middleware/auth.js";
+import { getInteractionServiceCompanyId } from "../lib/interactionService.js";
 
 const INTERACTION_SERVICE_URL = process.env.INTERACTION_SERVICE_URL || "http://localhost:8080";
-
-async function getOrCreateInteractionServiceCompanyId(pool, companyId) {
-  const { rows } = await pool.query(
-    `SELECT name, settings FROM app.companies WHERE id = $1`,
-    [companyId]
-  );
-  if (!rows.length) throw new Error("Company not found");
-  const { name, settings } = rows[0];
-  if (settings?.interaction_service_company_id) {
-    return settings.interaction_service_company_id;
-  }
-  const res = await fetch(`${INTERACTION_SERVICE_URL}/company/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: name || companyId }),
-  });
-  if (!res.ok) throw new Error(`Interaction service returned ${res.status} when creating company`);
-  const data = await res.json();
-  const interactionServiceCompanyId = data.id;
-  await pool.query(
-    `UPDATE app.companies SET settings = settings || $1::jsonb WHERE id = $2`,
-    [JSON.stringify({ interaction_service_company_id: interactionServiceCompanyId }), companyId]
-  );
-  return interactionServiceCompanyId;
-}
 
 // Resolve a segment's filter_criteria into SQL WHERE parts (parameterized)
 function buildSegmentWhere(filterCriteria, segmentType) {
@@ -50,9 +27,12 @@ function buildSegmentWhere(filterCriteria, segmentType) {
       preferred_channel:  "m.preferred_channel",
     };
     for (const [key, col] of Object.entries(textFields)) {
-      if (filterCriteria[key]) {
+      const v = filterCriteria[key];
+      if (Array.isArray(v)) {
+        if (v.length) { parts.push(`${col} = ANY($${idx++}::text[])`); params.push(v); }
+      } else if (v) {
         parts.push(`${col} = $${idx++}`);
-        params.push(filterCriteria[key]);
+        params.push(v);
       }
     }
     if (filterCriteria.is_opt_in_email === "true" || filterCriteria.is_opt_in_email === true) {
@@ -61,21 +41,65 @@ function buildSegmentWhere(filterCriteria, segmentType) {
     if (filterCriteria.opt_in_sms === "true" || filterCriteria.opt_in_sms === true) {
       parts.push("m.is_opt_in_sms = TRUE");
     }
+    // GA activity / commerce are pre-aggregated on app.customer_profiles (alias m),
+    // so these become simple column predicates (source-agnostic, company-scoped).
     if (filterCriteria.has_ga_activity === "true" || filterCriteria.has_ga_activity === true) {
-      parts.push("EXISTS (SELECT 1 FROM public.membership_ap_mapping apm2 WHERE apm2.membership_id = m.member_id)");
+      parts.push("m.ga_sessions > 0");
     }
     if (filterCriteria.has_seminars === "true" || filterCriteria.has_seminars === true) {
-      parts.push("EXISTS (SELECT 1 FROM public.membership_custom_activity mc WHERE mc.membership_id = m.member_id)");
+      parts.push("m.seminar_count > 0");
     }
     if (filterCriteria.min_ga_sessions) {
-      parts.push(`(SELECT COUNT(*) FROM public.membership_ap_mapping apm3 WHERE apm3.membership_id = m.member_id) >= $${idx++}`);
+      parts.push(`m.ga_sessions >= $${idx++}`);
       params.push(Number(filterCriteria.min_ga_sessions));
+    }
+    // Transaction criteria - from the pre-aggregated commerce columns.
+    if (filterCriteria.has_transactions === "true" || filterCriteria.has_transactions === true) {
+      parts.push("COALESCE(m.order_count, 0) > 0");
+    }
+    if (filterCriteria.min_orders) {
+      parts.push(`COALESCE(m.order_count, 0) >= $${idx++}`);
+      params.push(Number(filterCriteria.min_orders));
+    }
+    if (filterCriteria.max_orders) {
+      parts.push(`COALESCE(m.order_count, 0) <= $${idx++}`);
+      params.push(Number(filterCriteria.max_orders));
+    }
+    if (filterCriteria.min_spend) {
+      parts.push(`COALESCE(m.total_spend, 0) >= $${idx++}`);
+      params.push(Number(filterCriteria.min_spend));
+    }
+    if (filterCriteria.max_spend) {
+      parts.push(`COALESCE(m.total_spend, 0) <= $${idx++}`);
+      params.push(Number(filterCriteria.max_spend));
+    }
+    if (filterCriteria.ordered_within) {
+      parts.push(`m.last_order_date >= NOW() - make_interval(days => $${idx++})`);
+      params.push(Number(filterCriteria.ordered_within));
+    }
+    if (Array.isArray(filterCriteria.attribute_value_ids) && filterCriteria.attribute_value_ids.length) {
+      parts.push(`EXISTS (SELECT 1 FROM app.profile_attribute_values pav
+        JOIN app.attributes pa ON pa.id = pav.attribute_id AND pa.status = 'active'
+        WHERE pav.entity_type = 'customer' AND pav.entity_id = m.member_id
+          AND pav.attribute_value_id = ANY($${idx++}::uuid[]))`);
+      params.push(filterCriteria.attribute_value_ids);
     }
   } else {
     // anonymous_profile
-    if (filterCriteria.source_medium) {
+    if (Array.isArray(filterCriteria.source_medium)) {
+      if (filterCriteria.source_medium.length) {
+        parts.push(`pe.session_source_medium = ANY($${idx++}::text[])`);
+        params.push(filterCriteria.source_medium);
+      }
+    } else if (filterCriteria.source_medium) {
       parts.push(`pe.session_source_medium = $${idx++}`);
       params.push(filterCriteria.source_medium);
+    }
+    if (Array.isArray(filterCriteria.campaign)) {
+      if (filterCriteria.campaign.length) { parts.push(`pe.session_campaign_name = ANY($${idx++}::text[])`); params.push(filterCriteria.campaign); }
+    } else if (filterCriteria.campaign) {
+      parts.push(`pe.session_campaign_name = $${idx++}`);
+      params.push(filterCriteria.campaign);
     }
     if (filterCriteria.has_form_complete === "true" || filterCriteria.has_form_complete === true) {
       parts.push(
@@ -83,6 +107,13 @@ function buildSegmentWhere(filterCriteria, segmentType) {
          WHERE pe2.capsuite_apid = pe.capsuite_apid
            AND pe2.event_name IN ('Event_Form_Complete','form_submit'))`
       );
+    }
+    if (Array.isArray(filterCriteria.attribute_value_ids) && filterCriteria.attribute_value_ids.length) {
+      parts.push(`EXISTS (SELECT 1 FROM app.profile_attribute_values pav
+        JOIN app.attributes pa ON pa.id = pav.attribute_id AND pa.status = 'active'
+        WHERE pav.entity_type = 'anonymous' AND pav.entity_id = pe.capsuite_apid
+          AND pav.attribute_value_id = ANY($${idx++}::uuid[]))`);
+      params.push(filterCriteria.attribute_value_ids);
     }
   }
 
@@ -94,41 +125,49 @@ async function resolveSegmentToCapsuiteApids(pool, segmentId) {
   if (!segmentId) return [];
   try {
     const { rows } = await pool.query(
-      `SELECT segment_type, metadata FROM app.segments WHERE id = $1`,
+      `SELECT segment_type, metadata, company_id FROM app.segments WHERE id = $1`,
       [segmentId]
     );
     if (!rows.length) return [];
-    const { segment_type, metadata } = rows[0];
+    const { segment_type, metadata, company_id } = rows[0];
     const filterCriteria = metadata?.filter_criteria || null;
     const { where, params } = buildSegmentWhere(filterCriteria, segment_type);
+    // company_id is the next positional param after whatever buildSegmentWhere used.
+    const cIdx = params.length + 1;
+    const allParams = [...params, company_id];
 
     let sql;
     if (segment_type === "customer") {
+      // Known customers' anonymous web ids are pre-stored on the unified profile.
       sql = `
-        SELECT DISTINCT apm.capsuite_apid
-        FROM public.membership_ap_mapping apm
-        JOIN public.membership m ON apm.membership_id = m.member_id
-        WHERE apm.capsuite_apid IS NOT NULL
-          AND apm.capsuite_apid != ''
+        SELECT DISTINCT vid AS capsuite_apid
+        FROM app.customer_profiles m
+        CROSS JOIN LATERAL unnest(COALESCE(m.ga_visitor_ids, '{}')) AS vid
+        WHERE m.company_id = $${cIdx}
+          AND vid IS NOT NULL AND vid != ''
           AND ${where}
         LIMIT 5000
       `;
     } else {
+      // Unresolved visitors: GA apids in this company not linked to any customer.
       sql = `
         SELECT DISTINCT pe.capsuite_apid
         FROM ga_landing.path_exploration pe
-        WHERE pe.capsuite_apid IS NOT NULL
+        WHERE pe.company_id = $${cIdx}
+          AND pe.capsuite_apid IS NOT NULL
           AND pe.capsuite_apid != ''
           AND NOT EXISTS (
-            SELECT 1 FROM public.membership_ap_mapping apm
-            WHERE apm.capsuite_apid = pe.capsuite_apid
+            SELECT 1 FROM app.profile_identities pi
+            WHERE pi.company_id = $${cIdx}
+              AND pi.identity_type = 'anonymous_id'
+              AND pi.identity_value = pe.capsuite_apid
           )
           AND ${where}
         LIMIT 5000
       `;
     }
 
-    const result = await pool.query(sql, params);
+    const result = await pool.query(sql, allParams);
     return result.rows.map(r => r.capsuite_apid).filter(Boolean);
   } catch (err) {
     console.warn("Segment resolution failed (non-fatal):", err.message);
@@ -177,15 +216,12 @@ export function createPopupRouter(pool) {
   const router = Router();
   router.use(authenticate);
 
-  function companyId(req, res) {
-    const id = req.headers["x-company-id"];
-    if (!id) { res.status(400).json({ error: "x-company-id header required" }); return null; }
-    return id;
-  }
+  // Verify active membership of the x-company-id workspace; viewers read-only.
+  const companyId = (req, res) => resolveCompanyId(pool, req, res);
 
   // GET /api/popups
   router.get("/", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     try {
       const { rows } = await pool.query(
@@ -200,16 +236,19 @@ export function createPopupRouter(pool) {
 
   // POST /api/popups
   router.post("/", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const {
-      name, interaction_type = "banner", cdp_reference_id,
+      name, interaction_type = "banner",
       rules = {}, content = "", default_recommendation = {},
       is_active = false, is_default = false, start_time, end_time,
     } = req.body;
 
     if (!name?.trim()) return res.status(400).json({ error: "name is required" });
-    if (!cdp_reference_id?.trim()) return res.status(400).json({ error: "cdp_reference_id is required" });
+
+    const slug = (name || "popup").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 24);
+    const rand = Math.random().toString(36).slice(2, 7);
+    const cdp_reference_id = `${slug || "popup"}-${rand}`;
 
     try {
       const { rows } = await pool.query(
@@ -229,7 +268,7 @@ export function createPopupRouter(pool) {
 
       // Sync to interaction service (best-effort)
       try {
-        const isCompanyId = await getOrCreateInteractionServiceCompanyId(pool, cid);
+        const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
         const payload = await buildInteractionPayload(pool, popup, isCompanyId);
         const irRes = await fetch(`${INTERACTION_SERVICE_URL}/interaction/`, {
           method: "POST",
@@ -256,11 +295,11 @@ export function createPopupRouter(pool) {
 
   // PATCH /api/popups/:id
   router.patch("/:id", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const { id } = req.params;
     const {
-      name, interaction_type, cdp_reference_id,
+      name, interaction_type,
       rules, content, default_recommendation,
       is_active, is_default, start_time, end_time,
     } = req.body;
@@ -272,7 +311,6 @@ export function createPopupRouter(pool) {
 
       if (name !== undefined)                  { setParts.push(`name = $${i++}`);                          vals.push(name); }
       if (interaction_type !== undefined)       { setParts.push(`interaction_type = $${i++}`);              vals.push(interaction_type); }
-      if (cdp_reference_id !== undefined)       { setParts.push(`cdp_reference_id = $${i++}`);             vals.push(cdp_reference_id); }
       if (rules !== undefined)                  { setParts.push(`rules = $${i++}::jsonb`);                  vals.push(JSON.stringify(rules)); }
       if (content !== undefined)                { setParts.push(`content = $${i++}`);                       vals.push(content); }
       if (default_recommendation !== undefined) { setParts.push(`default_recommendation = $${i++}::jsonb`); vals.push(JSON.stringify(default_recommendation)); }
@@ -296,7 +334,7 @@ export function createPopupRouter(pool) {
 
       // Sync update to interaction service (best-effort)
       try {
-        const isCompanyId = await getOrCreateInteractionServiceCompanyId(pool, cid);
+        const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
         const payload = await buildInteractionPayload(pool, popup, isCompanyId);
         await fetch(`${INTERACTION_SERVICE_URL}/interaction/update`, {
           method: "POST",
@@ -315,7 +353,7 @@ export function createPopupRouter(pool) {
 
   // DELETE /api/popups/:id
   router.delete("/:id", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const { id } = req.params;
     try {
@@ -326,11 +364,96 @@ export function createPopupRouter(pool) {
     }
   });
 
+  // ── Analytics ────────────────────────────────────────────────────────────────
+
+  // GET /api/popups/analytics
+  router.get("/analytics", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    try {
+      const { rows } = await pool.query(`
+        WITH eng AS (
+          SELECT
+            ri.correlated_interaction_id,
+            ROUND(AVG(EXTRACT(EPOCH FROM (na.created_at - ri.created_at))), 1) AS avg_secs
+          FROM interaction.activities ri
+          CROSS JOIN LATERAL (
+            SELECT created_at FROM interaction.activities na2
+            WHERE na2.capsuite_sid = ri.capsuite_sid
+              AND na2.correlated_interaction_id = ri.correlated_interaction_id
+              AND na2.action IN ('click_interaction','close_interaction','email_collection')
+              AND na2.created_at > ri.created_at
+            ORDER BY na2.created_at
+            LIMIT 1
+          ) na
+          WHERE ri.action = 'retrieve_interaction'
+          GROUP BY ri.correlated_interaction_id
+        )
+        SELECT
+          p.id, p.name, p.interaction_type, p.status, p.rules, p.start_time, p.end_time, p.created_date,
+          s.name AS segment_name,
+          COALESCE(SUM(CASE WHEN a.action='retrieve_interaction' THEN 1 ELSE 0 END),0)::int AS impressions,
+          COUNT(DISTINCT CASE WHEN a.action='retrieve_interaction' THEN a.capsuite_sid END)::int AS unique_views,
+          COALESCE(SUM(CASE WHEN a.action='click_interaction' THEN 1 ELSE 0 END),0)::int AS clicks,
+          COALESCE(SUM(CASE WHEN a.action='email_collection' THEN 1 ELSE 0 END),0)::int AS emails,
+          COALESCE(SUM(CASE WHEN a.action='close_interaction' THEN 1 ELSE 0 END),0)::int AS dismissals,
+          ROUND(COALESCE(SUM(CASE WHEN a.action='click_interaction' THEN 1 ELSE 0 END),0)::numeric /
+            NULLIF(SUM(CASE WHEN a.action='retrieve_interaction' THEN 1 ELSE 0 END),0)*100,1) AS ctr,
+          ROUND(COALESCE(SUM(CASE WHEN a.action='email_collection' THEN 1 ELSE 0 END),0)::numeric /
+            NULLIF(SUM(CASE WHEN a.action='retrieve_interaction' THEN 1 ELSE 0 END),0)*100,1) AS email_rate,
+          ROUND(COALESCE(SUM(CASE WHEN a.action='close_interaction' THEN 1 ELSE 0 END),0)::numeric /
+            NULLIF(SUM(CASE WHEN a.action='retrieve_interaction' THEN 1 ELSE 0 END),0)*100,1) AS dismissal_rate,
+          ROUND(COALESCE(SUM(CASE WHEN a.action='email_collection' THEN 1 ELSE 0 END),0)::numeric /
+            NULLIF(SUM(CASE WHEN a.action='click_interaction' THEN 1 ELSE 0 END),0)*100,1) AS conversion_rate,
+          eng.avg_secs AS avg_engagement_secs
+        FROM app.popups p
+        LEFT JOIN interaction.interactions i ON i.cdp_reference_id = p.cdp_reference_id
+        LEFT JOIN interaction.activities a ON a.correlated_interaction_id = i.id
+        LEFT JOIN eng ON eng.correlated_interaction_id = i.id
+        LEFT JOIN app.segments s ON s.id = COALESCE(
+          NULLIF(p.rules->>'anonymous_segment_id',''),
+          NULLIF(p.rules->>'customer_segment_id','')
+        )::uuid
+        WHERE p.company_id = $1
+        GROUP BY p.id, p.name, p.interaction_type, p.status, p.rules, p.start_time, p.end_time, p.created_date, s.name, eng.avg_secs
+        ORDER BY impressions DESC NULLS LAST, p.created_date DESC
+      `, [cid]);
+      res.json(rows);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/popups/analytics/daily
+  router.get("/analytics/daily", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          DATE(a.created_at) AS date,
+          COUNT(*) FILTER (WHERE a.action='retrieve_interaction') AS impressions,
+          COUNT(*) FILTER (WHERE a.action='click_interaction') AS clicks,
+          COUNT(*) FILTER (WHERE a.action='email_collection') AS emails
+        FROM interaction.activities a
+        JOIN interaction.interactions i ON a.correlated_interaction_id = i.id
+        JOIN interaction.companies ic ON ic.id = i.company_id
+        WHERE ic.cdp_company_id = $1
+          AND a.created_at >= NOW() - INTERVAL '30 days'
+        GROUP BY DATE(a.created_at)
+        ORDER BY date ASC
+      `, [cid]);
+      res.json(rows);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Popup Templates ──────────────────────────────────────────────────────────
 
   // GET /api/popups/templates
   router.get("/templates", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     try {
       const { rows } = await pool.query(
@@ -345,15 +468,16 @@ export function createPopupRouter(pool) {
 
   // POST /api/popups/templates
   router.post("/templates", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
-    const { name, category = "Custom", description = "", content = "" } = req.body;
+    const { name, category = "Custom", description = "", content = "", builder_state } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "name is required" });
     try {
       const { rows } = await pool.query(
-        `INSERT INTO app.popup_templates (company_id, created_by, name, category, description, content)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [cid, req.user.id, name.trim(), category, description, content]
+        `INSERT INTO app.popup_templates (company_id, created_by, name, category, description, content, builder_state)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [cid, req.user.id, name.trim(), category, description, content,
+         builder_state ? JSON.stringify(builder_state) : null]
       );
       res.status(201).json(rows[0]);
     } catch (e) {
@@ -363,17 +487,18 @@ export function createPopupRouter(pool) {
 
   // PATCH /api/popups/templates/:id
   router.patch("/templates/:id", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const { id } = req.params;
-    const { name, category, description, content } = req.body;
+    const { name, category, description, content, builder_state } = req.body;
     const setParts = [];
     const vals = [];
     let i = 1;
-    if (name !== undefined)        { setParts.push(`name = $${i++}`);        vals.push(name); }
-    if (category !== undefined)    { setParts.push(`category = $${i++}`);    vals.push(category); }
-    if (description !== undefined) { setParts.push(`description = $${i++}`); vals.push(description); }
-    if (content !== undefined)     { setParts.push(`content = $${i++}`);     vals.push(content); }
+    if (name !== undefined)          { setParts.push(`name = $${i++}`);                          vals.push(name); }
+    if (category !== undefined)      { setParts.push(`category = $${i++}`);                      vals.push(category); }
+    if (description !== undefined)   { setParts.push(`description = $${i++}`);                   vals.push(description); }
+    if (content !== undefined)       { setParts.push(`content = $${i++}`);                       vals.push(content); }
+    if (builder_state !== undefined) { setParts.push(`builder_state = $${i++}::jsonb`);          vals.push(builder_state ? JSON.stringify(builder_state) : null); }
     if (!setParts.length) return res.status(400).json({ error: "No fields to update" });
     vals.push(id, cid);
     try {
@@ -390,7 +515,7 @@ export function createPopupRouter(pool) {
 
   // DELETE /api/popups/templates/:id
   router.delete("/templates/:id", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const { id } = req.params;
     try {
@@ -401,9 +526,219 @@ export function createPopupRouter(pool) {
     }
   });
 
+  // GET /api/popups/email-collected - emails collected via popup forms (CDP table)
+  router.get("/email-collected", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    const {
+      popup_id, search,
+      status, device_type, browser, country,
+      utm_source, utm_campaign,
+      popup_name,
+      page = "1", limit = "25",
+      all = "false",
+    } = req.query;
+    try {
+      const whereParts = ["company_id = $1"];
+      const params = [cid];
+      let idx = 2;
+
+      if (popup_id)     { whereParts.push(`popup_id = $${idx++}`);          params.push(popup_id); }
+      if (popup_name)   { whereParts.push(`popup_name ILIKE $${idx++}`);     params.push(`%${popup_name}%`); }
+      if (status)       { whereParts.push(`status = $${idx++}`);             params.push(status); }
+      if (device_type)  { whereParts.push(`device_type = $${idx++}`);        params.push(device_type); }
+      if (browser)      { whereParts.push(`browser ILIKE $${idx++}`);        params.push(`%${browser}%`); }
+      if (country)      { whereParts.push(`country = $${idx++}`);            params.push(country); }
+      if (utm_source)   { whereParts.push(`utm_source = $${idx++}`);         params.push(utm_source); }
+      if (utm_campaign) { whereParts.push(`utm_campaign ILIKE $${idx++}`);   params.push(`%${utm_campaign}%`); }
+      if (search) {
+        whereParts.push(
+          `(email ILIKE $${idx} OR first_name ILIKE $${idx} OR last_name ILIKE $${idx} OR phone ILIKE $${idx} OR source_url ILIKE $${idx})`
+        );
+        params.push(`%${search}%`);
+        idx++;
+      }
+
+      const where = whereParts.join(" AND ");
+
+      if (all === "true") {
+        // Full export - no pagination
+        const { rows } = await pool.query(
+          `SELECT * FROM app.popup_email_collected WHERE ${where} ORDER BY collected_at DESC LIMIT 10000`,
+          params
+        );
+        return res.json({ data: rows, total: rows.length, page: 1, limit: rows.length });
+      }
+
+      const pageNum = Math.max(1, parseInt(page, 10));
+      const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
+      const offset = (pageNum - 1) * limitNum;
+
+      const [dataRes, countRes] = await Promise.all([
+        pool.query(
+          `SELECT * FROM app.popup_email_collected WHERE ${where} ORDER BY collected_at DESC LIMIT $${idx++} OFFSET $${idx++}`,
+          [...params, limitNum, offset]
+        ),
+        pool.query(`SELECT COUNT(*) FROM app.popup_email_collected WHERE ${where}`, params),
+      ]);
+
+      res.json({
+        data: dataRes.rows,
+        total: Number(countRes.rows[0].count),
+        page: pageNum,
+        limit: limitNum,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // PATCH /api/popups/email-collected/bulk-status  - bulk update status on selected email records
+  router.patch("/email-collected/bulk-status", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    const { ids, status } = req.body;
+    const VALID = ["new", "contacted", "converted", "unsubscribed"];
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: "ids array is required" });
+    if (!VALID.includes(status)) return res.status(400).json({ error: `status must be one of: ${VALID.join(", ")}` });
+    try {
+      await pool.query(
+        `UPDATE app.popup_email_collected SET status=$1 WHERE id = ANY($2::uuid[]) AND company_id=$3`,
+        [status, ids, cid]
+      );
+      res.json({ success: true, updated: ids.length });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // POST /api/popups/email-collected/:id/create-profile
+  // Creates or links a CDP profile from a collected email entry with full lineage tagging.
+  router.post("/email-collected/:id/create-profile", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    const { id } = req.params;
+
+    try {
+      // Fetch the collected email record
+      const { rows: emailRows } = await pool.query(
+        `SELECT * FROM app.popup_email_collected WHERE id = $1 AND company_id = $2`,
+        [id, cid]
+      );
+      if (!emailRows.length) return res.status(404).json({ error: "Email record not found" });
+      const emailRecord = emailRows[0];
+
+      if (emailRecord.profile_created) {
+        return res.status(400).json({ error: "A profile has already been created for this email" });
+      }
+
+      const email = emailRecord.email?.toLowerCase().trim();
+      if (!email) return res.status(400).json({ error: "No email address on record" });
+
+      // Check if a customer profile already exists with this email (this workspace only)
+      const { rows: existingRows } = await pool.query(
+        `SELECT member_id, eng_full_name, primary_email FROM app.customer_profiles
+         WHERE company_id = $2 AND (LOWER(primary_email) = $1 OR LOWER(secondary_email) = $1)
+         LIMIT 1`,
+        [email, cid]
+      );
+
+      const now = new Date().toISOString();
+      const lineage = {
+        source:           "popup_email_collection",
+        popup_id:         emailRecord.popup_id,
+        popup_name:       emailRecord.popup_name,
+        cdp_reference_id: emailRecord.popup_ref,
+        collected_at:     emailRecord.collected_at,
+        created_at:       now,
+      };
+
+      if (existingRows.length) {
+        // Existing profile - just tag the lineage, don't duplicate
+        const existing = existingRows[0];
+        lineage.matched_existing = true;
+        lineage.matched_member_id = existing.member_id;
+
+        await pool.query(
+          `UPDATE app.popup_email_collected
+           SET profile_created = true, profile_created_at = NOW(),
+               profile_id = $1, profile_lineage = $2::jsonb
+           WHERE id = $3`,
+          [existing.member_id, JSON.stringify(lineage), id]
+        );
+
+        return res.json({
+          action:     "linked",
+          profile_id: existing.member_id,
+          name:       existing.eng_full_name || email,
+          lineage,
+        });
+      }
+
+      // No existing profile - create a new web-collected lead in the unified record.
+      lineage.matched_existing = false;
+
+      const { rows: coRows } = await pool.query("SELECT capsuite_ref FROM app.companies WHERE id = $1", [cid]);
+      const capsuiteRef = coRows[0]?.capsuite_ref || null;
+      const newMemberId = `${capsuiteRef ? capsuiteRef + "_" : ""}pop_${crypto.randomBytes(6).toString("hex")}`;
+
+      await pool.query(
+        `INSERT INTO app.customer_profiles
+           (company_id, member_id, member_source, capsuite_ref, primary_email, has_email,
+            member_reg_channel, last_refreshed)
+         VALUES ($1, $2, 'ga', $3, $4, true, 'popup_email_collection', NOW())
+         ON CONFLICT (company_id, member_id) DO NOTHING`,
+        [cid, newMemberId, capsuiteRef, email]
+      );
+
+      // Identity links (email + member_id) so the lead is reachable / stitchable.
+      await pool.query(
+        `INSERT INTO app.profile_identities
+           (company_id, member_id, source, source_id, identity_type, identity_value, is_primary)
+         VALUES ($1,$2,'popup',$3,'member_id',$2,true), ($1,$2,'popup',$3,'email',$4,false)
+         ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING`,
+        [cid, newMemberId, emailRecord.popup_ref || null, email]
+      );
+
+      await pool.query(
+        `UPDATE app.popup_email_collected
+         SET profile_created = true, profile_created_at = NOW(),
+             profile_id = $1, profile_lineage = $2::jsonb
+         WHERE id = $3`,
+        [newMemberId || null, JSON.stringify(lineage), id]
+      );
+
+      return res.json({
+        action:     "created",
+        profile_id: newMemberId || null,
+        lineage,
+      });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/popups/last-activity - last interaction service activity for this company (for Integrations indicator)
+  router.get("/last-activity", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    try {
+      const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
+      const irRes = await fetch(
+        `${INTERACTION_SERVICE_URL}/interaction/last-activity?company_id=${encodeURIComponent(isCompanyId)}`,
+        { signal: AbortSignal.timeout ? AbortSignal.timeout(4000) : undefined }
+      );
+      if (!irRes.ok) return res.json({ has_activity: false, last_activity: null });
+      const data = await irRes.json();
+      res.json(data);
+    } catch {
+      res.json({ has_activity: false, last_activity: null });
+    }
+  });
+
   // GET /api/popups/:id/emails - collected emails from interaction service
   router.get("/:id/emails", async (req, res) => {
-    const cid = companyId(req, res);
+    const cid = await companyId(req, res);
     if (!cid) return;
     const { id } = req.params;
     try {
@@ -415,7 +750,7 @@ export function createPopupRouter(pool) {
       const { cdp_reference_id } = rows[0];
 
       try {
-        const isCompanyId = await getOrCreateInteractionServiceCompanyId(pool, cid);
+        const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
         const irRes = await fetch(
           `${INTERACTION_SERVICE_URL}/interaction/get-email-list?company_id=${isCompanyId}&cdp_reference_id=${encodeURIComponent(cdp_reference_id)}`
         );

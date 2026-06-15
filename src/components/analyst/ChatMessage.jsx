@@ -1,6 +1,6 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar, Send, X } from "lucide-react";
+import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import MiniChart from "../dashboard/MiniChart";
@@ -25,8 +25,8 @@ const FunctionDisplay = ({ toolCall }) => {
     in_progress: { icon: Loader2, color: "text-muted-foreground", text: "Running...", spin: true },
     completed: isError
       ? { icon: AlertCircle, color: "text-destructive", text: "Failed" }
-      : { icon: CheckCircle2, color: "text-green-600", text: "Done" },
-    success: { icon: CheckCircle2, color: "text-green-600", text: "Done" },
+      : { icon: CheckCircle2, color: "text-foreground", text: "Done" },
+    success: { icon: CheckCircle2, color: "text-foreground", text: "Done" },
     failed: { icon: AlertCircle, color: "text-destructive", text: "Failed" },
     error: { icon: AlertCircle, color: "text-destructive", text: "Failed" },
   }[status] || { icon: Zap, color: "text-muted-foreground", text: "" };
@@ -43,7 +43,7 @@ const FunctionDisplay = ({ toolCall }) => {
       <div className="mt-2 text-xs">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-secondary/50 text-muted-foreground">
           <span>{label || statusConfig.text || formattedName}</span>
-          <StateIcon className={cn("h-3 w-3", isActive && "animate-spin", isFailed && "text-destructive", !isActive && !isFailed && "text-green-600")} />
+          <StateIcon className={cn("h-3 w-3", isActive && "animate-spin", isFailed && "text-destructive", !isActive && !isFailed && "text-foreground")} />
         </div>
       </div>
     );
@@ -128,20 +128,20 @@ function SegmentCard({ data, onAdd }) {
   };
 
   return (
-    <div className="my-3 border border-violet-200 dark:border-violet-800 rounded-xl overflow-hidden shadow-sm">
+    <div className="my-3 border border-border rounded-xl overflow-hidden shadow-sm">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 bg-violet-50/60 dark:bg-violet-950/20 border-b border-violet-100 dark:border-violet-800/50">
-        <div className="w-6 h-6 rounded-md bg-violet-100 dark:bg-violet-900 flex items-center justify-center flex-shrink-0">
-          <Users className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400" />
+      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
+        <div className="w-6 h-6 rounded-md bg-secondary flex items-center justify-center flex-shrink-0">
+          <Users className="w-3.5 h-3.5 text-muted-foreground" />
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-semibold">{data.name}</span>
           <span className="text-[10px] text-muted-foreground ml-2">AI-suggested segment</span>
         </div>
         {data.estimated_size != null && (
-          <span className="text-sm font-bold text-violet-700 dark:text-violet-300 tabular-nums flex-shrink-0 mr-2">
+          <span className="text-sm font-bold tabular-nums flex-shrink-0 mr-2">
             {Number(data.estimated_size).toLocaleString()}
-            <span className="text-[10px] font-normal ml-0.5">members</span>
+            <span className="text-[10px] font-normal ml-0.5 text-muted-foreground">members</span>
           </span>
         )}
         <Button
@@ -165,7 +165,7 @@ function SegmentCard({ data, onAdd }) {
         {criteria.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {criteria.map((c, i) => (
-              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 border border-violet-100 dark:border-violet-800">
+              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
                 {c}
               </span>
             ))}
@@ -179,7 +179,7 @@ function SegmentCard({ data, onAdd }) {
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-violet-100 dark:border-violet-800/50 bg-violet-50/30 dark:bg-violet-950/10">
+      <div className="px-4 py-2 border-t border-border bg-secondary/20">
         <p className="text-[10px] text-muted-foreground">
           Click "Save Segment" to add this to your Segments page - it can then be linked to email campaigns
         </p>
@@ -209,18 +209,18 @@ function SegmentPanel({ seg, choice, onChoice }) {
   return (
     <div className={cn(
       "rounded-lg border overflow-hidden transition-all",
-      choice === "none" ? "opacity-60 border-border" : "border-violet-200 dark:border-violet-800"
+      choice === "none" ? "opacity-60 border-border" : "border-border"
     )}>
       {/* Panel header */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-violet-50/60 dark:bg-violet-950/20 border-b border-violet-100 dark:border-violet-800/50">
-        <div className="w-5 h-5 rounded bg-violet-100 dark:bg-violet-900 flex items-center justify-center flex-shrink-0">
-          <Users className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+      <div className="flex items-center gap-2 px-3 py-2 bg-secondary/40 border-b border-border">
+        <div className="w-5 h-5 rounded bg-secondary flex items-center justify-center flex-shrink-0">
+          <Users className="w-3 h-3 text-muted-foreground" />
         </div>
-        <span className="text-[11px] font-semibold text-violet-900 dark:text-violet-200 flex-1">
+        <span className="text-[11px] font-semibold flex-1">
           {isExisting ? "Existing Segment" : "Recommended Segment"}
         </span>
         {seg.estimated_size != null && (
-          <span className="text-[11px] font-bold text-violet-700 dark:text-violet-300 tabular-nums">
+          <span className="text-[11px] font-bold tabular-nums">
             {Number(seg.estimated_size).toLocaleString()} members
           </span>
         )}
@@ -236,7 +236,7 @@ function SegmentPanel({ seg, choice, onChoice }) {
         {seg.metadata?.criteria && (
           <div className="flex flex-wrap gap-1 mt-1">
             {(Array.isArray(seg.metadata.criteria) ? seg.metadata.criteria : [seg.metadata.criteria]).map((c, i) => (
-              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400 border border-violet-100 dark:border-violet-800">
+              <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
                 {c}
               </span>
             ))}
@@ -255,8 +255,8 @@ function SegmentPanel({ seg, choice, onChoice }) {
             className={cn(
               "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
               choice === "create_new"
-                ? "bg-violet-600 text-white border-violet-600"
-                : "border-border text-muted-foreground hover:border-violet-400 hover:text-violet-700"
+                ? "bg-foreground text-background border-foreground"
+                : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
             )}
           >
             {choice === "create_new" ? <><Check className="w-3 h-3" /> Creating Segment</> : <><PlusCircle className="w-3 h-3" /> Create Segment</>}
@@ -268,8 +268,8 @@ function SegmentPanel({ seg, choice, onChoice }) {
             className={cn(
               "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
               choice === "use_existing"
-                ? "bg-violet-600 text-white border-violet-600"
-                : "border-border text-muted-foreground hover:border-violet-400 hover:text-violet-700"
+                ? "bg-foreground text-background border-foreground"
+                : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
             )}
           >
             {choice === "use_existing" ? <><Check className="w-3 h-3" /> Using Segment</> : "Use This Segment"}
@@ -314,31 +314,18 @@ function UTMPanel({ utm, choice, onChoice }) {
   return (
     <div className={cn(
       "rounded-lg border overflow-hidden transition-all",
-      choice === "none" ? "opacity-60 border-border"
-        : isPending && !isDecided ? "border-amber-200 dark:border-amber-800"
-        : "border-blue-200 dark:border-blue-800"
+      choice === "none" ? "opacity-60 border-border" : "border-border"
     )}>
       {/* Panel header */}
-      <div className={cn(
-        "flex items-center gap-2 px-3 py-2 border-b",
-        isPending && !isDecided
-          ? "bg-amber-50/60 dark:bg-amber-950/20 border-amber-100 dark:border-amber-800/50"
-          : "bg-blue-50/60 dark:bg-blue-950/20 border-blue-100 dark:border-blue-800/50"
-      )}>
-        <div className={cn(
-          "w-5 h-5 rounded flex items-center justify-center flex-shrink-0",
-          isPending && !isDecided ? "bg-amber-100 dark:bg-amber-900" : "bg-blue-100 dark:bg-blue-900"
-        )}>
-          <LinkIcon className={cn("w-3 h-3", isPending && !isDecided ? "text-amber-600 dark:text-amber-400" : "text-blue-600 dark:text-blue-400")} />
+      <div className="flex items-center gap-2 px-3 py-2 bg-secondary/40 border-b border-border">
+        <div className="w-5 h-5 rounded bg-secondary flex items-center justify-center flex-shrink-0">
+          <LinkIcon className="w-3 h-3 text-muted-foreground" />
         </div>
-        <span className={cn(
-          "text-[11px] font-semibold flex-1",
-          isPending && !isDecided ? "text-amber-900 dark:text-amber-200" : "text-blue-900 dark:text-blue-200"
-        )}>
+        <span className="text-[11px] font-semibold flex-1">
           {isExisting ? "Existing UTM Link" : isPending && !isDecided ? "UTM Tracking - Your choice" : "Recommended UTM Tracking"}
         </span>
         {isPending && !isDecided && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-700">
+          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
             Decide below
           </span>
         )}
@@ -348,17 +335,17 @@ function UTMPanel({ utm, choice, onChoice }) {
       <div className="px-3 py-2.5 bg-background space-y-2">
         <div className="flex flex-wrap gap-1.5">
           {(utm.utm_source || "email") && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
               source: {utm.utm_source || "email"}
             </span>
           )}
           {(utm.utm_medium || "email") && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
               medium: {utm.utm_medium || "email"}
             </span>
           )}
           {slug && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-100 dark:border-blue-800 font-mono">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border font-mono">
               campaign: {slug}
             </span>
           )}
@@ -378,8 +365,8 @@ function UTMPanel({ utm, choice, onChoice }) {
           className={cn(
             "flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-md border font-medium transition-all flex-1 justify-center",
             (choice === "create_new" || choice === "use_existing")
-              ? "bg-blue-600 text-white border-blue-600"
-              : "border-border text-muted-foreground hover:border-blue-400 hover:text-blue-700"
+              ? "bg-foreground text-background border-foreground"
+              : "border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground"
           )}
         >
           {choice === "create_new"
@@ -465,8 +452,8 @@ function EDMCard({ data, onAdd, onOpenInEditor }) {
 
       {/* Rationale */}
       {data.rationale && (
-        <div className="px-4 py-2.5 bg-blue-50/50 border-b border-border/50 dark:bg-blue-950/10">
-          <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">{data.rationale}</p>
+        <div className="px-4 py-2.5 bg-secondary/30 border-b border-border/50">
+          <p className="text-xs text-muted-foreground leading-relaxed">{data.rationale}</p>
         </div>
       )}
 
@@ -811,10 +798,15 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
         )}
 
         {!isUser && message.content && (
-          <div className="flex items-center gap-1 mt-1.5">
+          <div className="flex items-center gap-2 mt-1.5">
             <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}>
               {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
             </Button>
+            {message.token_usage?.total > 0 && (
+              <span className="text-[10px] text-muted-foreground/60 font-mono select-none">
+                {message.token_usage.total.toLocaleString()} tokens
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -3,11 +3,13 @@ import {
   LayoutDashboard, MessageSquare, Target, Users,
   ChevronLeft, ChevronRight, ContactRound, Mail, Plug,
   ChevronDown, Building2, LogOut,
-  Check, Plus, Settings, MousePointer2, Tag, Rocket,
+  Check, Plus, Settings, MousePointer2, Tag, Rocket, Upload, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { usePreferences } from "@/lib/PreferencesContext";
+import NotificationBell from "./NotificationBell";
 
 const navGroups = [
   {
@@ -21,7 +23,7 @@ const navGroups = [
     items: [
       { path: "/edm",      label: "Email",  icon: Mail },
       { path: "/popup",    label: "Pop Up", icon: MousePointer2 },
-      { path: "/campaigns",label: "UTM",    icon: Target },
+      { path: "/utm",      label: "UTM",    icon: Target },
     ],
   },
   {
@@ -36,6 +38,7 @@ const navGroups = [
     label: "Tools",
     items: [
       { path: "/integrations", label: "Integrations", icon: Plug },
+      { path: "/import-export",  label: "Import / Export",  icon: Upload },
     ],
   },
 ];
@@ -101,6 +104,7 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, currentCompany, logout, switchCompany } = useAuth();
+  const { t } = usePreferences();
   const isAnalyst = location.pathname === "/";
   const [collapsed, setCollapsed] = useState(isAnalyst);
 
@@ -108,7 +112,7 @@ export default function Sidebar() {
 
   return (
     <aside className={cn(
-      "h-screen border-r border-border flex flex-col transition-all duration-300 bg-background",
+      "h-full border-r border-border flex flex-col transition-all duration-300 bg-background",
       collapsed ? "w-16" : "w-60"
     )}>
       {/* Top: Click CDP branding */}
@@ -131,12 +135,12 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-3 px-2 overflow-y-auto">
+      <nav className="flex-1 min-h-0 py-3 px-2 overflow-y-auto">
         {navGroups.map((group, gi) => (
           <div key={gi} className={cn("space-y-0.5", gi > 0 && "mt-4")}>
             {group.label && !collapsed && (
               <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 select-none">
-                {group.label}
+                {t(group.label)}
               </p>
             )}
             {group.label && collapsed && gi > 0 && (
@@ -157,7 +161,7 @@ export default function Sidebar() {
                   title={collapsed ? item.label : undefined}
                 >
                   <item.icon className="w-4 h-4 flex-shrink-0" />
-                  {!collapsed && <span className="font-medium">{item.label}</span>}
+                  {!collapsed && <span className="font-medium">{t(item.label)}</span>}
                 </Link>
               );
             })}
@@ -165,8 +169,11 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer: company switcher + user menu */}
-      <div className="border-t border-border p-2 space-y-0.5">
+      {/* Footer: notifications + company switcher + user menu */}
+      <div className="border-t border-border p-2 space-y-0.5 flex-shrink-0">
+        {/* Notifications bell */}
+        <NotificationBell collapsed={collapsed} />
+
         {/* Company switcher */}
         {!collapsed ? (
           <Dropdown
@@ -185,7 +192,7 @@ export default function Sidebar() {
             }
           >
             <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Workspaces
+              {t("Workspaces")}
             </div>
             {companies.map(c => (
               <DropdownItem
@@ -199,7 +206,7 @@ export default function Sidebar() {
             <div className="border-t border-border mt-1 pt-1">
               <DropdownItem
                 icon={Plus}
-                label="Add workspace"
+                label={t("Add workspace")}
                 onClick={() => navigate("/companies")}
               />
             </div>
@@ -236,10 +243,13 @@ export default function Sidebar() {
               <p className="text-sm font-medium truncate">{user?.full_name}</p>
               <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
             </div>
-            <DropdownItem icon={Settings} label="Settings" onClick={() => navigate("/settings")} />
-            <DropdownItem icon={Rocket} label="Get Started" onClick={() => navigate("/get-started")} />
+            <DropdownItem icon={Settings} label={t("Settings")} onClick={() => navigate("/settings")} />
+            <DropdownItem icon={Rocket} label={t("Get Started")} onClick={() => navigate("/get-started")} />
+            {user?.is_platform_admin && (
+              <DropdownItem icon={ShieldCheck} label={t("Studio")} onClick={() => navigate("/studio")} />
+            )}
             <div className="border-t border-border mt-1 pt-1">
-              <DropdownItem icon={LogOut} label="Sign out" destructive onClick={logout} />
+              <DropdownItem icon={LogOut} label={t("Sign out")} destructive onClick={logout} />
             </div>
           </Dropdown>
         ) : (

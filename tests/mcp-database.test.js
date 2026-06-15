@@ -3,23 +3,26 @@ import { databaseTools, handleDatabaseTool } from "../server/mcp/tools/database.
 
 const EXPECTED_TOOLS = ["query_data", "list_tables", "describe_table"];
 
+// Data-dictionary entries: { table, use_case, granularity, fields[] }.
+// Schema prefixes (ga_landing.*, app.*) are supplied via the system prompt, not
+// stored per entry, so describe_table no longer filters by schema.
 const mockDictionary = [
   {
-    schema_name: "ga_landing",
-    table_name: "website_metrics",
-    description: "Daily website traffic metrics",
-    columns: [
-      { name: "date", type: "text" },
-      { name: "sessions", type: "integer" },
+    table: "website_metrics",
+    use_case: "Daily website traffic metrics",
+    granularity: "One row per date",
+    fields: [
+      { name: "date", type: "string" },
+      { name: "sessions", type: "int" },
     ],
   },
   {
-    schema_name: "public",
-    table_name: "membership",
-    description: "Member profiles",
-    columns: [
-      { name: "member_id", type: "text" },
-      { name: "eng_full_name", type: "text" },
+    table: "membership",
+    use_case: "Member profiles",
+    granularity: "One row per member",
+    fields: [
+      { name: "member_id", type: "string" },
+      { name: "eng_full_name", type: "string" },
     ],
   },
 ];
@@ -93,7 +96,7 @@ describe("DB Connector - list_tables", () => {
     const data = JSON.parse(result.content[0].text);
     expect(data.tables).toHaveLength(2);
     expect(data.tables[0].table_name).toBe("website_metrics");
-    expect(data.tables[0].schema_name).toBe("ga_landing");
+    expect(data.tables[0].use_case).toMatch(/traffic/);
     expect(data.tables[0].column_count).toBe(2);
   });
 
@@ -108,26 +111,20 @@ describe("DB Connector - describe_table", () => {
   it("returns full table definition by name", async () => {
     const result = await handleDatabaseTool("describe_table", { table_name: "membership" }, null, mockDictionary);
     const data = JSON.parse(result.content[0].text);
-    expect(data.table_name).toBe("membership");
-    expect(data.columns).toHaveLength(2);
+    expect(data.table).toBe("membership");
+    expect(data.fields).toHaveLength(2);
   });
 
-  it("filters by schema when schema_name provided", async () => {
+  it("returns the table regardless of schema_name (schema is implied by the dictionary)", async () => {
     const result = await handleDatabaseTool("describe_table", { table_name: "membership", schema_name: "public" }, null, mockDictionary);
     const data = JSON.parse(result.content[0].text);
-    expect(data.schema_name).toBe("public");
+    expect(data.table).toBe("membership");
   });
 
   it("returns error for unknown table", async () => {
     const result = await handleDatabaseTool("describe_table", { table_name: "nonexistent" }, null, mockDictionary);
     const data = JSON.parse(result.content[0].text);
     expect(data.error).toMatch(/not found/);
-  });
-
-  it("returns error when schema mismatch", async () => {
-    const result = await handleDatabaseTool("describe_table", { table_name: "membership", schema_name: "ga_landing" }, null, mockDictionary);
-    const data = JSON.parse(result.content[0].text);
-    expect(data.error).toBeTruthy();
   });
 });
 

@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "@/lib/AuthContext";
+import { useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { appClient } from "@/api/appClient";
 import { toast } from "sonner";
 import { Eye, EyeOff, Check } from "lucide-react";
-import { AuthLayout, GoogleButton, OrDivider } from "@/components/layout/AuthLayout";
+import { AuthLayout, GoogleButton, MicrosoftButton, OrDivider } from "@/components/layout/AuthLayout";
 
 function PasswordStrength({ password }) {
   const checks = [
@@ -16,7 +15,7 @@ function PasswordStrength({ password }) {
   return (
     <div className="mt-2 space-y-1">
       {checks.map(c => (
-        <div key={c.label} className={`flex items-center gap-1.5 text-xs ${c.ok ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
+        <div key={c.label} className={`flex items-center gap-1.5 text-xs ${c.ok ? "text-foreground" : "text-muted-foreground"}`}>
           <Check className={`w-3 h-3 ${c.ok ? "opacity-100" : "opacity-30"}`} />
           {c.label}
         </div>
@@ -27,18 +26,13 @@ function PasswordStrength({ password }) {
 
 export default function Register() {
   const navigate = useNavigate();
-  const { checkUserAuth } = useAuth();
-  const [form, setForm] = useState({ full_name: "", email: "", password: "", company_name: "" });
+  const [searchParams] = useSearchParams();
+  // Pre-fill the email when arriving from the login page ("no account" redirect).
+  const [form, setForm] = useState({ full_name: "", email: searchParams.get("email") || "", password: "", company_name: "" });
+  const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState(false);
-  const [googleAvailable, setGoogleAvailable] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/auth/google/status")
-      .then(r => r.json())
-      .then(d => setGoogleAvailable(d.configured))
-      .catch(() => setGoogleAvailable(false));
-  }, []);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handle = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
 
@@ -48,11 +42,20 @@ export default function Register() {
       toast.error("Password must be at least 8 characters");
       return;
     }
+    if (form.password !== confirm) {
+      toast.error("Passwords do not match");
+      return;
+    }
     setLoading(true);
     try {
-      await appClient.auth.register(form);
-      await checkUserAuth();
-      navigate("/");
+      // Don't create the account yet - email a code and verify it first.
+      const res = await appClient.auth.registerStart(form);
+      if (res?.sent) {
+        toast.success(`We sent a 6-digit code to ${form.email}.`);
+      } else {
+        toast.error("We couldn't send your verification code. You can resend it on the next page.");
+      }
+      navigate(`/verify-email?email=${encodeURIComponent(form.email)}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -65,12 +68,11 @@ export default function Register() {
       title="Create your account"
       subtitle="Start with a free workspace, no credit card needed"
     >
-      {googleAvailable && (
-        <>
-          <GoogleButton action="Sign up" />
-          <OrDivider />
-        </>
-      )}
+      <div className="space-y-3">
+        <GoogleButton action="Sign up" />
+        <MicrosoftButton action="Sign up" />
+      </div>
+      <OrDivider />
 
       <form onSubmit={submit} className="space-y-4">
         <div className="grid grid-cols-1 gap-4">
@@ -124,6 +126,32 @@ export default function Register() {
               </button>
             </div>
             <PasswordStrength password={form.password} />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1.5">Retype password</label>
+            <div className="relative">
+              <input
+                name="confirm_password"
+                type={showConfirm ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                className="w-full px-3 py-2.5 pr-10 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground/60"
+                placeholder="Re-enter your password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm(s => !s)}
+                className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            {confirm && form.password !== confirm && (
+              <p className="mt-1 text-xs text-destructive">Passwords do not match</p>
+            )}
           </div>
 
           <div>

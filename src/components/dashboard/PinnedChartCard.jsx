@@ -1,12 +1,12 @@
 import { useState, useMemo } from "react";
-import { X } from "lucide-react";
+import { X, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import MiniChart from "./MiniChart";
 import ChartExplainer from "./ChartExplainer";
 import { format, subDays, subMonths, parseISO, isAfter } from "date-fns";
 
-const SIZE_LABELS = { small: "S", medium: "M", large: "L", wide: "W" };
+const SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large", wide: "Wide" };
 
 const DATE_FILTERS = [
   { key: "all", label: "All time" },
@@ -69,11 +69,11 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-[10px] font-semibold text-muted-foreground"
-              title="Cycle size"
+              className="h-7 w-7 text-muted-foreground"
+              title={`Resize chart (${SIZE_LABELS[size] || "Medium"})`}
               onClick={onCycleSize}
             >
-              {SIZE_LABELS[size] || "M"}
+              {size === "large" ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </Button>
           )}
           <Button

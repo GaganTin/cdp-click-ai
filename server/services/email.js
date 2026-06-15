@@ -6,8 +6,11 @@ function getResend() {
   return _resend;
 }
 
-const DEFAULT_FROM_EMAIL = process.env.EDM_FROM_EMAIL || "onboarding@resend.dev";
-const DEFAULT_FROM_NAME  = process.env.EDM_FROM_NAME  || "Click AI";
+// Read at call time (NOT module load): in ESM, imports are evaluated before the
+// entrypoint runs dotenv.config(), so capturing these at top-level would freeze
+// them to "" and break the `from` field. Same reason APP_URL is a function below.
+const defaultFromEmail = () => process.env.EDM_FROM_EMAIL || "";
+const defaultFromName  = () => process.env.EDM_FROM_NAME  || "";
 
 /**
  * Send a single email via Resend.
@@ -19,7 +22,7 @@ export async function sendEmail({ to, subject, html, text, fromEmail, fromName, 
     return { id: `sim_${Date.now()}`, simulated: true };
   }
 
-  const from = `${fromName || DEFAULT_FROM_NAME} <${fromEmail || DEFAULT_FROM_EMAIL}>`;
+  const from = `${fromName || defaultFromName()} <${fromEmail || defaultFromEmail()}>`;
 
   const result = await getResend().emails.send({
     from,
@@ -71,6 +74,46 @@ export async function sendBatch(recipients, campaignPayload, batchSize = 50, del
     if (i + batchSize < recipients.length) await sleep(delayMs);
   }
   return results;
+}
+
+// ── Transactional auth emails ───────────────────────────────────────────────
+// Reuse the same Resend transport (simulated when RESEND_API_KEY is unset).
+// Resolved at call time for the same dotenv-timing reason as the sender above.
+const appUrl = () => (process.env.APP_BASE_URL || process.env.CDP_ENDPOINT || "http://localhost:5173").replace(/\/$/, "");
+
+export async function sendPasswordResetEmail(to, token) {
+  const link = `${appUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+  return sendEmail({
+    to,
+    subject: "Reset your Click CDP password",
+    html: `<p>We received a request to reset your password.</p>
+           <p><a href="${link}">Reset your password</a> - this link is valid for 1 hour.</p>
+           <p>If you didn't request this, you can safely ignore this email.</p>`,
+  });
+}
+
+export async function sendVerificationEmail(to, token) {
+  const link = `${appUrl()}/verify-email?token=${encodeURIComponent(token)}`;
+  return sendEmail({
+    to,
+    subject: "Verify your Click CDP email",
+    html: `<p>Welcome to Click CDP!</p>
+           <p><a href="${link}">Verify your email address</a> - this link is valid for 24 hours.</p>`,
+  });
+}
+
+// Code-based sign-up verification: a 6-digit code the user types on the
+// dedicated verify page to finish creating their account.
+export async function sendVerificationCodeEmail(to, code) {
+  return sendEmail({
+    to,
+    subject: "Your Click CDP verification code",
+    html: `<p>Welcome to Click CDP!</p>
+           <p>Your verification code is:</p>
+           <p style="font-size:28px;font-weight:700;letter-spacing:8px;margin:12px 0">${code}</p>
+           <p>Enter it on the verification page to finish creating your account. This code expires in 15 minutes.</p>
+           <p>If you didn't request this, you can safely ignore this email.</p>`,
+  });
 }
 
 function stripHtml(html) {

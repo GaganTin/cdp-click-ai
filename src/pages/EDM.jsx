@@ -1,39 +1,67 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import TableToolbar from "@/components/ui/TableToolbar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 import { usePlan } from "@/lib/usePlan";
+import { useStickyState } from "@/lib/useStickyState";
+import { Delta, syncPrevPeriod } from "@/components/analytics/AnalyticsKit";
 import { toast } from "sonner";
-import { format } from "date-fns";
 import {
-  Plus, BarChart2, Send, Pencil, Trash2,
+  format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
+  eachDayOfInterval, addMonths, isSameMonth, isToday,
+} from "date-fns";
+import {
+  Plus, BarChart2, Send, Pencil, Trash2, Archive,
   Mail, Clock, CheckCircle2, XCircle, RefreshCw,
-  ShieldOff, Search, Filter, Layout, Upload,
+  ShieldOff, Search, Filter, Layout, Upload, Info,
+  ArrowUp, ArrowDown, ArrowUpDown, Eye, Copy,
+  FileText, FileDown, X, Calendar, LayoutGrid, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel,
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import CampaignEditor from "@/components/edm/CampaignEditor";
 import CampaignStats from "@/components/edm/CampaignStats";
 import TemplateEditor from "@/components/edm/TemplateEditor";
+import { blocksToHtml } from "@/components/edm/emailHtml";
+
+// Render a template the same way the editor (and the actual send) does: from its
+// saved blocks via blocksToHtml. Falls back to the stored html_body for raw-HTML
+// templates or legacy ones without block data, so the card preview always matches
+// what you see when you open the template to edit it.
+function templatePreviewHtml(template) {
+  const blocks = template?.variables?._blocks;
+  if (!template?.variables?._html_mode && Array.isArray(blocks) && blocks.length) {
+    return blocksToHtml(blocks);
+  }
+  return template?.html_body || "";
+}
 
 const TABS = [
   { key: "emails",      label: "Emails",      icon: Mail },
   { key: "templates",   label: "Templates",   icon: Layout },
   { key: "analytics",   label: "Analytics",   icon: BarChart2 },
-  { key: "suppression", label: "Suppression", icon: ShieldOff },
+  { key: "suppression", label: "Email Suppression", icon: ShieldOff },
 ];
 
 const STATUS_STYLES = {
   draft:     "bg-secondary text-secondary-foreground",
-  scheduled: "bg-blue-100 text-blue-800",
-  sending:   "bg-amber-100 text-amber-800",
-  sent:      "bg-green-100 text-green-800",
+  scheduled: "bg-secondary text-foreground border border-border",
+  sending:   "bg-secondary text-foreground border border-border",
+  sent:      "bg-foreground text-background",
   cancelled: "bg-muted text-muted-foreground opacity-60",
+  archived:  "bg-muted text-muted-foreground opacity-60",
 };
 
 const STATUS_ICONS = {
@@ -42,31 +70,80 @@ const STATUS_ICONS = {
   sending:   RefreshCw,
   sent:      CheckCircle2,
   cancelled: XCircle,
+  archived:  Archive,
 };
 
 const REASON_STYLES = {
-  bounced:      "bg-red-100 text-red-700",
-  complained:   "bg-orange-100 text-orange-700",
-  unsubscribed: "bg-amber-100 text-amber-700",
+  bounced:      "bg-secondary text-foreground border border-border",
+  complained:   "bg-secondary text-foreground border border-border",
+  unsubscribed: "bg-secondary text-muted-foreground border border-border",
   manual:       "bg-secondary text-muted-foreground",
 };
 
 const STATUS_ACCENT = {
-  draft:     "#94a3b8",
-  scheduled: "#3b82f6",
-  sending:   "#f59e0b",
-  sent:      "#10b981",
-  cancelled: "#d1d5db",
+  draft:     "#d1d5db",
+  scheduled: "#6b7280",
+  sending:   "#374151",
+  sent:      "#111827",
+  cancelled: "#e5e7eb",
+  archived:  "#e5e7eb",
 };
 
+// ── Email / template preview dialog ───────────────────────────────────────────
+function PreviewDialog({ open, onClose, html, title, subject }) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="w-[96vw] max-w-3xl h-[90vh] p-0 flex flex-col gap-0" aria-describedby={undefined}>
+        <DialogHeader className="px-5 py-3 border-b border-border flex-shrink-0">
+          <DialogTitle className="text-sm font-semibold truncate">{title || "Preview"}</DialogTitle>
+          {subject && <p className="text-xs text-muted-foreground mt-0.5 truncate">Subject: {subject}</p>}
+        </DialogHeader>
+        <div className="flex-1 overflow-auto bg-secondary/10 p-6">
+          <div className="max-w-[650px] mx-auto rounded-xl overflow-hidden border border-border shadow-md bg-white">
+            <iframe
+              srcDoc={html || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content to preview.</p>"}
+              className="w-full"
+              style={{ height: "600px", display: "block" }}
+              title="Email preview"
+              sandbox="allow-same-origin"
+            />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Sorting ────────────────────────────────────────────────────────────────────
+// Shared by the Emails, Pop-up and UTM lists: sort by date / name / status.
+const SORT_GETTERS = {
+  date:   x => x.created_date || "",
+  name:   x => (x.name || "").toLowerCase(),
+  status: x => x.status || "",
+};
+function sortRecords(items, sortBy, sortDir) {
+  const get = SORT_GETTERS[sortBy];
+  if (!get) return items;
+  const arr = [...items].sort((a, b) => {
+    const av = get(a), bv = get(b);
+    return av < bv ? -1 : av > bv ? 1 : 0;
+  });
+  return sortDir === "asc" ? arr : arr.reverse();
+}
+
 // ── Email card ─────────────────────────────────────────────────────────────────
-function EmailCard({ campaign, onEdit, onStats, onSend, onDelete }) {
+function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
   const [confirmSend, setConfirmSend] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const { canUseFeatures } = usePlan();
   const Icon = STATUS_ICONS[campaign.status] || Clock;
   const canSend = ["draft", "scheduled"].includes(campaign.status) && canUseFeatures;
   const canEdit = ["draft", "scheduled"].includes(campaign.status);
   const accent = STATUS_ACCENT[campaign.status] || "#94a3b8";
+  // Only drafts can be deleted; everything else (except in-flight or already
+  // archived) is archived instead so its record/analytics are kept.
+  const canDelete  = campaign.status === "draft";
+  const canArchive = !["draft", "sending", "archived", "cancelled"].includes(campaign.status);
 
   return (
     <>
@@ -120,26 +197,44 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete }) {
         </div>
 
         <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-1">
-          {canEdit && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
-              <Pencil className="w-3 h-3" /> Edit
-            </Button>
-          )}
+          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setPreviewOpen(true)}>
+            <Eye className="w-3 h-3" /> Preview
+          </Button>
           {canSend && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setConfirmSend(true)}>
               <Send className="w-3 h-3" /> Send
             </Button>
           )}
-          {campaign.status === "sent" && (
+          {canEdit && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
+              <Pencil className="w-3 h-3" /> Edit
+            </Button>
+          )}
+          {["sent", "archived"].includes(campaign.status) && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onStats(campaign)}>
               <BarChart2 className="w-3 h-3" /> Stats
             </Button>
           )}
-          <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(campaign.id)}>
-            <Trash2 className="w-3 h-3" />
-          </Button>
+          {canDelete && (
+            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" title="Delete draft" onClick={() => onDelete(campaign.id)}>
+              <Trash2 className="w-3 h-3" />
+            </Button>
+          )}
+          {canArchive && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 ml-auto text-muted-foreground hover:text-foreground" title="Archive email" onClick={() => onArchive(campaign.id)}>
+              <Archive className="w-3 h-3" /> Archive
+            </Button>
+          )}
         </div>
       </div>
+
+      <PreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        html={campaign.html_body}
+        title={campaign.name}
+        subject={campaign.subject}
+      />
 
       <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
         <AlertDialogContent>
@@ -162,12 +257,136 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete }) {
   );
 }
 
+// ── Calendar view ────────────────────────────────────────────────────────────
+// Maps each campaign onto the day it sends/sent so you can see the sending
+// schedule at a glance. Sent → sent_at, scheduled → scheduled_at, otherwise the
+// created date so drafts still appear.
+function campaignDate(c) {
+  const raw = c.status === "sent"      ? c.sent_at
+            : c.status === "scheduled" ? c.scheduled_at
+            : (c.scheduled_at || c.sent_at || c.created_date);
+  return raw ? new Date(raw) : null;
+}
+
+const CAL_STATUSES = ["draft", "scheduled", "sending", "sent", "cancelled"];
+
+function EmailCalendar({ campaigns, onEdit, onStats }) {
+  const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
+
+  const dated = campaigns
+    .map(c => ({ c, date: campaignDate(c) }))
+    .filter(x => x.date && !isNaN(x.date));
+
+  const byDay = new Map();
+  dated.forEach(({ c, date }) => {
+    const key = format(date, "yyyy-MM-dd");
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(c);
+  });
+
+  const monthStart = startOfMonth(cursor);
+  const monthEnd   = endOfMonth(cursor);
+  const days = eachDayOfInterval({
+    start: startOfWeek(monthStart, { weekStartsOn: 0 }),
+    end:   endOfWeek(monthEnd, { weekStartsOn: 0 }),
+  });
+  const monthCount = dated.filter(x => isSameMonth(x.date, cursor)).length;
+  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const openCampaign = (c) => { if (c.status === "sent") onStats(c); else onEdit(c); };
+
+  return (
+    <div className="space-y-4">
+      {/* Month navigation + legend */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center border border-input rounded-md overflow-hidden h-8">
+          <button type="button" onClick={() => setCursor(c => addMonths(c, -1))} title="Previous month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" onClick={() => setCursor(startOfMonth(new Date()))} title="Jump to current month" className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors border-x border-input">
+            Today
+          </button>
+          <button type="button" onClick={() => setCursor(c => addMonths(c, 1))} title="Next month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <p className="text-sm font-semibold">{format(cursor, "MMMM yyyy")}</p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ml-auto">
+          {CAL_STATUSES.map(s => (
+            <span key={s} className="flex items-center gap-1.5 capitalize">
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: STATUS_ACCENT[s] }} /> {s}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p className="text-[11px] text-muted-foreground/70 -mt-2">
+        {monthCount} email{monthCount !== 1 ? "s" : ""} this month · click an email to open it
+      </p>
+
+      {/* Calendar grid */}
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="grid grid-cols-7 border-b border-border bg-secondary/20">
+          {WEEKDAYS.map(d => (
+            <div key={d} className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-center">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {days.map((day, i) => {
+            const key = format(day, "yyyy-MM-dd");
+            const items = byDay.get(key) || [];
+            const inMonth = isSameMonth(day, cursor);
+            const today = isToday(day);
+            return (
+              <div
+                key={key}
+                className={`min-h-[96px] border-b border-border p-1.5 flex flex-col gap-1 ${i % 7 !== 6 ? "border-r" : ""} ${inMonth ? "" : "bg-secondary/20"}`}
+              >
+                <span className={`text-[11px] self-start ${today ? "bg-foreground text-background rounded-full w-5 h-5 flex items-center justify-center font-semibold" : inMonth ? "text-foreground" : "text-muted-foreground/40"}`}>
+                  {format(day, "d")}
+                </span>
+                <div className="flex flex-col gap-1 overflow-hidden">
+                  {items.slice(0, 3).map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => openCampaign(c)}
+                      title={`${c.name}${c.subject ? `\n${c.subject}` : ""}\nStatus: ${c.status}`}
+                      className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] bg-secondary border border-border hover:border-foreground/40 transition-colors min-w-0"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: STATUS_ACCENT[c.status] || "#94a3b8" }} />
+                      <span className="truncate">{c.name}</span>
+                    </button>
+                  ))}
+                  {items.length > 3 && (
+                    <span className="text-[10px] text-muted-foreground pl-1">+{items.length - 3} more</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Emails tab ─────────────────────────────────────────────────────────────────
 function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("");
+  const [view, setView] = useState("grid"); // "grid" | "calendar"
+  const [groupByStatus, setGroupByStatus] = useState(true);
+  const [sortBy, setSortBy] = useStickyState("date", "edm.sortBy");   // "date" | "name" | "status"
+  const [sortDir, setSortDir] = useStickyState("desc", "edm.sortDir");
+  const [filters, setFilters] = useState({ status: [], segment_name: [], from_name: [], from_email: [] });
+  const filterRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.target.closest?.("[data-multiselect-popover]")) return; if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilters(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ["edm-campaigns"],
@@ -180,6 +399,12 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
     onError: (e) => toast.error(e.message),
   });
 
+  const archiveMutation = useMutation({
+    mutationFn: (id) => appClient.edm.archiveCampaign(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success("Email archived"); },
+    onError: (e) => toast.error(e.message),
+  });
+
   const sendMutation = useMutation({
     mutationFn: (id) => appClient.edm.sendCampaign(id),
     onSuccess: (data) => {
@@ -189,21 +414,34 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
     onError: (e) => toast.error(e.message),
   });
 
+  const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }));
+  const hasActiveFilters = Object.values(filters).some(a => a.length > 0);
+
+  const uniqueSegments = [...new Set(campaigns.map(c => c.segment_name).filter(Boolean))].sort();
+  const uniqueFromNames = [...new Set(campaigns.map(c => c.from_name).filter(Boolean))].sort();
+  const uniqueFromEmails = [...new Set(campaigns.map(c => c.from_email).filter(Boolean))].sort();
+
   const filtered = campaigns.filter(c => {
     const q = search.toLowerCase();
-    const matchSearch = !q || c.name.toLowerCase().includes(q) || c.subject.toLowerCase().includes(q);
-    const matchStatus = !statusFilter || c.status === statusFilter;
-    return matchSearch && matchStatus;
+    if (q && !c.name.toLowerCase().includes(q) && !c.subject?.toLowerCase().includes(q) && !c.from_email?.toLowerCase().includes(q)) return false;
+    if (filters.status.length && !filters.status.includes(c.status)) return false;
+    if (filters.segment_name.length && !filters.segment_name.includes(c.segment_name)) return false;
+    if (filters.from_name.length && !filters.from_name.includes(c.from_name)) return false;
+    if (filters.from_email.length && !filters.from_email.includes(c.from_email)) return false;
+    return true;
   });
-
-  const hasActiveFilters = !!statusFilter;
 
   const GROUPS = [
     { key: "sending",  label: "Sending",  filter: c => c.status === "sending" },
     { key: "draft",    label: "Drafts",   filter: c => ["draft","scheduled"].includes(c.status) },
     { key: "sent",     label: "Sent",     filter: c => c.status === "sent" },
-    { key: "archived", label: "Archived", filter: c => c.status === "cancelled" },
+    { key: "archived", label: "Archived", filter: c => ["archived", "cancelled"].includes(c.status) },
   ].filter(g => filtered.some(g.filter));
+
+  // Apply the chosen sort, then group (or show one flat list when grouping is off).
+  const sorted = sortRecords(filtered, sortBy, sortDir);
+  const displayGroups = groupByStatus ? GROUPS : [{ key: "all", label: "All", filter: () => true }];
+
 
   return (
     <div className="px-8 py-6">
@@ -215,42 +453,107 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search emails…"
+              placeholder="Search name, subject, from email..."
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-            <Filter className="w-3.5 h-3.5" /> Filters
-            {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground" />}
-          </Button>
-        </div>
-        {showFilters && (
-          <div className="mt-3 p-4 border border-border rounded-lg bg-secondary/20 flex gap-4">
-            <div>
-              <p className="text-[10px] text-muted-foreground mb-1">Status</p>
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground"
-              >
-                <option value="">All</option>
-                <option value="draft">Draft</option>
-                <option value="sent">Sent</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </div>
+          <div ref={filterRef} className="relative">
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
+              <Filter className="w-3.5 h-3.5" /> Filters
+              {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
+            </Button>
+            {showFilters && (
+              <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-80 md:w-[480px]">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                  {hasActiveFilters && (
+                    <button onClick={() => setFilters({ status: [], segment_name: [], from_name: [], from_email: [] })} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                    <MultiSelect value={filters.status} onChange={v => setFilter("status", v)}
+                      options={["draft","scheduled","sending","sent","cancelled","archived"]} placeholder="All" />
+                  </div>
+                  {uniqueSegments.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">Segment</p>
+                      <MultiSelect value={filters.segment_name} onChange={v => setFilter("segment_name", v)} options={uniqueSegments} placeholder="All" />
+                    </div>
+                  )}
+                  {uniqueFromNames.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">From Name</p>
+                      <MultiSelect value={filters.from_name} onChange={v => setFilter("from_name", v)} options={uniqueFromNames} placeholder="All" />
+                    </div>
+                  )}
+                  {uniqueFromEmails.length > 0 && (
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-1">From Email</p>
+                      <MultiSelect value={filters.from_email} onChange={v => setFilter("from_email", v)} options={uniqueFromEmails} placeholder="All" />
+                    </div>
+                  )}
+                </div>
+
+                {/* Sort */}
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                  <div className="flex items-center gap-2">
+                    <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                      className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                      <option value="date">Date</option>
+                      <option value="name">Name</option>
+                      <option value="status">Status</option>
+                    </select>
+                    <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+                      className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
+                      {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                    </button>
+                  </div>
+                </div>
+                {view === "grid" && (
+                  <div className="mt-3 pt-3 border-t border-border">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                    <label className="flex items-center justify-between cursor-pointer">
+                      <span className="text-xs text-muted-foreground">Status</span>
+                      <input type="checkbox" checked={groupByStatus} onChange={e => setGroupByStatus(e.target.checked)}
+                        className="rounded border-border cursor-pointer" />
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        )}
+
+          {/* View toggle: grid / calendar */}
+          <div className="flex items-center border border-input rounded-md overflow-hidden h-9">
+            <button
+              type="button"
+              onClick={() => setView("grid")}
+              className={`h-9 px-2.5 flex items-center gap-1.5 text-xs transition-colors ${view === "grid" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" /> Grid
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("calendar")}
+              className={`h-9 px-2.5 flex items-center gap-1.5 text-xs border-l border-input transition-colors ${view === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
+            >
+              <Calendar className="w-3.5 h-3.5" /> Calendar
+            </button>
+          </div>
+        </div>
         {hasActiveFilters && (
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {statusFilter && (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                Status: <strong>{statusFilter}</strong>
-                <button onClick={() => setStatusFilter("")} className="hover:text-foreground text-muted-foreground ml-0.5">
+            {Object.entries(filters).flatMap(([k, vals]) => vals.map(v => (
+              <span key={`${k}:${v}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+                {k.replace(/_/g, " ")}: <strong>{v}</strong>
+                <button onClick={() => setFilter(k, filters[k].filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">
                   <XCircle className="w-3 h-3" />
                 </button>
               </span>
-            )}
+            )))}
           </div>
         )}
       </div>
@@ -277,13 +580,19 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
         </div>
       )}
 
-      {GROUPS.map(group => (
+      {!isLoading && filtered.length > 0 && view === "calendar" && (
+        <EmailCalendar campaigns={filtered} onEdit={onEdit} onStats={onStats} />
+      )}
+
+      {view === "grid" && displayGroups.map(group => (
         <div key={group.key} className="mb-8">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-            {group.label}
-          </p>
+          {groupByStatus && (
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+              {group.label}
+            </p>
+          )}
           <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-            {filtered.filter(group.filter).map(c => (
+            {sorted.filter(group.filter).map(c => (
               <EmailCard
                 key={c.id}
                 campaign={c}
@@ -291,6 +600,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
                 onStats={onStats}
                 onSend={(id) => sendMutation.mutate(id)}
                 onDelete={(id) => deleteMutation.mutate(id)}
+                onArchive={(id) => archiveMutation.mutate(id)}
               />
             ))}
           </div>
@@ -301,41 +611,81 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
 }
 
 // ── Templates tab ─────────────────────────────────────────────────────────────
-function TemplateCard({ template, onEdit, onDelete }) {
+function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   return (
-    <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all flex flex-col">
-      <div className="h-1 flex-shrink-0 bg-gradient-to-r from-violet-400 to-indigo-400" />
-      <div className="p-4 flex flex-col gap-2 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm truncate">{template.name}</p>
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">{template.subject}</p>
+    <>
+      <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all flex flex-col">
+        <div className="h-1 flex-shrink-0 bg-gradient-to-r from-border to-muted-foreground/30" />
+        <div className="p-4 flex flex-col gap-2 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate">{template.name}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 truncate">{template.subject}</p>
+            </div>
+            <span className="text-[11px] text-muted-foreground flex-shrink-0 mt-0.5">
+              {format(new Date(template.created_date || template.updated_date || Date.now()), "MMM d, yyyy")}
+            </span>
           </div>
-          <span className="text-[11px] text-muted-foreground flex-shrink-0 mt-0.5">
-            {format(new Date(template.created_date || template.updated_date || Date.now()), "MMM d, yyyy")}
-          </span>
-        </div>
-        {template.variables?._blocks && (
-          <p className="text-[11px] text-muted-foreground">
-            {template.variables._blocks.length} block{template.variables._blocks.length !== 1 ? "s" : ""}
+          {template.preview_text && (
+            <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">{template.preview_text}</p>
+          )}
+          <p className={`text-[10px] uppercase tracking-wide capitalize ${
+            template.status === "published" ? "text-foreground font-medium" : "text-muted-foreground/60"
+          }`}>
+            {template.status || "draft"}
           </p>
-        )}
+        </div>
+        <div className="border-t border-border bg-secondary/20">
+          {/* Secondary actions */}
+          <div className="px-3 pt-2 pb-1 flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setPreviewOpen(true)}>
+              <Eye className="w-3 h-3" /> Preview
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onDuplicate(template.id)}>
+              <Copy className="w-3 h-3" /> Clone
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(template)}>
+              <Pencil className="w-3 h-3" /> Edit
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(template.id)}>
+              <Trash2 className="w-3 h-3" />
+            </Button>
+          </div>
+          {/* Primary action */}
+          <div className="px-3 pb-2.5">
+            <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={() => onUse(template)}>
+              <Plus className="w-3 h-3" /> Use Template
+            </Button>
+          </div>
+        </div>
       </div>
-      <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-1">
-        <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(template)}>
-          <Pencil className="w-3 h-3" /> Edit
-        </Button>
-        <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(template.id)}>
-          <Trash2 className="w-3 h-3" />
-        </Button>
-      </div>
-    </div>
+
+      <PreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        html={templatePreviewHtml(template)}
+        title={template.name}
+        subject={template.subject}
+      />
+    </>
   );
 }
 
-function TemplatesTab({ onCreate, onEdit, onImport }) {
+function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
   const qc = useQueryClient();
   const fileInputRef = useRef(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState([]);
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (e.target.closest?.("[data-multiselect-popover]")) return; if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilters(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const { data: templates = [], isLoading } = useQuery({
     queryKey: ["edm-templates"],
@@ -345,6 +695,12 @@ function TemplatesTab({ onCreate, onEdit, onImport }) {
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.edm.deleteTemplate(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success("Template deleted"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (id) => appClient.edm.duplicateTemplate(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success("Template duplicated"); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -359,17 +715,75 @@ function TemplatesTab({ onCreate, onEdit, onImport }) {
     e.target.value = "";
   };
 
+  const visible = templates.filter(t => {
+    const q = search.toLowerCase();
+    if (q && !t.name.toLowerCase().includes(q) && !t.subject?.toLowerCase().includes(q) && !t.preview_text?.toLowerCase().includes(q)) return false;
+    if (statusFilter.length && !statusFilter.includes(t.status)) return false;
+    return true;
+  });
+
+  const hasActiveFilters = statusFilter.length > 0;
+
+  const GROUPS = [
+    { key: "published", label: "Published", filter: t => t.status === "published" },
+    { key: "draft",     label: "Drafts",    filter: t => (t.status || "draft") !== "published" },
+  ].filter(g => visible.some(g.filter));
+
   return (
     <div className="px-8 py-6">
-      {/* Toolbar — only shown when templates exist */}
-      {!isLoading && templates.length > 0 && (
-        <div className="flex items-center gap-3 mb-6">
-          <Button variant="outline" size="sm" className="h-9 gap-1.5 ml-auto" onClick={() => fileInputRef.current?.click()}>
+      {/* Toolbar */}
+      <div className="mb-6 space-y-2">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search templates..."
+              className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div ref={filterRef} className="relative">
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
+              <Filter className="w-3.5 h-3.5" /> Filters
+              {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
+            </Button>
+            {showFilters && (
+              <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-56">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                  {hasActiveFilters && (
+                    <button onClick={() => setStatusFilter([])} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                  )}
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                  <MultiSelect value={statusFilter} onChange={setStatusFilter}
+                    options={["draft","published"]} placeholder="All" />
+                </div>
+              </div>
+            )}
+          </div>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-3.5 h-3.5" /> Import HTML
           </Button>
           <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
+          <span className="text-xs text-muted-foreground ml-auto">
+            {visible.length !== templates.length ? `${visible.length} of ${templates.length}` : `${templates.length}`} templates
+          </span>
         </div>
-      )}
+
+        {hasActiveFilters && (
+          <div className="flex flex-wrap gap-1.5">
+            {statusFilter.map(v => (
+              <span key={v} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+                Status: <strong>{v}</strong>
+                <button onClick={() => setStatusFilter(statusFilter.filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {isLoading && (
         <div className="flex items-center justify-center py-20">
@@ -390,124 +804,521 @@ function TemplatesTab({ onCreate, onEdit, onImport }) {
               <Upload className="w-3.5 h-3.5" /> Import HTML
             </Button>
           </div>
-          <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
         </div>
       )}
 
-      {!isLoading && templates.length > 0 && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-          {templates.map(t => (
-            <TemplateCard
-              key={t.id}
-              template={t}
-              onEdit={onEdit}
-              onDelete={(id) => deleteMutation.mutate(id)}
-            />
-          ))}
+      {!isLoading && templates.length > 0 && visible.length === 0 && (
+        <div className="text-center py-12 text-sm text-muted-foreground">
+          <Layout className="w-8 h-8 mx-auto mb-2 opacity-20" />
+          <p>No templates match your search.</p>
         </div>
       )}
+
+      {!isLoading && visible.length > 0 && GROUPS.map(group => (
+        <div key={group.key} className="mb-8">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+            {group.label}
+          </p>
+          <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+            {visible.filter(group.filter).map(t => (
+              <TemplateCard
+                key={t.id}
+                template={t}
+                onUse={onUse}
+                onEdit={onEdit}
+                onDelete={(id) => deleteMutation.mutate(id)}
+                onDuplicate={(id) => duplicateMutation.mutate(id)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
 
 // ── Analytics tab ─────────────────────────────────────────────────────────────
+
+const EDM_ANALYTICS_COLS = [
+  { key: "name",             label: "Campaign Name",   defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "subject",          label: "Subject",         defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "segment_name",     label: "Segment",         defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "total_recipients", label: "Recipients",      defaultVisible: true,  filterable: false, description: "Total number of email addresses this campaign was sent to, after opt-in and suppression filtering." },
+  { key: "open_count",       label: "Opens",           defaultVisible: true,  filterable: false, description: "Number of unique recipients who opened the email at least once." },
+  { key: "open_rate",        label: "Open Rate",       defaultVisible: true,  filterable: false, description: "Opens ÷ Total Recipients × 100. Measures how many people opened your email." },
+  { key: "click_count",      label: "Clicks",          defaultVisible: false, filterable: false, description: "Number of unique recipients who clicked any link in the email." },
+  { key: "click_rate",       label: "Click Rate",      defaultVisible: true,  filterable: false, description: "Clicks ÷ Total Recipients × 100. Measures how many recipients clicked a link, regardless of whether they opened first." },
+  { key: "ctor",             label: "CTOR",            defaultVisible: false, filterable: false, description: "Click-to-Open Rate: Clicks ÷ Opens × 100. Measures email content effectiveness among openers." },
+  { key: "bounce_count",     label: "Bounces",         defaultVisible: false, filterable: false, description: "Emails that could not be delivered. Bounced addresses are automatically added to the suppression list." },
+  { key: "bounce_rate",      label: "Bounce Rate",     defaultVisible: true,  filterable: false, description: "Bounces ÷ Total Recipients × 100. A high bounce rate damages sender reputation." },
+  { key: "unsubscribe_count",label: "Unsubscribes",    defaultVisible: false, filterable: false, description: "Recipients who clicked the unsubscribe link. These are automatically suppressed from future sends." },
+  { key: "unsubscribe_rate", label: "Unsub Rate",      defaultVisible: true,  filterable: false, description: "Unsubscribes ÷ Delivered × 100. Tracks opt-out rate per campaign." },
+  { key: "delivered_count",  label: "Delivered",       defaultVisible: false, filterable: false, description: "Emails confirmed as delivered to the recipient's inbox by the email service provider." },
+  { key: "sent_at",          label: "Sent Date",       defaultVisible: true,  filterable: false },
+];
+
 function AnalyticsTab() {
+  const [search, setSearch]   = useState("");
+  const [filters, setFilters] = useState({});
+  const [colOrder, setColOrder]   = useState(() => EDM_ANALYTICS_COLS.map(c => c.key));
+  const [hiddenCols, setHiddenCols] = useState(() => new Set(EDM_ANALYTICS_COLS.filter(c => !c.defaultVisible).map(c => c.key)));
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo]     = useState("");
+  const [compare, setCompare]   = useState(false);
+  const [cmpFrom, setCmpFrom]   = useState("");
+  const [cmpTo, setCmpTo]       = useState("");
+  const [sortKey, setSortKey]   = useState("sent_at");
+  const [sortDir, setSortDir]   = useState("desc");
+  const [selected, setSelected] = useState(new Set());
+
+  const setFilter = (k, v) => { setFilters(p => ({ ...p, [k]: v })); setSelected(new Set()); };
+  const toggleCol = (k) => setHiddenCols(p => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (colOrder.filter(x => !n.has(x)).length > 1) n.add(k); return n; });
+  const moveCol   = (k, d) => setColOrder(p => { const i = p.indexOf(k); if (i<0) return p; const n=[...p]; if(d==="up"&&i>0)[n[i-1],n[i]]=[n[i],n[i-1]]; else if(d==="down"&&i<p.length-1)[n[i],n[i+1]]=[n[i+1],n[i]]; return n; });
+
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
   const { data: campaigns = [], isLoading } = useQuery({
     queryKey: ["edm-campaigns"],
     queryFn: () => appClient.edm.listCampaigns(),
   });
 
-  const sent = campaigns.filter(c => c.status === "sent");
-  const totalSent = sent.reduce((s, c) => s + (c.total_recipients || 0), 0);
-  const totalOpens = sent.reduce((s, c) => s + (c.open_count || 0), 0);
+  const inRange = (c, f, t) => {
+    if (f && c.sent_at && new Date(c.sent_at) < new Date(f)) return false;
+    if (t && c.sent_at && new Date(c.sent_at) > new Date(t + "T23:59:59")) return false;
+    return true;
+  };
+  const sent = campaigns.filter(c => c.status === "sent" && inRange(c, dateFrom, dateTo));
+
+  const totalSent   = sent.reduce((s, c) => s + (c.total_recipients || 0), 0);
+  const totalOpens  = sent.reduce((s, c) => s + (c.open_count || 0), 0);
   const totalClicks = sent.reduce((s, c) => s + (c.click_count || 0), 0);
-  const avgOpenRate = totalSent > 0 ? Math.round((totalOpens / totalSent) * 100) : 0;
+  const avgOpenRate  = totalSent > 0 ? Math.round((totalOpens  / totalSent) * 100) : 0;
   const avgClickRate = totalSent > 0 ? Math.round((totalClicks / totalSent) * 100) : 0;
 
+  // Comparison period (client-side, same campaign list filtered to the prev range).
+  const prevSent    = compare ? campaigns.filter(c => c.status === "sent" && inRange(c, cmpFrom, cmpTo)) : [];
+  const pTotalSent  = prevSent.reduce((s, c) => s + (c.total_recipients || 0), 0);
+  const pOpens      = prevSent.reduce((s, c) => s + (c.open_count || 0), 0);
+  const pClicks     = prevSent.reduce((s, c) => s + (c.click_count || 0), 0);
+  const pAvgOpen    = pTotalSent > 0 ? Math.round((pOpens  / pTotalSent) * 100) : 0;
+  const pAvgClick   = pTotalSent > 0 ? Math.round((pClicks / pTotalSent) * 100) : 0;
+  const syncCmp = (f, t) => { if (f && t) { const p = syncPrevPeriod(f, t); setCmpFrom(p.from); setCmpTo(p.to); } };
+
+  const enriched = sent.map(c => ({
+    ...c,
+    open_rate:        c.total_recipients > 0 ? `${Math.round((c.open_count  / c.total_recipients) * 100)}%` : "0%",
+    click_rate:       c.total_recipients > 0 ? `${Math.round((c.click_count / c.total_recipients) * 100)}%` : "0%",
+    bounce_rate:      c.total_recipients > 0 ? `${((c.bounce_count||0)      / c.total_recipients * 100).toFixed(1)}%` : "0%",
+    unsubscribe_rate: (c.delivered_count||c.total_recipients) > 0 ? `${((c.unsubscribe_count||0) / (c.delivered_count||c.total_recipients) * 100).toFixed(1)}%` : "0%",
+    ctor:             (c.open_count||0) > 0 ? `${((c.click_count||0) / c.open_count * 100).toFixed(1)}%` : "0%",
+  }));
+
+  const filtered = enriched.filter(c => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.subject?.toLowerCase().includes(search.toLowerCase())) return false;
+    for (const [key, val] of Object.entries(filters)) {
+      if (!val) continue;
+      if (!String(c[key] ?? "").toLowerCase().includes(val.toLowerCase())) return false;
+    }
+    return true;
+  });
+
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    if (!sortKey) return 0;
+    let av = a[sortKey], bv = b[sortKey];
+    if (typeof av === "string" && av.endsWith("%")) av = parseFloat(av) || 0;
+    if (typeof bv === "string" && bv.endsWith("%")) bv = parseFloat(bv) || 0;
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1; if (bv == null) return - 1;
+    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return sortDir === "asc" ? cmp : - cmp;
+  });
+
+  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => EDM_ANALYTICS_COLS.find(c => c.key === k)).filter(Boolean);
+
+  // Selection helpers
+  const allIds       = sortedFiltered.map(c => c.id);
+  const allSelected  = allIds.length > 0 && allIds.every(id => selected.has(id));
+  const someSelected = allIds.some(id => selected.has(id));
+  const toggleRow    = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll    = () => {
+    if (allSelected) setSelected(prev => { const n = new Set(prev); allIds.forEach(id => n.delete(id)); return n; });
+    else             setSelected(prev => { const n = new Set(prev); allIds.forEach(id => n.add(id)); return n; });
+  };
+
+  const exportCsv = (onlySelected = false) => {
+    const rows = onlySelected ? sortedFiltered.filter(c => selected.has(c.id)) : sortedFiltered;
+    if (!rows.length) return;
+    const header = visibleCols.map(c => c.label).join(",");
+    const body = rows.map(row => visibleCols.map(c => {
+      const v = c.key === "sent_at" ? (row.sent_at ? format(new Date(row.sent_at), "MMM d, yyyy") : "") : String(row[c.key] ?? "");
+      return v.includes(",") ? `"${v}"` : v;
+    }).join(",")).join("\n");
+    const blob = new Blob([`${header}\n${body}`], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = onlySelected ? "email-analytics-selected.csv" : "email-analytics.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin" />
-      </div>
-    );
+    return <div className="flex items-center justify-center py-20"><div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin" /></div>;
   }
 
   return (
-    <div className="px-8 py-6 space-y-8">
-      {/* Summary tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: "Emails Sent", value: sent.length, sub: "campaigns" },
-          { label: "Total Recipients", value: totalSent.toLocaleString(), sub: "across all sends" },
-          { label: "Avg Open Rate", value: `${avgOpenRate}%`, sub: `${totalOpens.toLocaleString()} opens` },
-          { label: "Avg Click Rate", value: `${avgClickRate}%`, sub: `${totalClicks.toLocaleString()} clicks` },
-        ].map(tile => (
-          <div key={tile.label} className="border border-border rounded-lg p-4 space-y-1">
-            <p className="text-xs text-muted-foreground">{tile.label}</p>
-            <p className="text-2xl font-bold">{tile.value}</p>
-            <p className="text-[11px] text-muted-foreground">{tile.sub}</p>
-          </div>
-        ))}
-      </div>
+    <TooltipProvider>
+      <div className="px-8 py-6 space-y-6">
 
-      {/* Per-email breakdown */}
-      {sent.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-            Sent Emails - Performance
-          </p>
-          <div className="border border-border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-secondary/20">
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">Email</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Recipients</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Open Rate</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Click Rate</th>
-                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground">Sent</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sent.map(c => {
-                  const openRate = c.total_recipients > 0 ? Math.round((c.open_count / c.total_recipients) * 100) : 0;
-                  const clickRate = c.total_recipients > 0 ? Math.round((c.click_count / c.total_recipients) * 100) : 0;
-                  return (
-                    <tr key={c.id} className="border-b border-border last:border-0 hover:bg-secondary/10">
-                      <td className="px-4 py-3">
-                        <p className="font-medium truncate max-w-[200px]">{c.name}</p>
-                        <p className="text-xs text-muted-foreground truncate max-w-[200px]">{c.subject}</p>
-                      </td>
-                      <td className="px-4 py-3 text-right text-muted-foreground">{(c.total_recipients || 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-right font-semibold">{openRate}%</td>
-                      <td className="px-4 py-3 text-right font-semibold">{clickRate}%</td>
-                      <td className="px-4 py-3 text-right text-muted-foreground text-xs">
-                        {c.sent_at ? format(new Date(c.sent_at), "MMM d, yyyy") : "-"}
-                      </td>
+        {/* ── Date + filter bar - matches UTM analytics style ── */}
+        <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
+          {/* Period date pickers */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Period</p>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="h-8 px-2 text-xs border border-input rounded-md bg-background"
+              />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="h-8 px-2 text-xs border border-input rounded-md bg-background"
+              />
+            </div>
+          </div>
+
+          {/* Compare toggle */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Compare</p>
+            <button
+              onClick={() => { if (!compare) syncCmp(dateFrom, dateTo); setCompare(v => !v); }}
+              className={`h-8 px-3 text-xs border rounded-md transition-colors ${
+                compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
+              }`}
+            >
+              {compare ? "On" : "Off"}
+            </button>
+          </div>
+
+          {/* Quick ranges */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick</p>
+            <div className="flex gap-1">
+              {[7, 30, 90].map(d => {
+                const today = new Date();
+                const from = new Date(today - d * 86_400_000);
+                const toStr = today.toISOString().slice(0, 10);
+                const fromStr = from.toISOString().slice(0, 10);
+                const active = dateFrom === fromStr && dateTo === toStr;
+                return (
+                  <button
+                    key={d}
+                    onClick={() => { setDateFrom(fromStr); setDateTo(toStr); if (compare) syncCmp(fromStr, toStr); }}
+                    className={`h-8 px-2.5 text-xs border rounded-md transition-colors ${
+                      active
+                        ? "bg-foreground text-background border-foreground"
+                        : "border-input bg-background hover:bg-secondary"
+                    }`}
+                  >
+                    {d}d
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Comparison period */}
+          {compare && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
+              <div className="flex items-center gap-1.5">
+                <input type="date" value={cmpFrom} onChange={e => setCmpFrom(e.target.value)}
+                  className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+                <span className="text-xs text-muted-foreground">→</span>
+                <input type="date" value={cmpTo} onChange={e => setCmpTo(e.target.value)}
+                  className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+              </div>
+            </div>
+          )}
+
+          {/* Clear */}
+          {(dateFrom || dateTo) && (
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 opacity-0 select-none">·</p>
+              <button
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+                className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          {(dateFrom || dateTo) && (
+            <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">
+              {sent.length} campaign{sent.length !== 1 ? "s" : ""} in range
+            </p>
+          )}
+        </div>
+
+        {/* ── KPI tiles ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "Emails Sent",       value: sent.length,                sub: "campaigns",        curr: sent.length, prev: prevSent.length, prevDisplay: prevSent.length },
+            { label: "Total Recipients",  value: totalSent.toLocaleString(), sub: "across all sends", curr: totalSent,   prev: pTotalSent,      prevDisplay: pTotalSent.toLocaleString() },
+            { label: "Avg Open Rate",     value: `${avgOpenRate}%`,          sub: `${totalOpens.toLocaleString()} opens`,  curr: avgOpenRate,  prev: pAvgOpen,  prevDisplay: `${pAvgOpen}%` },
+            { label: "Avg Click Rate",    value: `${avgClickRate}%`,         sub: `${totalClicks.toLocaleString()} clicks`, curr: avgClickRate, prev: pAvgClick, prevDisplay: `${pAvgClick}%` },
+          ].map(tile => (
+            <div key={tile.label} className="border border-border rounded-lg p-4 space-y-1">
+              <p className="text-xs text-muted-foreground">{tile.label}</p>
+              <p className="text-2xl font-bold">{tile.value}</p>
+              <p className="text-[11px] text-muted-foreground">{tile.sub}</p>
+              {compare && (
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <Delta curr={tile.curr} prev={tile.prev} />
+                  <span className="text-[10px] text-muted-foreground">vs {tile.prevDisplay}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {sent.length === 0 ? (
+          <div className="text-center py-16 text-sm text-muted-foreground">
+            <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+            <p className="font-medium text-foreground mb-1">No data yet</p>
+            <p className="text-xs">Send your first email to start seeing analytics.</p>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sent Emails - Performance</p>
+              <TableToolbar
+                search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
+                columns={EDM_ANALYTICS_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
+                onToggleCol={toggleCol} onMoveCol={moveCol}
+                filters={filters} onFilter={setFilter}
+                resultCount={sortedFiltered.length} totalCount={sent.length}
+                placeholder="Search campaign name or subject..."
+              />
+
+              {/* Selection toolbar */}
+              {selected.size > 0 && (
+                <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
+                  <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+                  <div className="flex items-center gap-1 ml-2">
+                    <Button
+                      size="sm" variant="secondary"
+                      className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+                      onClick={() => exportCsv(true)}
+                    >
+                      Export CSV
+                    </Button>
+                  </div>
+                  <button
+                    onClick={() => setSelected(new Set())}
+                    className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              <div className="border border-border rounded-lg overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/20">
+                      <th className="w-10 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          className="rounded border-border"
+                          checked={allSelected}
+                          ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                          onChange={toggleAll}
+                        />
+                      </th>
+                      {visibleCols.map(col => (
+                        <th
+                          key={col.key}
+                          onClick={() => handleSort(col.key)}
+                          className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors"
+                        >
+                          {col.description ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="inline-flex items-center gap-1">
+                                  {col.label}
+                                  <Info className="w-3 h-3 opacity-40" />
+                                  {sortKey === col.key
+                                    ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                                    : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-52 text-center leading-relaxed">
+                                {col.description}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="inline-flex items-center gap-1">
+                              {col.label}
+                              {sortKey === col.key
+                                ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                                : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                            </span>
+                          )}
+                        </th>
+                      ))}
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                  </thead>
+                  <tbody>
+                    {sortedFiltered.map(c => {
+                      const isSelected = selected.has(c.id);
+                      return (
+                      <tr
+                        key={c.id}
+                        className={`border-b border-border last:border-0 cursor-pointer ${isSelected ? "bg-secondary/30" : "hover:bg-secondary/10"}`}
+                        onClick={() => toggleRow(c.id)}
+                      >
+                        <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            className="rounded border-border"
+                            checked={isSelected}
+                            onChange={() => toggleRow(c.id)}
+                          />
+                        </td>
+                        {visibleCols.map(col => {
+                          switch (col.key) {
+                            case "name":             return <td key={col.key} className="px-4 py-2"><p className="font-medium truncate max-w-[220px]">{c.name}</p></td>;
+                            case "subject":          return <td key={col.key} className="px-4 py-2 text-xs text-muted-foreground max-w-[200px] truncate">{c.subject}</td>;
+                            case "segment_name":     return <td key={col.key} className="px-4 py-2 text-xs text-muted-foreground">{c.segment_name || "-"}</td>;
+                            case "total_recipients": return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.total_recipients||0).toLocaleString()}</td>;
+                            case "open_count":       return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.open_count||0).toLocaleString()}</td>;
+                            case "open_rate":        return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{c.open_rate}</td>;
+                            case "click_count":      return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.click_count||0).toLocaleString()}</td>;
+                            case "click_rate":       return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{c.click_rate}</td>;
+                            case "ctor":             return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{c.ctor}</td>;
+                            case "bounce_count":     return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.bounce_count||0).toLocaleString()}</td>;
+                            case "bounce_rate":      return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{c.bounce_rate}</td>;
+                            case "unsubscribe_count":return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.unsubscribe_count||0).toLocaleString()}</td>;
+                            case "unsubscribe_rate": return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{c.unsubscribe_rate}</td>;
+                            case "delivered_count":  return <td key={col.key} className="px-4 py-2 text-right tabular-nums text-sm text-muted-foreground">{(c.delivered_count||0).toLocaleString()}</td>;
+                            case "sent_at":          return <td key={col.key} className="px-4 py-2 text-right text-muted-foreground text-xs whitespace-nowrap">{c.sent_at ? format(new Date(c.sent_at), "MMM d, yyyy") : "-"}</td>;
+                            default:                 return <td key={col.key} className="px-4 py-2 text-xs text-muted-foreground">{String(c[col.key] ?? "-")}</td>;
+                          }
+                        })}
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-      {sent.length === 0 && (
-        <div className="text-center py-16 text-sm text-muted-foreground">
-          <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-foreground mb-1">No data yet</p>
-          <p className="text-xs">Send your first email to start seeing analytics.</p>
-        </div>
-      )}
-    </div>
+            {/* Segment comparison */}
+            {(() => {
+              const segments = {};
+              sortedFiltered.forEach(c => {
+                const seg = c.segment_name || "All Customers";
+                if (!segments[seg]) segments[seg] = { opens: [], clicks: [], count: 0 };
+                segments[seg].opens.push(parseFloat(c.open_rate)||0);
+                segments[seg].clicks.push(parseFloat(c.click_rate)||0);
+                segments[seg].count++;
+              });
+              const segEntries = Object.entries(segments).map(([name, d]) => ({
+                name,
+                count: d.count,
+                avgOpen: (d.opens.reduce((a,b)=>a+b,0)/d.opens.length).toFixed(1),
+                avgClick: (d.clicks.reduce((a,b)=>a+b,0)/d.clicks.length).toFixed(1),
+              })).sort((a,b) => b.avgOpen - a.avgOpen);
+              if (segEntries.length < 2) return null;
+              return (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Segment Comparison</p>
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-secondary/20">
+                          <th className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground">Segment</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Campaigns</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Avg Open Rate</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Avg Click Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {segEntries.map(s => (
+                          <tr key={s.name} className="border-b border-border last:border-0 hover:bg-secondary/10">
+                            <td className="px-4 py-2 text-sm font-medium">{s.name}</td>
+                            <td className="px-4 py-2 text-right text-sm text-muted-foreground">{s.count}</td>
+                            <td className="px-4 py-2 text-right text-sm text-muted-foreground">{s.avgOpen}%</td>
+                            <td className="px-4 py-2 text-right text-sm text-muted-foreground">{s.avgClick}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
+    </TooltipProvider>
   );
 }
 
 // ── Suppression tab ───────────────────────────────────────────────────────────
-function SuppressionTab() {
+
+const SUPP_COLS = [
+  { key: "email",    label: "Email",      defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "reason",   label: "Reason",     defaultVisible: true,  filterable: true,  type: "select", options: ["bounced","complained","unsubscribed","manual"] },
+  { key: "added_at", label: "Added Date", defaultVisible: true,  filterable: false },
+];
+
+function SuppressionTab({ onRegisterOpen }) {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [adding, setAdding] = useState("");
+  const [search, setSearch]     = useState("");
+  const [filters, setFilters]   = useState({});
+  const [colOrder, setColOrder]   = useState(() => SUPP_COLS.map(c => c.key));
+  const [hiddenCols, setHiddenCols] = useState(() => new Set(SUPP_COLS.filter(c => !c.defaultVisible).map(c => c.key)));
+  const [addOpen, setAddOpen]   = useState(false);
+  const [addMode, setAddMode]   = useState("single"); // "single" | "import"
+  const [addEmail, setAddEmail] = useState("");
+  const [addReason, setAddReason] = useState("manual");
+  const [customReason, setCustomReason] = useState("");
+  const [importRows, setImportRows]     = useState(null); // { valid, duplicates, invalid }
+  const [importFileName, setImportFileName] = useState("");
+  const [importResults, setImportResults] = useState(null); // { added, duplicates, invalid }
+  const importInputRef = useRef(null);
+  const [selected, setSelected] = useState(new Set());
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  const effectiveReason = addReason === "__custom__" ? customReason.trim() : addReason;
+
+  useEffect(() => { onRegisterOpen?.(() => setAddOpen(true)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const resetAdd = () => {
+    setAddOpen(false);
+    setAddMode("single");
+    setAddEmail(""); setAddReason("manual"); setCustomReason("");
+    setImportRows(null); setImportFileName(""); setImportResults(null);
+  };
+
+  const [sortKey, setSortKey] = useState("added_at");
+  const [sortDir, setSortDir] = useState("desc");
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const setFilter = (k, v) => { setFilters(p => ({ ...p, [k]: v })); setSelected(new Set()); };
+  const toggleCol = (k) => setHiddenCols(p => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (colOrder.filter(x => !n.has(x)).length > 1) n.add(k); return n; });
+  const moveCol   = (k, d) => setColOrder(p => { const i = p.indexOf(k); if (i<0) return p; const n=[...p]; if(d==="up"&&i>0)[n[i-1],n[i]]=[n[i],n[i-1]]; else if(d==="down"&&i<p.length-1)[n[i],n[i+1]]=[n[i+1],n[i]]; return n; });
 
   const { data: suppressed = [], isLoading } = useQuery({
     queryKey: ["edm-suppression"],
@@ -515,91 +1326,442 @@ function SuppressionTab() {
   });
 
   const addMutation = useMutation({
-    mutationFn: (email) => appClient.edm.addSuppression(email, "manual"),
+    mutationFn: ({ email, reason }) => appClient.edm.addSuppression(email, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["edm-suppression"] });
-      setAdding("");
+      resetAdd();
       toast.success("Added to suppression list");
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const removeMutation = useMutation({
-    mutationFn: (email) => appClient.edm.removeSuppression(email),
-    onSuccess: () => {
+  const importMutation = useMutation({
+    mutationFn: (entries) => appClient.edm.importSuppression(entries),
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["edm-suppression"] });
-      toast.success("Removed from suppression list");
+      setImportResults({
+        added: res?.added ?? (importRows?.valid.length ?? 0),
+        duplicates: importRows?.duplicates.length ?? 0,
+        invalid: importRows?.invalid.length ?? 0,
+      });
     },
+    onError: (e) => toast.error(e.message),
   });
 
-  const filtered = suppressed.filter(s =>
-    !search || s.email.toLowerCase().includes(search.toLowerCase())
-  );
+  const bulkRemoveMutation = useMutation({
+    mutationFn: (emails) => appClient.edm.bulkRemoveSuppression(emails),
+    onSuccess: (_, emails) => {
+      qc.invalidateQueries({ queryKey: ["edm-suppression"] });
+      setSelected(new Set());
+      setConfirmRemove(false);
+      toast.success(`${emails.length} email${emails.length !== 1 ? "s" : ""} removed from suppression list`);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const filtered = suppressed.filter(s => {
+    if (search && !s.email.toLowerCase().includes(search.toLowerCase())) return false;
+    for (const [key, val] of Object.entries(filters)) {
+      if (!val) continue;
+      if (String(s[key] ?? "").toLowerCase() !== val.toLowerCase()) return false;
+    }
+    return true;
+  });
+
+  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => SUPP_COLS.find(c => c.key === k)).filter(Boolean);
+
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    if (!sortKey) return 0;
+    let av = a[sortKey], bv = b[sortKey];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1; if (bv == null) return - 1;
+    const cmp = String(av).localeCompare(String(bv));
+    return sortDir === "asc" ? cmp : - cmp;
+  });
+
+  // Selection helpers
+  const allSelected  = sortedFiltered.length > 0 && sortedFiltered.every(s => selected.has(s.email));
+  const someSelected = sortedFiltered.some(s => selected.has(s.email));
+  const toggleRow    = (email) => setSelected(p => { const n = new Set(p); n.has(email) ? n.delete(email) : n.add(email); return n; });
+  const toggleAll    = () => {
+    if (allSelected) setSelected(p => { const n = new Set(p); sortedFiltered.forEach(s => n.delete(s.email)); return n; });
+    else setSelected(p => { const n = new Set(p); sortedFiltered.forEach(s => n.add(s.email)); return n; });
+  };
+
+  const buildCsv = (rows) => {
+    const header = visibleCols.map(c => c.label).join(",");
+    const body = rows.map(s => visibleCols.map(c => {
+      const v = c.key === "added_at" ? (s.added_at ? format(new Date(s.added_at), "MMM d, yyyy") : "") : String(s[c.key] ?? "");
+      return v.includes(",") ? `"${v}"` : v;
+    }).join(",")).join("\n");
+    return `${header}\n${body}`;
+  };
+
+  const exportCsv = (onlySelected = false) => {
+    const rows = onlySelected ? filtered.filter(s => selected.has(s.email)) : filtered;
+    if (!rows.length) return;
+    const blob = new Blob([buildCsv(rows)], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = onlySelected ? "suppression-selected.csv" : "email-suppression.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  // ── Import-from-file helpers ──────────────────────────────────────────────
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  // Parse a CSV/TXT file into { valid, duplicates, invalid }.
+  // Accepts "email,reason" rows or one email per line. Skips a leading header
+  // row, dedups within the file, and skips emails already on the list.
+  const parseEmailFile = (text) => {
+    const existing = new Set(suppressed.map(s => String(s.email).toLowerCase()));
+    const seen = new Set();
+    const valid = [], duplicates = [], invalid = [];
+    text.split(/\r?\n/).forEach((line, i) => {
+      const raw = line.trim();
+      if (!raw) return;
+      const cols = raw.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
+      const email = cols[0].toLowerCase();
+      if (i === 0 && (email === "email" || email === "email address")) return; // header
+      if (!EMAIL_RE.test(email)) { invalid.push(cols[0]); return; }
+      if (existing.has(email) || seen.has(email)) { duplicates.push(email); return; }
+      seen.add(email);
+      valid.push({ email, reason: (cols[1] || "manual").toLowerCase() });
+    });
+    return { valid, duplicates, invalid };
+  };
+
+  const processImportFile = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setImportFileName(file.name);
+      setImportRows(parseEmailFile(text));
+    } catch {
+      toast.error("Could not read that file");
+    }
+  };
+
+  const clearImportFile = () => { setImportFileName(""); setImportRows(null); };
+
+  const downloadTemplate = () => {
+    const csv = "email,reason\njohn@example.com,manual\njane@example.com,unsubscribed\n";
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "suppression-import-template.csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="px-8 py-6">
-      <div className="flex items-center gap-3 mb-6">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search suppressed emails…"
-            className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          <input
-            value={adding}
-            onChange={e => setAdding(e.target.value)}
-            placeholder="email@example.com"
-            className="h-9 w-56 px-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
-            onKeyDown={e => e.key === "Enter" && adding && addMutation.mutate(adding)}
-          />
-          <Button
-            variant="outline" size="sm" className="h-9 gap-1.5"
-            onClick={() => adding && addMutation.mutate(adding)}
-            disabled={!adding || addMutation.isPending}
-          >
-            <Plus className="w-3.5 h-3.5" /> Add
-          </Button>
-        </div>
-      </div>
+      <TableToolbar
+        search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
+        columns={SUPP_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
+        onToggleCol={toggleCol} onMoveCol={moveCol}
+        filters={filters} onFilter={setFilter}
+        resultCount={filtered.length} totalCount={suppressed.length}
+        placeholder="Search suppressed emails..."
+      />
 
-      <p className="text-xs text-muted-foreground mb-4">
-        {suppressed.length.toLocaleString()} suppressed emails - bounces, unsubscribes, and complaints are added automatically.
-      </p>
-
-      <div className="border border-border rounded-lg overflow-hidden">
-        {isLoading && (
-          <div className="flex items-center justify-center py-10">
-            <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
-          </div>
-        )}
-        {!isLoading && filtered.length === 0 && (
-          <div className="py-12 text-center text-sm text-muted-foreground">
-            <ShieldOff className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            No suppressed emails
-          </div>
-        )}
-        {filtered.map(s => (
-          <div key={s.email} className="flex items-center gap-3 px-4 py-2.5 border-b border-border last:border-0 hover:bg-secondary/20">
-            <span className="flex-1 text-sm font-mono">{s.email}</span>
-            <Badge className={`${REASON_STYLES[s.reason] || REASON_STYLES.manual} text-[10px]`}>
-              {s.reason}
-            </Badge>
-            <span className="text-xs text-muted-foreground w-16 text-right">
-              {format(new Date(s.added_at), "MMM d")}
-            </span>
+      {/* Selection toolbar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
+          <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+          <div className="flex items-center gap-1 ml-2">
             <Button
-              variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              onClick={() => removeMutation.mutate(s.email)}
+              size="sm" variant="secondary"
+              className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+              onClick={() => setConfirmRemove(true)}
+              disabled={bulkRemoveMutation.isPending}
             >
-              <XCircle className="w-3.5 h-3.5" />
+              Delete
+            </Button>
+            <Button
+              size="sm" variant="secondary"
+              className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+              onClick={() => exportCsv(true)}
+            >
+              Export CSV
             </Button>
           </div>
-        ))}
-      </div>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Add to suppression modal */}
+      <Dialog open={addOpen} onOpenChange={(v) => { if (!v) resetAdd(); else setAddOpen(true); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add to Suppression List</DialogTitle>
+          </DialogHeader>
+
+          {/* Mode toggle */}
+          {!importResults && (
+            <div className="flex gap-0.5 p-0.5 bg-secondary/40 rounded-lg">
+              {[["single", "Single email"], ["import", "Import file"]].map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setAddMode(k)}
+                  className={`flex-1 h-8 text-xs font-medium rounded-md transition-colors ${
+                    addMode === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {addMode === "single" ? (
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Email address <span className="text-destructive">*</span></Label>
+                <Input
+                  value={addEmail}
+                  onChange={e => setAddEmail(e.target.value)}
+                  placeholder="email@example.com"
+                  className="h-9 text-sm"
+                  onKeyDown={e => e.key === "Enter" && addEmail && effectiveReason && addMutation.mutate({ email: addEmail.trim(), reason: effectiveReason })}
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Reason</Label>
+                <select
+                  value={addReason}
+                  onChange={e => setAddReason(e.target.value)}
+                  className="w-full h-9 px-3 text-sm bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="manual">Manual</option>
+                  <option value="bounced">Bounced</option>
+                  <option value="complained">Complained</option>
+                  <option value="unsubscribed">Unsubscribed</option>
+                  <option value="__custom__">Other (custom)...</option>
+                </select>
+                {addReason === "__custom__" && (
+                  <Input
+                    value={customReason}
+                    onChange={e => setCustomReason(e.target.value)}
+                    placeholder="Enter custom reason..."
+                    className="mt-2 h-9 text-sm"
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 mt-1">
+              {!importResults ? (
+                <>
+                  {/* Step 1 - Download the template */}
+                  <div className="rounded-md border border-border bg-secondary/20 p-4 space-y-2">
+                    <p className="text-xs font-semibold flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Step 1 - Download the template</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Fill in the emails to suppress using the CSV template. <strong>email</strong> is required; <strong>reason</strong> is optional. Duplicate and already-suppressed emails are skipped automatically.
+                    </p>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}>
+                      <FileDown className="w-3.5 h-3.5" /> Download Template CSV
+                    </Button>
+                  </div>
+
+                  {/* Step 2 - Upload your filled CSV */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Step 2 - Upload your filled CSV</p>
+                    <div
+                      className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-foreground/40 transition-colors"
+                      onClick={() => importInputRef.current?.click()}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); processImportFile(e.dataTransfer.files[0]); }}
+                    >
+                      <input ref={importInputRef} type="file" accept=".csv,.txt" className="hidden"
+                        onChange={e => { processImportFile(e.target.files[0]); e.target.value = ""; }} />
+                      {importFileName ? (
+                        <div className="flex items-center justify-center gap-2 text-sm">
+                          <FileText className="w-4 h-4 text-foreground" />
+                          <span className="font-medium">{importFileName}</span>
+                          <button onClick={e => { e.stopPropagation(); clearImportFile(); }} className="text-muted-foreground hover:text-foreground">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-muted-foreground text-xs">
+                          <Upload className="w-5 h-5 mx-auto mb-1 opacity-40" />
+                          Click to select CSV or drag and drop
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Live preview of parsed file */}
+                  {importRows && (
+                    <div className="rounded-md border border-border bg-secondary/20 p-3 space-y-1 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-foreground">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="font-medium">{importRows.valid.length}</span> new email{importRows.valid.length !== 1 ? "s" : ""} ready to import
+                      </div>
+                      {importRows.duplicates.length > 0 && (
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <Info className="w-3.5 h-3.5" /> {importRows.duplicates.length} duplicate{importRows.duplicates.length !== 1 ? "s" : ""} skipped (already on list or repeated)
+                        </div>
+                      )}
+                      {importRows.invalid.length > 0 && (
+                        <div className="flex items-center gap-1.5 text-destructive">
+                          <XCircle className="w-3.5 h-3.5" /> {importRows.invalid.length} invalid email{importRows.invalid.length !== 1 ? "s" : ""} skipped
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <Button
+                    className="w-full gap-1.5"
+                    disabled={!importRows?.valid.length || importMutation.isPending}
+                    onClick={() => importRows?.valid.length && importMutation.mutate(importRows.valid)}
+                  >
+                    {importMutation.isPending
+                      ? "Importing…"
+                      : <><Upload className="w-3.5 h-3.5" /> Import{importRows?.valid.length ? ` ${importRows.valid.length}` : ""} Email{importRows?.valid.length !== 1 ? "s" : ""}</>}
+                  </Button>
+                </>
+              ) : (
+                /* Import complete */
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-foreground" />
+                    <span className="font-medium text-sm">Import complete</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
+                      <p className="text-2xl font-bold">{importResults.added}</p>
+                      <p className="text-[11px] text-muted-foreground">Imported</p>
+                    </div>
+                    <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
+                      <p className="text-2xl font-bold">{importResults.duplicates}</p>
+                      <p className="text-[11px] text-muted-foreground">Duplicates</p>
+                    </div>
+                    <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
+                      <p className="text-2xl font-bold">{importResults.invalid}</p>
+                      <p className="text-[11px] text-muted-foreground">Invalid</p>
+                    </div>
+                  </div>
+                  <Button className="w-full" onClick={resetAdd}>Done</Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {addMode === "single" && (
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={resetAdd}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={() => addEmail && effectiveReason && addMutation.mutate({ email: addEmail.trim(), reason: effectiveReason })}
+                disabled={!addEmail.trim() || !effectiveReason || addMutation.isPending}
+              >
+                {addMutation.isPending ? "Adding..." : "Add to List"}
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm bulk remove */}
+      <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {selected.size} email{selected.size !== 1 ? "s" : ""} from suppression list?</AlertDialogTitle>
+            <AlertDialogDescription>
+              These emails will be eligible to receive future campaigns again. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => bulkRemoveMutation.mutate([...selected])}
+              disabled={bulkRemoveMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {bulkRemoveMutation.isPending ? "Removing…" : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {isLoading && <div className="flex items-center justify-center py-10"><div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" /></div>}
+
+      {!isLoading && filtered.length === 0 && (
+        <div className="py-12 text-center text-sm text-muted-foreground border border-border rounded-lg">
+          <ShieldOff className="w-8 h-8 mx-auto mb-2 opacity-20" />
+          No suppressed emails
+        </div>
+      )}
+
+      {!isLoading && sortedFiltered.length > 0 && (
+        <div className="border border-border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/20">
+                <th className="w-10 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    className="rounded border-border"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                    onChange={toggleAll}
+                  />
+                </th>
+                {visibleCols.map(col => (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {col.label}
+                      {sortKey === col.key
+                        ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                        : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sortedFiltered.map(s => {
+                const isSelected = selected.has(s.email);
+                return (
+                  <tr
+                    key={s.email}
+                    className={`border-b border-border last:border-0 cursor-pointer ${isSelected ? "bg-secondary/30" : "hover:bg-secondary/10"}`}
+                    onClick={() => toggleRow(s.email)}
+                  >
+                    <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="rounded border-border"
+                        checked={isSelected}
+                        onChange={() => toggleRow(s.email)}
+                      />
+                    </td>
+                    {visibleCols.map(col => {
+                      switch (col.key) {
+                        case "email":    return <td key={col.key} className="px-4 py-2.5 text-sm font-mono">{s.email}</td>;
+                        case "reason":   return <td key={col.key} className="px-4 py-2.5 text-xs text-muted-foreground capitalize">{s.reason}</td>;
+                        case "added_at": return <td key={col.key} className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{s.added_at ? format(new Date(s.added_at), "MMM d, yyyy") : "-"}</td>;
+                        default: return <td key={col.key} className="px-4 py-2.5 text-xs text-muted-foreground">{String(s[col.key] ?? "-")}</td>;
+                      }
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -636,7 +1798,7 @@ export default function EDM() {
   });
 
   const handleSave = (formData) => {
-    if (editTarget) updateMutation.mutate({ id: editTarget.id, data: formData });
+    if (editTarget?.id) updateMutation.mutate({ id: editTarget.id, data: formData });
     else createMutation.mutate(formData);
   };
 
@@ -667,9 +1829,34 @@ export default function EDM() {
     else templateCreateMutation.mutate(data);
   };
 
+  // "Use Template" from a saved template card - pre-fill a new email from it
+  const handleUseTemplateCard = (t) => handleUseTemplate({
+    name: t.name,
+    subject: t.subject || "",
+    html_body: t.html_body || "",
+    blocks: t.variables?._blocks,
+    htmlMode: t.variables?._html_mode || false,
+  });
+
+  // "Use Template" - close template editor, switch to Emails tab, open campaign editor pre-filled
+  const handleUseTemplate = ({ name, subject, html_body, blocks, htmlMode }) => {
+    setTemplateEditorOpen(false);
+    setTemplateEditTarget(null);
+    setTab("emails");
+    setEditorOpen(true);
+    setEditTarget({
+      name: `Email from ${name}`,
+      subject,
+      html_body,
+      ab_test_config: { _blocks: blocks, _html_mode: htmlMode },
+    });
+  };
+
   const openCreate = () => { setEditTarget(null); setEditorOpen(true); };
   const openEdit   = (c)  => { setEditTarget(c);    setEditorOpen(true); };
   const openTemplateCreate = () => { setTemplateEditTarget(null); setTemplateEditorOpen(true); };
+
+  const suppressionOpenerRef = useRef(null);
   const openTemplateEdit   = (t)  => { setTemplateEditTarget(t);    setTemplateEditorOpen(true); };
   const openTemplateImport = (initialData) => { setTemplateEditTarget(initialData); setTemplateEditorOpen(true); };
 
@@ -686,6 +1873,16 @@ export default function EDM() {
           {tab === "emails" && canUseFeatures && (
             <Button size="sm" className="gap-1.5 h-9" onClick={openCreate}>
               <Plus className="w-3.5 h-3.5" /> New Email
+            </Button>
+          )}
+          {tab === "templates" && (
+            <Button size="sm" className="gap-1.5 h-9" onClick={openTemplateCreate}>
+              <Plus className="w-3.5 h-3.5" /> New Template
+            </Button>
+          )}
+          {tab === "suppression" && (
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => suppressionOpenerRef.current?.()}>
+              <Plus className="w-3.5 h-3.5" /> Add Email
             </Button>
           )}
         </div>
@@ -723,12 +1920,13 @@ export default function EDM() {
         {tab === "templates" && (
           <TemplatesTab
             onCreate={openTemplateCreate}
+            onUse={handleUseTemplateCard}
             onEdit={openTemplateEdit}
             onImport={openTemplateImport}
           />
         )}
         {tab === "analytics"  && <AnalyticsTab />}
-        {tab === "suppression" && <SuppressionTab />}
+        {tab === "suppression" && <SuppressionTab onRegisterOpen={fn => { suppressionOpenerRef.current = fn; }} />}
       </div>
 
       <CampaignEditor
@@ -748,6 +1946,7 @@ export default function EDM() {
         open={templateEditorOpen}
         onClose={() => { setTemplateEditorOpen(false); setTemplateEditTarget(null); }}
         onSave={handleTemplateSave}
+        onUseTemplate={handleUseTemplate}
         initial={templateEditTarget}
       />
     </div>

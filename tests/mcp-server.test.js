@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createAnalystMCPClient, toOpenAITools } from "../server/mcp/server.js";
 
+// Order matches ALL_TOOLS in server/mcp/server.js:
+// database, segments, utm, edm, analytics.
 const EXPECTED_TOOLS = [
   "query_data",
   "list_tables",
@@ -9,10 +11,22 @@ const EXPECTED_TOOLS = [
   "preview_segment_size",
   "list_campaigns",
   "analyze_utm_performance",
+  "suggest_edm_opportunities",
+  "get_member_profile_breakdown",
   "list_edm_campaigns",
   "preview_edm_recipients",
   "analyze_edm_performance",
   "suggest_send_time",
+  "score_rfm",
+  "estimate_clv",
+  "score_churn_risk",
+  "analyze_cohort_retention",
+  "cluster_members",
+  "find_association_rules",
+  "predict_next_event",
+  "compute_channel_attribution",
+  "detect_anomalies",
+  "forecast_registrations",
 ];
 
 function makeMockPool() {
@@ -22,7 +36,7 @@ function makeMockPool() {
 }
 
 describe("MCP Server - tool discovery", () => {
-  it("registers all 11 expected tools", async () => {
+  it("registers all 23 expected tools", async () => {
     const client = await createAnalystMCPClient(makeMockPool(), []);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
@@ -64,7 +78,7 @@ describe("MCP Server - tool calls via client", () => {
   });
 
   it("routes list_tables and returns dictionary entries", async () => {
-    const dict = [{ schema_name: "ga_landing", table_name: "page_metrics", description: "Page data", columns: [] }];
+    const dict = [{ table: "page_metrics", use_case: "Page data", granularity: "One row per page", fields: [] }];
     const client = await createAnalystMCPClient(makeMockPool(), dict);
     const result = await client.callTool({ name: "list_tables", arguments: {} });
     const data = JSON.parse(result.content[0].text);

@@ -12,6 +12,18 @@ export function GoogleIcon({ className = "w-5 h-5" }) {
   );
 }
 
+// Microsoft logo SVG (four coloured squares)
+export function MicrosoftIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M11.4 11.4H2V2h9.4v9.4z" fill="#F25022" />
+      <path d="M22 11.4h-9.4V2H22v9.4z" fill="#7FBA00" />
+      <path d="M11.4 22H2v-9.4h9.4V22z" fill="#00A4EF" />
+      <path d="M22 22h-9.4v-9.4H22V22z" fill="#FFB900" />
+    </svg>
+  );
+}
+
 // Divider with "or" text
 export function OrDivider() {
   return (
@@ -44,14 +56,29 @@ export function GoogleButton({ action = "Continue" }) {
   );
 }
 
-// Branded logo
+// Microsoft OAuth button
+export function MicrosoftButton({ action = "Continue" }) {
+  const handleClick = () => {
+    window.location.href = "/api/auth/microsoft";
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="w-full flex items-center justify-center gap-3 py-2.5 px-4 border border-border rounded-md bg-background hover:bg-secondary text-sm font-medium transition-colors"
+    >
+      <MicrosoftIcon />
+      {action} with Microsoft
+    </button>
+  );
+}
+
+// Branded logo - matches the landing page wordmark ("Click CDP")
 export function Logo({ className = "" }) {
   return (
     <Link to="/" className={`inline-flex items-center gap-2 ${className}`}>
-      <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
-        <span className="text-primary-foreground font-bold text-sm">C</span>
-      </div>
-      <span className="font-bold text-lg tracking-tight">Click</span>
+      <span className="font-bold text-lg tracking-tight">Click CDP</span>
     </Link>
   );
 }

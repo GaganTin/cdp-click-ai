@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 
 export function usePlan() {
-  const { currentCompany } = useAuth();
+  const { currentCompany, user } = useAuth();
 
   const { data: plans = [], isLoading } = useQuery({
     queryKey: ["plans"],
@@ -11,7 +11,8 @@ export function usePlan() {
     staleTime: 10 * 60 * 1000,
   });
 
-  const planId = currentCompany?.plan ?? "free";
+  // account_plan is authoritative (billing); currentCompany.plan is a denormalised copy.
+  const planId = user?.account_plan ?? currentCompany?.plan ?? "free";
   const planConfig = plans.find(p => p.id === planId) ?? null;
 
   // The next tier up (used by upgrade prompts so they always reference the right plan name/price)
@@ -23,12 +24,19 @@ export function usePlan() {
   const warningDays = planConfig?.warning_days ?? 7;
   const limits = planConfig?.limits ?? {};
 
+  // Authoritative trial end is the account's stored plan_expires_at; only fall back
+  // to (workspace created_date + trial_days) when the server value is absent.
+  const planExpiresAt = user?.account_plan_expires_at ? new Date(user.account_plan_expires_at) : null;
   const createdDate = currentCompany?.created_date ? new Date(currentCompany.created_date) : null;
-  const trialExpiresAt = createdDate && trialDays
-    ? new Date(createdDate.getTime() + trialDays * 24 * 60 * 60 * 1000)
-    : null;
+  const trialExpiresAt = planExpiresAt
+    ?? (createdDate && trialDays
+      ? new Date(createdDate.getTime() + trialDays * 24 * 60 * 60 * 1000)
+      : null);
 
   const isFreePlan = planId === "free";
+  const isPaidPlan = planId === "paid";
+  // When the account moved onto the paid plan (null while on free).
+  const upgradedAt = user?.account_plan_upgraded_at ? new Date(user.account_plan_upgraded_at) : null;
   const isTrialExpired = isFreePlan && trialExpiresAt ? new Date() > trialExpiresAt : false;
   const daysLeft = trialExpiresAt
     ? Math.max(0, Math.ceil((trialExpiresAt - new Date()) / (24 * 60 * 60 * 1000)))
@@ -47,8 +55,8 @@ export function usePlan() {
     plans,
     isLoadingPlans: isLoading,
     isFreePlan,
-    isProPlan: planId === "pro",
-    isEnterprise: planId === "enterprise",
+    isPaidPlan,
+    upgradedAt,
     isTrialExpired,
     daysLeft,
     warningDays,

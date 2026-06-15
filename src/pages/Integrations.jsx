@@ -1,30 +1,37 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { appClient } from "@/api/appClient";
+import { appClient, getCurrentCompanyId } from "@/api/appClient";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import {
-  BarChart2, Search, ShoppingBag, Plug, Globe,
-  CheckCircle2, AlertCircle, RefreshCw,
-  Loader2, EyeOff, Eye, ExternalLink, Unplug,
-  ChevronRight, Copy, Download, XCircle,
+  BarChart2, Search, ShoppingBag, Plug, Globe, Store, ShoppingCart, Boxes,
+  CheckCircle2, AlertCircle, RefreshCw, Loader2,
+  EyeOff, Eye, ExternalLink, Unplug, ChevronRight,
+  Copy, Download, XCircle, ShieldCheck, History,
+  Activity, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel,
-  AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
-  AlertDialogHeader, AlertDialogTitle,
+  Sheet, SheetContent, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 const GA_EDITOR_EMAILS = [
-  import.meta.env.VITE_GA_EDITOR_EMAIL_1 || "cdp-analytics-1@your-project.iam.gserviceaccount.com",
-  import.meta.env.VITE_GA_EDITOR_EMAIL_2 || "cdp-analytics-2@your-project.iam.gserviceaccount.com",
+  import.meta.env.VITE_GA_EDITOR_EMAIL_1 || "capsuite.ga@gmail.com",
+  import.meta.env.VITE_GA_EDITOR_EMAIL_2 || "starting-account-u9jbb14nb4ie@capsuite-1709107069505.iam.gserviceaccount.com",
+];
+
+const GSC_EDITOR_EMAILS = [
+  import.meta.env.VITE_GSC_EDITOR_EMAIL_1 || "capsuite.ga@gmail.com",
+  import.meta.env.VITE_GSC_EDITOR_EMAIL_2 || "capsuite-cdp-dev-2@capsuitecdp-400308.iam.gserviceaccount.com",
 ];
 
 const INTEGRATIONS = [
@@ -37,8 +44,8 @@ const INTEGRATIONS = [
     Icon: BarChart2,
     syncable: true,
     fields: [
-      { key: "propertyId", label: "Property ID", placeholder: "e.g. 123456789", type: "text", hint: "Admin → Property Details (top right corner)" },
-      { key: "propertyName", label: "Property URL", placeholder: "e.g. https://www.example.com", type: "text", hint: "Admin → Data Streams → your website URL" },
+      { key: "propertyId",   label: "Property ID",   placeholder: "e.g. 123456789",             type: "text",     hint: "Admin → Property Details (top right corner)" },
+      { key: "propertyName", label: "Property URL",  placeholder: "e.g. https://www.example.com", type: "text",   hint: "Admin → Data Streams → your website URL" },
     ],
     instructions: [
       {
@@ -74,12 +81,12 @@ const INTEGRATIONS = [
           "Under Data display, click Custom definitions → Create custom dimensions.",
           { type: "table", headers: ["Dimension name", "Description", "Scope", "Event parameter"], rows: [
             ["CapSuite APID", "Client AP_ID for no GA id existing", "User", "capsuite_apid"],
-            ["Capsuite SID", "Client ID from cookies", "User", "capsuite_sid"],
+            ["Capsuite SID",  "Client ID from cookies",              "User", "capsuite_sid"],
           ]},
         ],
       },
     ],
-    disconnectWarning: "All Google Analytics data (dashboard, custom attributes, anonymous profiles, etc.) stored in the CDP will be permanently deleted.",
+    disconnectWarning: "All Google Analytics data and its anonymous visitor profiles will be permanently deleted. Your content attributes and tagged pages are kept.",
   },
   {
     id: "googleSearchConsole",
@@ -99,7 +106,7 @@ const INTEGRATIONS = [
           "Log in to your Google Search Console account.",
           "In the sidebar, click Settings, then Users and permissions under General Settings.",
           "Click Add Users, paste both emails below, and select Full permission:",
-          { type: "emails", value: GA_EDITOR_EMAILS },
+          { type: "emails", value: GSC_EDITOR_EMAILS },
         ],
       },
       {
@@ -122,8 +129,8 @@ const INTEGRATIONS = [
     Icon: ShoppingBag,
     syncable: true,
     fields: [
-      { key: "storeName", label: "Store Name", placeholder: "storename123 (without .myshopify.com)", type: "text", hint: "Settings → Store details → your myshopify.com subdomain." },
-      { key: "accessToken", label: "Access Token", placeholder: "shpat_xxxxxxxxxxxxxxxx", type: "password", hint: "Settings → Apps → Develop Apps → your app → Install App." },
+      { key: "storeName",    label: "Store Name",    placeholder: "storename123 (without .myshopify.com)", type: "text",     hint: "Settings → Store details → your myshopify.com subdomain." },
+      { key: "accessToken",  label: "Access Token",  placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",       type: "password", hint: "Settings → Apps → Develop Apps → your app → Install App → \"Reveal & Copy Token\"" },
     ],
     instructions: [
       {
@@ -141,7 +148,7 @@ const INTEGRATIONS = [
           "Click Create an app, enter any name ending with _CDP (e.g. MyCDP), and save.",
           "Under Configuration, click Configure Admin API scopes and select: orders, products, customers.",
           "Click Save, then Install App → Install.",
-          "Click Reveal token once to copy your Access Token. (It is only shown once.)",
+          "Click Install App → Install, then click \"Reveal & Copy Token\". (It is only shown once.)",
         ],
       },
     ],
@@ -156,38 +163,58 @@ const INTEGRATIONS = [
     Icon: Plug,
     syncable: false,
     isOAuth: true,
+    comingSoon: true,
     fields: [
       { key: "storeName", label: "Store Name", placeholder: "storename123 (without .myshopify.com)", type: "text", hint: "Settings → Store details → your myshopify.com subdomain." },
     ],
     instructions: [
-      {
-        title: "Log in as store owner",
-        steps: ["Log in to your Shopify store as the store owner or with admin permissions to approve app installs."],
-      },
-      {
-        title: "Find your Store Name",
-        steps: [
-          "In the sidebar, go to Settings.",
-          "Your Store Name is the subdomain before .myshopify.com (e.g. storename123).",
-        ],
-      },
-      {
-        title: "Install the CDP App",
-        steps: [
-          "Enter your store name below and click Install CDP App.",
-          "You will be redirected to a Shopify permissions screen.",
-          "Click Install app to approve the Capsuite CDP app.",
-          "The CDP tracking script will be automatically added to your storefront.",
-        ],
-      },
+      { title: "Log in as store owner", steps: ["Log in to your Shopify store as the store owner or with admin permissions to approve app installs."] },
+      { title: "Find your Store Name", steps: ["In the sidebar, go to Settings.", "Your Store Name is the subdomain before .myshopify.com (e.g. storename123)."] },
+      { title: "Install the CDP App", steps: ["Enter your store name below and click Install CDP App.", "You will be redirected to a Shopify permissions screen.", "Click Install app to approve the Capsuite CDP app.", "The CDP tracking script will be automatically added to your storefront."] },
     ],
     disconnectWarning: "The CDP tracking script will be immediately removed from your storefront. Visitor tracking and session data collection will stop immediately.",
+  },
+  {
+    id: "odoo",
+    name: "Odoo",
+    shortName: "Odoo",
+    description: "Import sales orders, products, inventory, and member records from your Odoo ERP.",
+    category: "eCommerce",
+    Icon: Boxes,
+    syncable: true,
+    comingSoon: true,
+    fields: [],
+    instructions: [],
+  },
+  {
+    id: "shopline",
+    name: "Shopline",
+    shortName: "Shopline",
+    description: "Import orders, products, and member records from your Shopline store.",
+    category: "eCommerce",
+    Icon: Store,
+    syncable: true,
+    comingSoon: true,
+    fields: [],
+    instructions: [],
+  },
+  {
+    id: "woocommerce",
+    name: "WooCommerce",
+    shortName: "Woo",
+    description: "Import orders, products, and customer records from your WooCommerce store.",
+    category: "eCommerce",
+    Icon: ShoppingCart,
+    syncable: true,
+    comingSoon: true,
+    fields: [],
+    instructions: [],
   },
   {
     id: "wordpress",
     name: "WordPress Plugin",
     shortName: "WP Plugin",
-    description: "Install the CDP tracking plugin on your WordPress site to capture visitor sessions.",
+    description: "Install the Capsuite CDP plugin on your WordPress site to track visitors and serve personalised pop ups.",
     category: "Tracking",
     Icon: Globe,
     syncable: false,
@@ -197,92 +224,130 @@ const INTEGRATIONS = [
       {
         title: "Download and install the plugin",
         steps: [
-          "Download the Capsuite CDP plugin from the link below.",
+          "Download the Capsuite CDP plugin (.zip) from the Install tab.",
           "In your WordPress admin, go to Plugins → Add New Plugin → Upload Plugin.",
-          "Upload the downloaded .zip file and click Install Now, then Activate.",
+          "Upload the downloaded .zip file, click Install Now, then Activate.",
         ],
       },
       {
-        title: "Configure your CDP API key",
+        title: "Enter your Company ID",
         steps: [
-          "After activation, go to Settings → Capsuite CDP.",
-          "Enter your CDP API key (available from your account settings).",
-          "Click Save Settings. The plugin will begin tracking visitors immediately.",
+          "After activation, go to Settings → Capsuite CDP in your WordPress admin.",
+          "Copy your Company ID from the Install tab on this page.",
+          "Paste it into the Company ID field and click Save Settings.",
+        ],
+      },
+      {
+        title: "Configure display URLs",
+        steps: [
+          "In the plugin settings, enter the URL patterns where pop ups should appear.",
+          "Use * to show on all pages, /product/* for a section, or /specific-page for one page.",
+          "Choose a default position (center, bottom-right, etc.) and set your preferred popup dimensions.",
+        ],
+      },
+      {
+        title: "Test the connection",
+        steps: [
+          "Click the Test Connection button in the plugin settings page to verify the plugin can reach Capsuite.",
+          "Visit any matching page on your site - if a pop-up is active and you meet the targeting rules, it will appear.",
+          "Check the Install tab on this page - the activity indicator will update when the first visitor event is captured.",
         ],
       },
     ],
-    disconnectWarning: "The CDP tracking script will be removed from your WordPress site and visitor tracking will stop.",
+    disconnectWarning: "The Capsuite CDP plugin will stop serving pop ups and tracking visitor sessions on your WordPress site.",
   },
 ];
 
 // ── Status helpers ─────────────────────────────────────────────────────────────
 function getStatus(record) {
-  if (!record?.is_connected) return record?.is_connection_error ? "error" : "disconnected";
+  if (!record) return "disconnected";
+  if (!record.is_connected && !record.is_connection_error) return "disconnected";
   if (record.is_connection_error) return "error";
-  return record.is_synced ? "synced" : "connected";
+  const active = record.latest_job_status;
+  if (active === "queued" || active === "running") return "syncing";
+  if (record.is_synced) return "synced";
+  return "connected";
 }
 
 const STATUS_BADGE = {
   disconnected: "bg-secondary text-secondary-foreground",
   connected:    "bg-secondary text-secondary-foreground",
   synced:       "bg-secondary text-secondary-foreground",
-  error:        "bg-red-100 text-red-700",
+  syncing:      "bg-secondary text-secondary-foreground",
+  error:        "bg-destructive/10 text-destructive",
 };
 
 const STATUS_DOT = {
   disconnected: "bg-muted-foreground/40",
   connected:    "bg-foreground",
   synced:       "bg-foreground",
-  error:        "bg-red-500",
+  syncing:      "bg-foreground animate-pulse",
+  error:        "bg-destructive",
 };
 
 const STATUS_LABEL = {
   disconnected: "Not connected",
   connected:    "Connected",
   synced:       "Connected",
+  syncing:      "Syncing…",
   error:        "Error",
 };
 
-// ── Instruction step ───────────────────────────────────────────────────────────
+const JOB_STATUS_BADGE = {
+  queued:    "bg-secondary text-muted-foreground",
+  running:   "bg-secondary text-foreground",
+  completed: "bg-secondary text-foreground",
+  failed:    "bg-destructive/10 text-destructive",
+  cancelled: "bg-secondary text-muted-foreground",
+};
+
+const AUDIT_ICON = {
+  connected:         { Icon: CheckCircle2, cls: "text-foreground" },
+  disconnected:      { Icon: Unplug,       cls: "text-muted-foreground" },
+  connection_failed: { Icon: XCircle,      cls: "text-destructive" },
+  reconnected:       { Icon: CheckCircle2, cls: "text-foreground" },
+  health_passed:     { Icon: ShieldCheck,  cls: "text-foreground" },
+  health_failed:     { Icon: AlertCircle,  cls: "text-destructive" },
+  sync_queued:       { Icon: Clock,        cls: "text-muted-foreground" },
+  sync_completed:    { Icon: CheckCircle2, cls: "text-foreground" },
+  sync_failed:       { Icon: XCircle,      cls: "text-destructive" },
+  sync_cancelled:    { Icon: XCircle,      cls: "text-muted-foreground" },
+};
+
+// ── Instruction step renderer ──────────────────────────────────────────────────
 function InstructionStep({ step, index }) {
   const [copied, setCopied] = useState(null);
-
   const copyText = (text, i) => {
     navigator.clipboard.writeText(text);
     setCopied(i);
     setTimeout(() => setCopied(null), 1500);
   };
-
   return (
     <div className="mb-5">
       <div className="flex items-center gap-2 mb-2">
-        <span className="flex items-center justify-center w-4.5 h-4.5 w-5 h-5 rounded-full bg-foreground text-background text-[10px] font-bold flex-shrink-0">
+        <span className="flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-background text-[10px] font-bold flex-shrink-0">
           {index + 1}
         </span>
         <p className="text-xs font-semibold">{step.title}</p>
       </div>
       <div className="ml-7 space-y-1.5">
         {step.steps.map((s, si) => {
-          if (typeof s === "string") {
+          if (typeof s === "string")
             return <p key={si} className="text-xs text-muted-foreground leading-relaxed">{s}</p>;
-          }
-          if (s.type === "emails") {
+          if (s.type === "emails")
             return (
               <div key={si} className="space-y-1.5 mt-1.5">
                 {s.value.map((email, ei) => (
                   <div key={ei} className="flex items-center gap-2 bg-secondary rounded-md px-2.5 py-1.5">
-                    <span className="text-[11px] font-mono flex-1 text-foreground truncate">{email}</span>
-                    <button onClick={() => copyText(email, ei)} className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0">
-                      {copied === ei
-                        ? <CheckCircle2 className="w-3 h-3 text-foreground" />
-                        : <Copy className="w-3 h-3" />}
+                    <span className="text-[11px] font-mono flex-1 truncate">{email}</span>
+                    <button onClick={() => copyText(email, ei)} className="text-muted-foreground hover:text-foreground flex-shrink-0">
+                      {copied === ei ? <CheckCircle2 className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                     </button>
                   </div>
                 ))}
               </div>
             );
-          }
-          if (s.type === "table") {
+          if (s.type === "table")
             return (
               <div key={si} className="mt-2 overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-[11px]">
@@ -296,16 +361,13 @@ function InstructionStep({ step, index }) {
                   <tbody>
                     {s.rows.map((row, ri) => (
                       <tr key={ri} className="border-t border-border">
-                        {row.map((cell, ci) => (
-                          <td key={ci} className="px-2.5 py-1.5 font-mono">{cell}</td>
-                        ))}
+                        {row.map((cell, ci) => <td key={ci} className="px-2.5 py-1.5 font-mono">{cell}</td>)}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             );
-          }
           return null;
         })}
       </div>
@@ -313,40 +375,128 @@ function InstructionStep({ step, index }) {
   );
 }
 
+// ── WordPress Plugin Install panel ────────────────────────────────────────────
+function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
+  const [copied, setCopied] = useState(false);
+
+  const { data: activityData } = useQuery({
+    queryKey: ["popup-last-activity"],
+    queryFn: () => appClient.popup.getLastActivity(),
+    refetchInterval: 60_000,
+  });
+
+  const companyId = getCurrentCompanyId() || "";
+  const hasActivity = activityData?.has_activity;
+  const lastActivity = activityData?.last_activity;
+
+  const copyCompanyId = () => {
+    if (!companyId) return;
+    navigator.clipboard.writeText(companyId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  // Activity status indicator
+  let activityDot = "bg-muted-foreground/40";
+  let activityLabel = "No activity captured yet";
+  let activitySub = "Install the plugin and visit a page on your site to verify it's working.";
+
+  if (hasActivity && lastActivity?.CreatedAt) {
+    const ms = Date.now() - new Date(lastActivity.CreatedAt).getTime();
+    const hours = ms / 36e5;
+    if (hours < 1) {
+      activityDot = "bg-green-500";
+      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
+      activitySub = "Plugin is active and sending data.";
+    } else if (hours < 24) {
+      activityDot = "bg-yellow-400";
+      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
+      activitySub = "Plugin is installed. No recent activity in the last hour.";
+    } else {
+      activityDot = "bg-muted-foreground/40";
+      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
+      activitySub = "No recent activity - check if the plugin is still active on your WordPress site.";
+    }
+  }
+
+  return (
+    <div className="space-y-4 pt-1">
+      {/* Company ID */}
+      <div className="space-y-1.5">
+        <p className="text-xs font-medium">Your Company ID</p>
+        <p className="text-[11px] text-muted-foreground">Paste this into the plugin settings in your WordPress admin.</p>
+        <div className="flex items-center gap-2 bg-secondary rounded-md px-2.5 py-2">
+          <span className="text-[11px] font-mono flex-1 truncate text-foreground">
+            {companyId || "Loading…"}
+          </span>
+          <button
+            onClick={copyCompanyId}
+            disabled={!companyId}
+            className="text-muted-foreground hover:text-foreground flex-shrink-0 transition-colors"
+          >
+            {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-foreground" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Activity indicator */}
+      <div className="rounded-lg border border-border p-3 bg-secondary/20 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${activityDot}`} />
+          <p className="text-xs font-medium">{activityLabel}</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground pl-4">{activitySub}</p>
+      </div>
+
+      {/* Download */}
+      <div className="rounded-lg border border-border p-3 bg-secondary/20 space-y-2">
+        <p className="text-xs text-muted-foreground">Download the plugin and install it on your WordPress site following the steps in the <strong>How to Connect</strong> tab.</p>
+        <a
+          href={appClient.dataIntegrations.downloadWordPressPlugin()}
+          download="capsuite-cdp-popup.zip"
+        >
+          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
+            <Download className="w-3 h-3" /> Download Plugin (.zip)
+          </Button>
+        </a>
+      </div>
+
+      {!isConnected ? (
+        <Button size="sm" className="w-full h-8 text-xs" onClick={() => onConnect({})} disabled={isLoading}>
+          {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
+          Mark as Installed
+        </Button>
+      ) : (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Plugin marked as installed
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Connection form ────────────────────────────────────────────────────────────
 function ConnectionForm({ integration, record, onConnect, isLoading }) {
   const [form, setForm] = useState(() =>
-    Object.fromEntries((integration.fields || []).map((f) => [f.key, record?.config?.[f.key] || ""]))
+    Object.fromEntries((integration.fields || []).map((f) => [
+      f.key,
+      // Never pre-fill password / token fields- the stored value is encrypted
+      // and the client only receives a redacted mask anyway. Non-sensitive fields
+      // (like storeName, propertyId) pre-fill for convenience.
+      f.type === "password" ? "" : (record?.config?.[f.key] || ""),
+    ]))
   );
   const [showPasswords, setShowPasswords] = useState({});
 
-  const isConnected = record?.is_connected;
-  const isBlocked = isConnected && !record?.is_connection_error;
+  const isConnected = record?.is_connected && !record?.is_connection_error;
 
   if (integration.isPlugin) {
     return (
-      <div className="space-y-4 pt-1">
-        <div className="rounded-lg border border-border p-3 bg-secondary/20 space-y-3">
-          <p className="text-xs text-muted-foreground">Download and install the Capsuite CDP WordPress plugin following the instructions in the How to Connect tab.</p>
-          <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => window.open("#", "_blank")}>
-            <Download className="w-3 h-3" />
-            Download Plugin (.zip)
-            <ExternalLink className="w-3 h-3 text-muted-foreground" />
-          </Button>
-        </div>
-        {!isConnected && (
-          <Button size="sm" className="w-full h-8 text-xs" onClick={() => onConnect({})} disabled={isLoading}>
-            {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-            Mark as Installed
-          </Button>
-        )}
-        {isConnected && (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Plugin marked as installed
-          </div>
-        )}
-      </div>
+      <WordPressPluginInstall
+        isConnected={isConnected}
+        onConnect={onConnect}
+        isLoading={isLoading}
+      />
     );
   }
 
@@ -357,11 +507,10 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
           <div key={field.key} className="space-y-1">
             <Label className="text-xs">{field.label}</Label>
             <Input
-              id={field.key}
               value={form[field.key]}
               onChange={(e) => setForm((p) => ({ ...p, [field.key]: e.target.value }))}
               placeholder={field.placeholder}
-              disabled={isBlocked || isLoading}
+              disabled={isLoading}
               className="h-9 text-sm"
             />
             {field.hint && <p className="text-[11px] text-muted-foreground">{field.hint}</p>}
@@ -388,12 +537,11 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
           <Label className="text-xs">{field.label}</Label>
           <div className="relative">
             <Input
-              id={field.key}
               type={field.type === "password" && !showPasswords[field.key] ? "password" : "text"}
               value={form[field.key]}
               onChange={(e) => setForm((p) => ({ ...p, [field.key]: e.target.value }))}
-              placeholder={isBlocked ? "••••••••••••" : field.placeholder}
-              disabled={isBlocked || isLoading}
+              placeholder={isConnected ? "••••••••••••" : field.placeholder}
+              disabled={isConnected || isLoading}
               className={cn("h-9 text-sm", field.type === "password" && "pr-9")}
             />
             {field.type === "password" && (
@@ -418,16 +566,13 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
         </div>
       )}
 
-      {isBlocked ? (
+      {isConnected ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          Connected - disconnect to edit credentials.
+          <CheckCircle2 className="w-3.5 h-3.5" /> Connected- disconnect to update credentials.
         </div>
       ) : (
         <Button
-          type="submit"
-          size="sm"
-          className="w-full h-8 text-xs"
+          type="submit" size="sm" className="w-full h-8 text-xs"
           disabled={isLoading || integration.fields.some((f) => !form[f.key]?.trim())}
         >
           {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
@@ -438,21 +583,115 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
   );
 }
 
-// ── Integration card ───────────────────────────────────────────────────────────
-function IntegrationCard({ integration, record, onSetup, onSync, onDisconnect, isSyncing }) {
-  const status = getStatus(record);
-  const isConnected = status === "connected" || status === "synced";
+// ── Sync job list ──────────────────────────────────────────────────────────────
+function SyncJobList({ type }) {
+  const { data: jobs = [], isLoading } = useQuery({
+    queryKey: ["sync-jobs", type],
+    queryFn: () => appClient.dataIntegrations.syncJobs(type),
+    staleTime: 10_000,
+  });
 
-  const configDetail = isConnected && record?.config
-    ? integration.id === "googleAnalytics"      ? record.config.propertyId
-    : integration.id === "googleSearchConsole"  ? record.config.siteUrl
-    : integration.id === "shopify"              ? `${record.config.storeName}.myshopify.com`
-    : integration.id === "shopifyCustomApp"     ? record.config.storeName
-    : null
-    : null;
+  if (isLoading) return <div className="py-8 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>;
+  if (!jobs.length) return <p className="text-xs text-muted-foreground py-4">No sync jobs yet.</p>;
 
   return (
-    <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all group flex flex-col">
+    <div className="space-y-2">
+      {jobs.map((job) => (
+        <div key={job.id} className="flex items-start gap-2.5 rounded-lg border border-border px-3 py-2.5">
+          <div className="mt-0.5 flex-shrink-0">
+            {(job.status === "queued" || job.status === "running")
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
+              : job.status === "completed"
+              ? <CheckCircle2 className="w-3.5 h-3.5 text-foreground" />
+              : <XCircle className="w-3.5 h-3.5 text-destructive" />
+            }
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <Badge className={cn("text-[10px] h-4 px-1.5", JOB_STATUS_BADGE[job.status] || "bg-secondary")}>
+                {job.status}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                {job.created_date
+                  ? formatDistanceToNow(new Date(job.created_date), { addSuffix: true })
+                  : "-"}
+              </span>
+              {job.records_synced != null && (
+                <span className="text-[11px] text-muted-foreground">{job.records_synced.toLocaleString()} records</span>
+              )}
+            </div>
+            {job.error_message && (
+              <p className="text-[11px] text-destructive mt-0.5 break-words">{job.error_message}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Audit log list ─────────────────────────────────────────────────────────────
+function AuditLogList({ type }) {
+  const { data: events = [], isLoading } = useQuery({
+    queryKey: ["audit-log", type],
+    queryFn: () => appClient.dataIntegrations.auditLog(type),
+    staleTime: 10_000,
+  });
+
+  if (isLoading) return <div className="py-8 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>;
+  if (!events.length) return <p className="text-xs text-muted-foreground py-4">No activity yet.</p>;
+
+  return (
+    <div className="space-y-1.5">
+      {events.map((evt) => {
+        const { Icon, cls } = AUDIT_ICON[evt.action] || { Icon: Activity, cls: "text-muted-foreground" };
+        return (
+          <div key={evt.id} className="flex items-start gap-2.5 py-1.5">
+            <Icon className={cn("w-3.5 h-3.5 mt-0.5 flex-shrink-0", cls)} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-medium capitalize">{evt.action.replace(/_/g, " ")}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {evt.occurred_at
+                    ? formatDistanceToNow(new Date(evt.occurred_at), { addSuffix: true })
+                    : "-"}
+                </span>
+              </div>
+              {evt.detail && <p className="text-[11px] text-muted-foreground mt-0.5 break-words">{evt.detail}</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Integration card ───────────────────────────────────────────────────────────
+function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDisconnect, isRetesting }) {
+  const status = integration.comingSoon ? "disconnected" : getStatus(record);
+  const isConnected = status === "connected" || status === "synced" || status === "syncing";
+
+  // Config detail lines shown below the status badge - array of { label, value }
+  const configLines = isConnected && record?.config
+    ? integration.id === "googleAnalytics"
+      ? [
+          { label: "ID",  value: record.config.propertyId },
+          { label: "URL", value: record.config.propertyName },
+        ]
+      : integration.id === "googleSearchConsole"
+      ? [{ label: "Site", value: record.config.siteUrl }]
+      : integration.id === "shopify"
+      ? [{ label: "Store", value: `${record.config.storeName}.myshopify.com` }]
+      : integration.id === "shopifyCustomApp"
+      ? [{ label: "Store", value: record.config.storeName }]
+      : []
+    : [];
+
+  return (
+    <div className={cn(
+      "bg-background border border-border rounded-xl overflow-hidden transition-all flex flex-col",
+      integration.comingSoon ? "opacity-60 cursor-not-allowed" : "hover:shadow-md hover:border-border/80"
+    )}>
       <div className="p-4 flex flex-col gap-3 flex-1">
         {/* Header */}
         <div className="flex items-start gap-3">
@@ -463,27 +702,46 @@ function IntegrationCard({ integration, record, onSetup, onSync, onDisconnect, i
             <div className="flex items-center gap-2 flex-wrap">
               <p className="font-semibold text-sm leading-snug">{integration.name}</p>
               <span className="text-[10px] text-muted-foreground">{integration.category}</span>
+              {integration.comingSoon && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
+                  Coming Soon
+                </span>
+              )}
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{integration.description}</p>
           </div>
         </div>
 
-        {/* Status + detail */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Badge className={cn("text-[10px] h-4 px-1.5 gap-0.5 flex items-center", STATUS_BADGE[status])}>
-            <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", STATUS_DOT[status])} />
+        {/* Status + config detail */}
+        <div className="flex flex-col gap-1">
+          <Badge className={cn("text-[10px] h-4 px-1.5 gap-0.5 flex items-center self-start", STATUS_BADGE[status])}>
+            {status === "syncing"
+              ? <Loader2 className="w-1.5 h-1.5 animate-spin flex-shrink-0" />
+              : <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", STATUS_DOT[status])} />
+            }
             {STATUS_LABEL[status]}
           </Badge>
-          {configDetail && (
-            <span className="text-[11px] text-muted-foreground font-mono truncate">{configDetail}</span>
-          )}
+          {configLines.map(({ label, value }) => value && (
+            <div key={label} className="flex items-baseline gap-1.5 min-w-0">
+              <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wide flex-shrink-0">{label}</span>
+              <span className="text-[11px] text-muted-foreground font-mono truncate">{value}</span>
+            </div>
+          ))}
         </div>
 
         {/* Dates */}
-        {isConnected && record?.last_connected_date && (
+        {isConnected && (
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-            <span>Connected {format(new Date(record.last_connected_date), "MMM d, yyyy")}</span>
-            {record.last_synced_date && (
+            {record?.last_connected_date && (
+              <span>Connected {format(new Date(record.last_connected_date), "MMM d, yyyy")}</span>
+            )}
+            {record?.last_tested_date && (
+              <span className="flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+                Tested {formatDistanceToNow(new Date(record.last_tested_date), { addSuffix: true })}
+              </span>
+            )}
+            {record?.last_synced_date && (
               <span className="flex items-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
                 Synced {format(new Date(record.last_synced_date), "MMM d, yyyy")}
@@ -492,34 +750,51 @@ function IntegrationCard({ integration, record, onSetup, onSync, onDisconnect, i
           </div>
         )}
 
-        {/* Error */}
-        {status === "error" && record?.connection_error && (
-          <p className="text-[11px] text-muted-foreground truncate">{record.connection_error}</p>
-        )}
       </div>
 
-      {/* Action bar */}
-      <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-1">
-        {!isConnected && status !== "error" && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={onSetup}>
-            <ChevronRight className="w-3 h-3" /> Set Up
-          </Button>
-        )}
-        {status === "error" && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={onSetup}>
-            <AlertCircle className="w-3 h-3" /> Fix Connection
-          </Button>
-        )}
-        {isConnected && integration.syncable && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={onSync} disabled={isSyncing}>
-            {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            {isSyncing ? "Syncing…" : "Sync"}
-          </Button>
-        )}
-        {(isConnected || status === "error") && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground ml-auto" onClick={onDisconnect}>
-            <Unplug className="w-3 h-3" /> Disconnect
-          </Button>
+      {/* Action bar - single row, no wrapping */}
+      <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-0.5 min-w-0">
+        {integration.comingSoon ? (
+          <span className="text-[11px] text-muted-foreground px-1">Available soon</span>
+        ) : (
+          <>
+            {!isConnected && status !== "error" && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSetup}>
+                <ChevronRight className="w-3 h-3" /> Set Up
+              </Button>
+            )}
+            {status === "error" && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSetup}>
+                <AlertCircle className="w-3 h-3" /> Fix
+              </Button>
+            )}
+            {(isConnected || status === "error") && (
+              <Button
+                variant="ghost" size="sm"
+                className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0"
+                onClick={onRetest}
+                disabled={isRetesting || status === "syncing"}
+              >
+                {isRetesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
+                {isRetesting ? "Testing…" : "Re-test"}
+              </Button>
+            )}
+            {isConnected && integration.syncable && status !== "syncing" && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSync}>
+                <RefreshCw className="w-3 h-3" /> Sync Data
+              </Button>
+            )}
+            {isConnected && status === "syncing" && (
+              <span className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 flex-shrink-0">
+                <Loader2 className="w-3 h-3 animate-spin" /> Syncing…
+              </span>
+            )}
+            {(isConnected || status === "error") && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground ml-auto flex-shrink-0" onClick={onDisconnect}>
+                <Unplug className="w-3 h-3" /> Disconnect
+              </Button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -528,25 +803,40 @@ function IntegrationCard({ integration, record, onSetup, onSync, onDisconnect, i
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Integrations() {
-  const [search, setSearch] = useState("");
+  const [search, setSearch]                 = useState("");
   const [activeIntegration, setActiveIntegration] = useState(null);
-  const [sheetTab, setSheetTab] = useState("instructions");
+  const [sheetTab, setSheetTab]             = useState("instructions");
   const [disconnectTarget, setDisconnectTarget] = useState(null);
-  const [syncingTypes, setSyncingTypes] = useState(new Set());
+  const [retestingTypes, setRetestingTypes] = useState(new Set());
   const queryClient = useQueryClient();
 
   const { data: integrationsList = [], isLoading } = useQuery({
     queryKey: ["data-integrations"],
     queryFn: () => appClient.dataIntegrations.list(),
-    refetchInterval: 30_000,
+    // Dynamic polling: every 3 s when any integration is actively syncing,
+    // no polling otherwise. Removes the old always-on 30 s interval.
+    refetchInterval: (query) => {
+      const list = query.state.data || [];
+      const hasSyncing = list.some((r) =>
+        r.latest_job_status === "queued" || r.latest_job_status === "running"
+      );
+      return hasSyncing ? 3_000 : false;
+    },
+    refetchOnWindowFocus: true,
   });
 
-  const recordMap = Object.fromEntries(integrationsList.map((r) => [r.integration_type, r]));
+  const recordMap = useMemo(
+    () => Object.fromEntries(integrationsList.map((r) => [r.integration_type, r])),
+    [integrationsList]
+  );
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["data-integrations"] });
+
+  // ── Connect ──────────────────────────────────────────────────────────────────
   const connectMutation = useMutation({
     mutationFn: ({ type, config }) => appClient.dataIntegrations.connect(type, config),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["data-integrations"] });
+      invalidate();
       if (data?.oauthUrl) { window.location.href = data.oauthUrl; return; }
       if (data?.is_connection_error) {
         toast.error(`Connection failed: ${data.connection_error || "Unknown error"}`);
@@ -558,39 +848,64 @@ export default function Integrations() {
     onError: (e) => toast.error(e.message),
   });
 
+  // ── Re-test ──────────────────────────────────────────────────────────────────
+  const retestMutation = useMutation({
+    mutationFn: (type) => appClient.dataIntegrations.check(type),
+    onMutate: (type) => setRetestingTypes((p) => new Set([...p, type])),
+    onSettled: (_, __, type) => setRetestingTypes((p) => { const n = new Set(p); n.delete(type); return n; }),
+    onSuccess: (data) => {
+      invalidate();
+      if (data?.is_connection_error) {
+        toast.error(`Connection check failed: ${data.connection_error || "Unknown error"}`);
+      } else {
+        toast.success("Connection verified successfully.");
+      }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // ── Sync ─────────────────────────────────────────────────────────────────────
+  const syncMutation = useMutation({
+    mutationFn: (type) => appClient.dataIntegrations.sync(type),
+    onSuccess: (data) => {
+      invalidate();
+      if (data?.alreadyQueued) {
+        toast.info("A sync is already in progress.");
+      } else {
+        toast.success("Sync queued. Data will refresh shortly.");
+      }
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  // ── Disconnect ───────────────────────────────────────────────────────────────
   const disconnectMutation = useMutation({
     mutationFn: (type) => appClient.dataIntegrations.disconnect(type),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["data-integrations"] });
+      invalidate();
       toast.success("Integration disconnected.");
       setDisconnectTarget(null);
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const syncMutation = useMutation({
-    mutationFn: (type) => appClient.dataIntegrations.sync(type),
-    onSuccess: (data, type) => {
-      setSyncingTypes((p) => { const n = new Set(p); n.delete(type); return n; });
-      queryClient.invalidateQueries({ queryKey: ["data-integrations"] });
-      if (data?.is_sync_error) toast.error(`Sync failed: ${data.sync_error || "Unknown error"}`);
-      else toast.success("Data sync triggered.");
-    },
-    onError: (e, type) => {
-      setSyncingTypes((p) => { const n = new Set(p); n.delete(type); return n; });
-      toast.error(e.message);
-    },
-  });
-
-  const handleSync = (type) => {
-    setSyncingTypes((p) => new Set([...p, type]));
-    syncMutation.mutate(type);
-  };
-
   const handleSetup = (integration) => {
     const record = recordMap[integration.id];
-    setSheetTab(record?.is_connection_error ? "connect" : "instructions");
+    const connected = record?.is_connected && !record?.is_connection_error;
+    // Already connected (or errored) → open the connection/manage view, not the
+    // "How to Connect" steps. Only a never-connected integration lands on instructions.
+    setSheetTab(connected || record?.is_connection_error ? "connect" : "instructions");
     setActiveIntegration(integration);
+  };
+
+  const handleDisconnect = (integration) => {
+    const record = recordMap[integration.id];
+    // Skip confirmation when the connection never succeeded - just wipe it immediately
+    if (record?.is_connection_error && !record?.is_connected) {
+      disconnectMutation.mutate(integration.id);
+    } else {
+      setDisconnectTarget(integration.id);
+    }
   };
 
   const filtered = INTEGRATIONS.filter((i) => {
@@ -599,8 +914,25 @@ export default function Integrations() {
     return i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q);
   });
 
-  const activeRecord = activeIntegration ? recordMap[activeIntegration.id] : null;
-  const disconnectIntegration = disconnectTarget ? INTEGRATIONS.find((i) => i.id === disconnectTarget) : null;
+  // "My Connections" - connected or attempted (error counts)
+  const myConnections = filtered.filter((i) => {
+    if (i.comingSoon) return false;
+    const r = recordMap[i.id];
+    return r?.is_connected || r?.is_connection_error;
+  });
+
+  // "Available Connections" - never touched, not coming soon
+  const availableConnections = filtered.filter((i) => {
+    if (i.comingSoon) return false;
+    const r = recordMap[i.id];
+    return !r?.is_connected && !r?.is_connection_error;
+  });
+
+  // "Coming Soon" - flagged integrations
+  const comingSoonConnections = filtered.filter((i) => i.comingSoon);
+
+  const activeRecord         = activeIntegration ? recordMap[activeIntegration.id] : null;
+  const disconnectIntegration = disconnectTarget  ? INTEGRATIONS.find((i) => i.id === disconnectTarget) : null;
 
   return (
     <div className="flex flex-col h-full">
@@ -609,14 +941,15 @@ export default function Integrations() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="font-heading text-3xl font-semibold tracking-tight">Integrations</h1>
-            <p className="text-sm text-muted-foreground mt-1">Connect your data sources to sync customer behaviour, orders, and web analytics.</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Connect your data sources to sync customer behaviour, orders, and web analytics.
+            </p>
           </div>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
-        {/* Search */}
         <div className="mb-6">
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -629,38 +962,93 @@ export default function Integrations() {
           </div>
         </div>
 
-        {/* Loading skeleton */}
         {isLoading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[1, 2, 3, 4].map((n) => (
+            {[1, 2, 3, 4, 5].map((n) => (
               <div key={n} className="h-36 rounded-xl border border-border bg-background animate-pulse" />
             ))}
           </div>
         )}
 
-        {/* Cards */}
         {!isLoading && filtered.length === 0 && (
           <p className="text-sm text-muted-foreground py-8">No integrations match your search.</p>
         )}
 
         {!isLoading && filtered.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((integration) => (
-              <IntegrationCard
-                key={integration.id}
-                integration={integration}
-                record={recordMap[integration.id]}
-                onSetup={() => handleSetup(integration)}
-                onSync={() => handleSync(integration.id)}
-                onDisconnect={() => setDisconnectTarget(integration.id)}
-                isSyncing={syncingTypes.has(integration.id)}
-              />
-            ))}
+          <div className="space-y-8">
+            {/* My Connections */}
+            {myConnections.length > 0 && (
+              <div>
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                  My Connections
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {myConnections.map((integration) => (
+                    <IntegrationCard
+                      key={integration.id}
+                      integration={integration}
+                      record={recordMap[integration.id]}
+                      onSetup={() => handleSetup(integration)}
+                      onSync={() => syncMutation.mutate(integration.id)}
+                      onRetest={() => retestMutation.mutate(integration.id)}
+                      onDisconnect={() => handleDisconnect(integration)}
+                      isRetesting={retestingTypes.has(integration.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Available Connections */}
+            {availableConnections.length > 0 && (
+              <div>
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                  Available Connections
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {availableConnections.map((integration) => (
+                    <IntegrationCard
+                      key={integration.id}
+                      integration={integration}
+                      record={recordMap[integration.id]}
+                      onSetup={() => handleSetup(integration)}
+                      onSync={() => syncMutation.mutate(integration.id)}
+                      onRetest={() => retestMutation.mutate(integration.id)}
+                      onDisconnect={() => handleDisconnect(integration)}
+                      isRetesting={retestingTypes.has(integration.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Coming Soon */}
+            {comingSoonConnections.length > 0 && (
+              <div>
+                <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+                  Coming Soon
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {comingSoonConnections.map((integration) => (
+                    <IntegrationCard
+                      key={integration.id}
+                      integration={integration}
+                      record={recordMap[integration.id]}
+                      onSetup={() => {}}
+                      onSync={() => {}}
+                      onRetest={() => {}}
+                      onDisconnect={() => {}}
+                      isRetesting={false}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Setup Sheet */}
+      {/* Setup / History Sheet */}
       <Sheet open={!!activeIntegration} onOpenChange={(open) => !open && setActiveIntegration(null)}>
         <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0 overflow-y-auto">
           {activeIntegration && (
@@ -683,6 +1071,11 @@ export default function Integrations() {
                   <TabsTrigger value="connect" className="text-xs">
                     {activeIntegration.isPlugin ? "Install" : "Connect"}
                   </TabsTrigger>
+                  {(activeRecord?.is_connected || activeRecord?.is_connection_error) && (
+                    <TabsTrigger value="history" className="text-xs gap-1">
+                      <History className="w-3 h-3" /> History
+                    </TabsTrigger>
+                  )}
                 </TabsList>
 
                 <TabsContent value="instructions" className="flex-1 overflow-y-auto px-6 pb-6 mt-4">
@@ -690,9 +1083,7 @@ export default function Integrations() {
                     <InstructionStep key={i} step={step} index={i} />
                   ))}
                   <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full h-8 text-xs gap-1.5 mt-2"
+                    variant="outline" size="sm" className="w-full h-8 text-xs gap-1.5 mt-2"
                     onClick={() => setSheetTab("connect")}
                   >
                     Continue to {activeIntegration.isPlugin ? "Install" : "Connect"}
@@ -708,6 +1099,39 @@ export default function Integrations() {
                     isLoading={connectMutation.isPending}
                   />
                 </TabsContent>
+
+                {(activeRecord?.is_connected || activeRecord?.is_connection_error) && (
+                  <TabsContent value="history" className="flex-1 overflow-y-auto px-6 pb-6 mt-4">
+                    {activeIntegration.syncable && (
+                      <>
+                        <div className="flex items-center justify-between mb-3">
+                          <p className="text-xs font-medium">Sync Jobs</p>
+                          <Button
+                            variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                            onClick={() => syncMutation.mutate(activeIntegration.id)}
+                            disabled={syncMutation.isPending || getStatus(activeRecord) === "syncing"}
+                          >
+                            {syncMutation.isPending
+                              ? <Loader2 className="w-3 h-3 animate-spin" />
+                              : <RefreshCw className="w-3 h-3" />
+                            }
+                            Sync Data
+                          </Button>
+                        </div>
+                        <SyncJobList type={activeIntegration.id} />
+                        <div className="mt-6 mb-3">
+                          <p className="text-xs font-medium">Activity Log</p>
+                        </div>
+                      </>
+                    )}
+                    {!activeIntegration.syncable && (
+                      <div className="mb-3">
+                        <p className="text-xs font-medium">Activity Log</p>
+                      </div>
+                    )}
+                    <AuditLogList type={activeIntegration.id} />
+                  </TabsContent>
+                )}
               </Tabs>
             </>
           )}

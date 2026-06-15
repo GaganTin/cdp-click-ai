@@ -24,8 +24,8 @@ export const segmentTools = [
     description:
       "Estimate how many people match a segment's criteria without saving anything. " +
       "Always call this before suggesting a segment so you can report a real estimated_size. " +
-      "For 'customer' segments: queries public.membership. " +
-      "For 'anonymous_profile' segments: queries ga_landing.path_exploration grouped by capsuite_apid.",
+      "For 'customer' segments: queries app.customer_profiles. " +
+      "For 'anonymous_profile' segments: queries app.anonymous_profiles (unresolved web visitors).",
     inputSchema: {
       type: "object",
       properties: {
@@ -38,8 +38,8 @@ export const segmentTools = [
           type: "string",
           description:
             "A SQL WHERE clause fragment (no WHERE keyword) to filter the base table. " +
-            "For customer: filters on public.membership columns (member_reg_channel, age_group, education_level, etc.). " +
-            "For anonymous_profile: filters on ga_landing.path_exploration columns (session_source_medium, event_name, etc.).",
+            "For customer: filters on app.customer_profiles columns (member_reg_channel, age_group, education_level, ga_sessions, order_count, etc.). " +
+            "For anonymous_profile: filters on app.anonymous_profiles columns (top_source_medium, form_completes, etc.).",
         },
       },
       required: ["segment_type", "sql_where"],
@@ -70,16 +70,12 @@ export async function handleSegmentTool(name, args, pool) {
     const { segment_type, sql_where } = args;
     let sql;
     if (segment_type === "customer") {
-      sql = `SELECT COUNT(DISTINCT member_id) AS count FROM public.membership WHERE ${sql_where}`;
+      sql = `SELECT COUNT(DISTINCT member_id) AS count FROM app.customer_profiles WHERE ${sql_where}`;
     } else {
-      // anonymous_profile: count distinct visitors not in the member mapping
-      sql = `SELECT COUNT(DISTINCT pe.capsuite_apid) AS count
-             FROM ga_landing.path_exploration pe
-             WHERE NOT EXISTS (
-               SELECT 1 FROM public.membership_ap_mapping apm
-               WHERE apm.capsuite_apid = pe.capsuite_apid
-             )
-             AND ${sql_where}`;
+      // anonymous_profile: unresolved web visitors live in app.anonymous_profiles
+      sql = `SELECT COUNT(DISTINCT visitor_id) AS count
+             FROM app.anonymous_profiles
+             WHERE ${sql_where}`;
     }
     try {
       const result = await pool.query(sql);

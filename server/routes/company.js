@@ -1,21 +1,18 @@
 import { Router } from "express";
 import crypto from "crypto";
 import { authenticate } from "../middleware/auth.js";
+import { registerCompanyWithInteractionService } from "../lib/interactionService.js";
+import { slugify, uniqueSlug } from "../lib/slug.js";
 
-function slugify(str) {
-  return str
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-async function uniqueSlug(pool, base, excludeId = null) {
-  const slug = slugify(base) || "company";
-  for (let i = 0; ; i++) {
-    const candidate = i === 0 ? slug : `${slug}-${i}`;
+// capsuite_ref is globally unique (external ETL maps it → company_id). Readable
+// underscore-cased root from the name + a short random suffix, retry on collision.
+async function uniqueCapsuiteRef(pool, base) {
+  const root = (slugify(base) || "workspace").replace(/-/g, "_").slice(0, 40);
+  for (;;) {
+    const candidate = `${root}_${crypto.randomBytes(3).toString("hex")}`;
     const { rows } = await pool.query(
-      "SELECT id FROM app.companies WHERE LOWER(slug) = LOWER($1) AND ($2::uuid IS NULL OR id != $2::uuid)",
-      [candidate, excludeId]
+      "SELECT 1 FROM app.companies WHERE capsuite_ref = $1",
+      [candidate]
     );
     if (!rows.length) return candidate;
   }
@@ -30,7 +27,7 @@ async function getMembership(pool, companyId, userId) {
 }
 
 function isAdmin(member) {
-  return member && ["owner", "admin"].includes(member.role) && member.status === "active";
+  return member && member.role === "admin" && member.status === "active";
 }
 
 function isActive(member) {
@@ -40,39 +37,124 @@ function isActive(member) {
 export function createCompanyRouter(pool) {
   const router = Router();
 
-  // POST /api/companies - create a new company
+  // Active-member count vs the account plan's team_members limit (null = unlimited).
+  async function memberLimit(companyId) {
+    const { rows } = await pool.query(
+      `SELECT p.limits->>'team_members' AS lim,
+              (SELECT COUNT(*)::int FROM app.company_members
+                WHERE company_id = c.id AND status = 'active') AS active
+         FROM app.companies c
+         JOIN app.accounts a ON a.id = c.account_id
+         JOIN app.plans p    ON p.id = a.plan
+        WHERE c.id = $1`,
+      [companyId]
+    );
+    const r = rows[0] || {};
+    const limit = r.lim == null || r.lim === "" ? null : parseInt(r.lim, 10);
+    return { limit, active: r.active || 0 };
+  }
+
+  // Count of active admins in a workspace (used to prevent removing the last one).
+  async function activeAdminCount(companyId) {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM app.company_members
+        WHERE company_id = $1 AND role = 'admin' AND status = 'active'`,
+      [companyId]
+    );
+    return rows[0].n;
+  }
+
+  // POST /api/companies - create a new workspace under the caller's account
   router.post("/", authenticate, async (req, res) => {
     const { name, website, industry, company_size } = req.body;
     if (!name) return res.status(400).json({ error: "name is required" });
 
+    const client = await pool.connect();
     try {
-      const slug = await uniqueSlug(pool, name);
-      const { rows: [company] } = await pool.query(
-        `INSERT INTO app.companies (name, slug, website, industry, company_size)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [name, slug, website || null, industry || null, company_size || null]
+      await client.query("BEGIN");
+
+      // The new workspace belongs to the caller's account.
+      const { rows: [u] } = await client.query(
+        "SELECT account_id FROM app.users WHERE id = $1",
+        [req.user.id]
+      );
+      if (!u) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "User not found" });
+      }
+      const accountId = u.account_id;
+
+      // Enforce the plan's workspace limit (null = unlimited).
+      const { rows: [acct] } = await client.query(
+        `SELECT a.plan, p.limits FROM app.accounts a JOIN app.plans p ON p.id = a.plan WHERE a.id = $1`,
+        [accountId]
+      );
+      const wsLimit = acct?.limits?.workspaces ?? null;
+      if (wsLimit != null) {
+        const { rows: [{ n }] } = await client.query(
+          "SELECT COUNT(*)::int AS n FROM app.companies WHERE account_id = $1 AND is_active = true",
+          [accountId]
+        );
+        if (n >= wsLimit) {
+          await client.query("ROLLBACK");
+          return res.status(403).json({
+            error: `Your ${acct.plan} plan allows up to ${wsLimit} workspace(s). Upgrade to add more.`,
+          });
+        }
+      }
+
+      const slug = await uniqueSlug(client, name);
+      const capsuite_ref = await uniqueCapsuiteRef(client, name);
+      const { rows: [company] } = await client.query(
+        `INSERT INTO app.companies (account_id, name, slug, capsuite_ref, website, industry, company_size, plan)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT plan FROM app.accounts WHERE id = $1))
+         RETURNING *`,
+        [accountId, name, slug, capsuite_ref, website || null, industry || null, company_size || null]
       );
 
-      await pool.query(
-        `INSERT INTO app.company_members (company_id, user_id, role, status)
-         VALUES ($1, $2, 'owner', 'active')`,
-        [company.id, req.user.id]
+      await client.query(
+        `INSERT INTO app.company_members (account_id, company_id, user_id, role, status)
+         VALUES ($1, $2, $3, 'admin', 'active')`,
+        [accountId, company.id, req.user.id]
       );
 
-      await pool.query(
+      await client.query(
         `INSERT INTO app.user_preferences (user_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
         [req.user.id, company.id]
       );
 
-      await pool.query(
-        `INSERT INTO app.audit_log (company_id, user_id, action, resource_type, resource_id)
-         VALUES ($1, $2, 'create', 'company', $1)`,
-        [company.id, req.user.id]
+      // Seed the per-workspace pipeline config rows (ga_reports/gsc_reports etc.
+      // come from column defaults). Without these the GA/GSC DAGs LEFT JOIN to a
+      // NULL config and silently skip the workspace.
+      await client.query(
+        `INSERT INTO app.company_report_config (company_id, created_by, capsuite_ref, is_trial)
+         VALUES ($1, $2, $3, (SELECT plan = 'free' FROM app.accounts WHERE id = $4))
+         ON CONFLICT (company_id) DO NOTHING`,
+        [company.id, req.user.id, capsuite_ref, accountId]
       );
+      await client.query(
+        `INSERT INTO app.web_content_html_elements (company_id, created_by, capsuite_ref)
+         VALUES ($1, $2, $3) ON CONFLICT (company_id) DO NOTHING`,
+        [company.id, req.user.id, capsuite_ref]
+      );
+
+      await client.query(
+        `INSERT INTO app.audit_log (account_id, company_id, user_id, action, resource_type, resource_id)
+         VALUES ($1, $2, $3, 'create', 'workspace', $4)`,
+        [accountId, company.id, req.user.id, company.id]
+      );
+
+      await client.query("COMMIT");
+
+      // Register with interaction service - non-fatal if service is down
+      registerCompanyWithInteractionService(pool, company.id, company.name).catch(() => {});
 
       res.status(201).json(company);
     } catch (err) {
+      await client.query("ROLLBACK");
       res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
     }
   });
 
@@ -119,7 +201,7 @@ export function createCompanyRouter(pool) {
     if (!sets.length) return res.status(400).json({ error: "No fields to update" });
 
     if (name) {
-      const slug = await uniqueSlug(pool, name, id);
+      const slug = await uniqueSlug(pool, name, { excludeId: id });
       sets.push(`slug = $${sets.length + 1}`);
       vals.push(slug);
     }
@@ -144,13 +226,17 @@ export function createCompanyRouter(pool) {
 
     try {
       const { rows } = await pool.query(
-        `SELECT cm.id, cm.role, cm.status, cm.joined_at,
-                u.id AS user_id, u.email, u.full_name, u.avatar_url, u.last_login_at
+        `SELECT cm.id, cm.role, cm.status, cm.joined_at, cm.permissions,
+                u.id AS user_id, u.email, u.full_name, u.avatar_url, u.last_login_at,
+                (a.owner_user_id = cm.user_id) AS is_account_owner
          FROM app.company_members cm
          JOIN app.users u ON u.id = cm.user_id
+         JOIN app.companies c ON c.id = cm.company_id
+         JOIN app.accounts a ON a.id = c.account_id
          WHERE cm.company_id = $1
          ORDER BY
-           CASE cm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 WHEN 'editor' THEN 2 ELSE 3 END,
+           (a.owner_user_id = cm.user_id) DESC,
+           CASE cm.role WHEN 'admin' THEN 0 WHEN 'contributor' THEN 1 ELSE 2 END,
            cm.joined_at`,
         [id]
       );
@@ -171,8 +257,8 @@ export function createCompanyRouter(pool) {
     const vals = [];
 
     if (role !== undefined) {
-      if (!["admin", "editor", "viewer"].includes(role)) {
-        return res.status(400).json({ error: "role must be admin, editor, or viewer" });
+      if (!["admin", "contributor", "viewer"].includes(role)) {
+        return res.status(400).json({ error: "role must be admin, contributor, or viewer" });
       }
       sets.push(`role = $${sets.length + 1}`);
       vals.push(role);
@@ -188,11 +274,23 @@ export function createCompanyRouter(pool) {
 
     try {
       const { rows: [target] } = await pool.query(
-        "SELECT role FROM app.company_members WHERE id = $1 AND company_id = $2",
+        `SELECT cm.role, cm.status AS target_status, (a.owner_user_id = cm.user_id) AS is_account_owner
+         FROM app.company_members cm
+         JOIN app.companies c ON c.id = cm.company_id
+         JOIN app.accounts a ON a.id = c.account_id
+         WHERE cm.id = $1 AND cm.company_id = $2`,
         [memberId, id]
       );
       if (!target) return res.status(404).json({ error: "Member not found" });
-      if (target.role === "owner") return res.status(400).json({ error: "Cannot change owner role" });
+      if (target.is_account_owner) return res.status(400).json({ error: "Cannot change the account owner's role" });
+
+      // Don't let the workspace lose its last active admin.
+      const removingAdmin =
+        (role !== undefined && role !== "admin") || (status !== undefined && status !== "active");
+      if (target.role === "admin" && target.target_status === "active" && removingAdmin
+          && (await activeAdminCount(id)) <= 1) {
+        return res.status(400).json({ error: "A workspace must keep at least one active admin." });
+      }
 
       vals.push(memberId, id);
       const { rows: [updated] } = await pool.query(
@@ -214,13 +312,22 @@ export function createCompanyRouter(pool) {
 
     try {
       const { rows: [target] } = await pool.query(
-        "SELECT role, user_id FROM app.company_members WHERE id = $1 AND company_id = $2",
+        `SELECT cm.role, cm.status AS target_status, cm.user_id, (a.owner_user_id = cm.user_id) AS is_account_owner
+         FROM app.company_members cm
+         JOIN app.companies c ON c.id = cm.company_id
+         JOIN app.accounts a ON a.id = c.account_id
+         WHERE cm.id = $1 AND cm.company_id = $2`,
         [memberId, id]
       );
       if (!target) return res.status(404).json({ error: "Member not found" });
-      if (target.role === "owner") return res.status(400).json({ error: "Cannot remove the company owner" });
+      if (target.is_account_owner) return res.status(400).json({ error: "Cannot remove the account owner" });
 
-      await pool.query("DELETE FROM app.company_members WHERE id = $1", [memberId]);
+      // Don't let the workspace lose its last active admin.
+      if (target.role === "admin" && target.target_status === "active" && (await activeAdminCount(id)) <= 1) {
+        return res.status(400).json({ error: "A workspace must keep at least one active admin." });
+      }
+
+      await pool.query("DELETE FROM app.company_members WHERE id = $1 AND company_id = $2", [memberId, id]);
 
       await pool.query(
         `INSERT INTO app.audit_log (company_id, user_id, action, resource_type, resource_id, changes)
@@ -264,20 +371,32 @@ export function createCompanyRouter(pool) {
 
     const { email, role = "viewer" } = req.body;
     if (!email) return res.status(400).json({ error: "email is required" });
-    if (!["admin", "editor", "viewer"].includes(role)) {
-      return res.status(400).json({ error: "role must be admin, editor, or viewer" });
+    if (!["admin", "contributor", "viewer"].includes(role)) {
+      return res.status(400).json({ error: "role must be admin, contributor, or viewer" });
     }
 
     try {
-      // Already a member?
+      // Already a member (active OR suspended)? Re-inviting a suspended member
+      // must NOT silently reactivate them - admins un-suspend explicitly.
       const { rows: existingMember } = await pool.query(
-        `SELECT cm.id FROM app.company_members cm
+        `SELECT cm.status FROM app.company_members cm
          JOIN app.users u ON u.id = cm.user_id
-         WHERE cm.company_id = $1 AND LOWER(u.email) = LOWER($2) AND cm.status = 'active'`,
+         WHERE cm.company_id = $1 AND LOWER(u.email) = LOWER($2)`,
         [id, email]
       );
       if (existingMember.length) {
+        if (existingMember[0].status === "suspended") {
+          return res.status(409).json({ error: "This user is suspended in this workspace. Un-suspend them instead of re-inviting." });
+        }
         return res.status(409).json({ error: "This user is already a member" });
+      }
+
+      // Enforce the account plan's team-member limit (null = unlimited).
+      const { limit, active } = await memberLimit(id);
+      if (limit != null && active >= limit) {
+        return res.status(403).json({
+          error: `Your plan allows up to ${limit} team member${limit === 1 ? "" : "s"} per workspace. Upgrade to add more.`,
+        });
       }
 
       // Cancel any existing pending invite
@@ -351,12 +470,30 @@ export function createCompanyRouter(pool) {
         });
       }
 
+      // A stale invite must not reactivate a suspended membership.
+      const { rows: [existing] } = await pool.query(
+        `SELECT status FROM app.company_members WHERE company_id = $1 AND user_id = $2`,
+        [inv.company_id, req.user.id]
+      );
+      if (existing?.status === "suspended") {
+        return res.status(403).json({ error: "Your access to this workspace is suspended. Contact an admin." });
+      }
+
+      // Re-check the plan team-member limit at accept time (unless already a member).
+      if (!existing) {
+        const { limit, active } = await memberLimit(inv.company_id);
+        if (limit != null && active >= limit) {
+          return res.status(403).json({ error: "This workspace has reached its team-member limit." });
+        }
+      }
+
       await pool.query(
-        `INSERT INTO app.company_members (company_id, user_id, role, invited_by, status)
-         VALUES ($1, $2, $3, $4, 'active')
+        `INSERT INTO app.company_members (account_id, company_id, user_id, role, permissions, invited_by, status)
+         SELECT c.account_id, $1, $2, $3, $4::jsonb, $5, 'active'
+         FROM app.companies c WHERE c.id = $1
          ON CONFLICT (company_id, user_id)
-         DO UPDATE SET role = EXCLUDED.role, status = 'active'`,
-        [inv.company_id, req.user.id, inv.role, inv.invited_by]
+         DO UPDATE SET role = EXCLUDED.role, permissions = EXCLUDED.permissions, status = 'active'`,
+        [inv.company_id, req.user.id, inv.role, JSON.stringify(inv.permissions || {}), inv.invited_by]
       );
 
       await pool.query(
@@ -405,7 +542,7 @@ export function createCompanyRouter(pool) {
          VALUES ($1, $2,
            COALESCE($3, 'system'), COALESCE($4, 'en'), COALESCE($5, 'UTC'),
            COALESCE($6, 'MMM d, yyyy'),
-           COALESCE($7::jsonb, '{"email_digest":true,"member_joined":true,"report_ready":true}'),
+           COALESCE($7::jsonb, '{"campaign_completed":true,"sync_status":true,"new_leads":true}'),
            COALESCE($8, false),
            COALESCE($9::jsonb, '{}'))
          ON CONFLICT (user_id, company_id) DO UPDATE SET
