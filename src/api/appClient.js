@@ -184,6 +184,8 @@ export const appClient = {
     },
     markRead:    (id) => request(`/notifications/${id}/read`, { method: "POST" }),
     markAllRead: () => request("/notifications/read-all", { method: "POST" }),
+    remove:      (id) => request(`/notifications/${id}`, { method: "DELETE" }),
+    clearAll:    () => request("/notifications", { method: "DELETE" }),
   },
   segments: {
     // Live member count for a segment (matches its filter criteria).

@@ -276,7 +276,7 @@ const STATUS_BADGE = {
   connected:    "bg-secondary text-secondary-foreground",
   synced:       "bg-secondary text-secondary-foreground",
   syncing:      "bg-secondary text-secondary-foreground",
-  sync_failed:  "bg-destructive/10 text-destructive",
+  sync_failed:  "bg-secondary text-secondary-foreground",
   error:        "bg-destructive/10 text-destructive",
 };
 
@@ -285,7 +285,7 @@ const STATUS_DOT = {
   connected:    "bg-foreground",
   synced:       "bg-foreground",
   syncing:      "bg-foreground animate-pulse",
-  sync_failed:  "bg-destructive",
+  sync_failed:  "bg-foreground",
   error:        "bg-destructive",
 };
 
@@ -752,16 +752,6 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
                 Synced {format(new Date(record.last_synced_date), "MMM d, yyyy")}
               </span>
             )}
-          </div>
-        )}
-
-        {/* Sync failure reason (from the DAG, via the dag-complete webhook) */}
-        {status === "sync_failed" && (record?.sync_error || record?.latest_job_error) && (
-          <div className="flex items-start gap-1.5 text-[11px] text-destructive bg-destructive/5 rounded-md px-2 py-1.5">
-            <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-            <span className="leading-snug break-words">
-              <span className="font-medium">Sync failed:</span> {record.sync_error || record.latest_job_error}
-            </span>
           </div>
         )}
 

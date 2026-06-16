@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Bell, Mail, RefreshCw, UserPlus, Check, CheckCheck,
+  Bell, Mail, RefreshCw, UserPlus, Check, CheckCheck, X, Trash2,
 } from "lucide-react";
 import { appClient } from "@/api/appClient";
 import { useAuth } from "@/lib/AuthContext";
@@ -53,6 +53,8 @@ export default function NotificationBell({ collapsed = false }) {
 
   const markRead = useMutation({ mutationFn: (id) => appClient.notifications.markRead(id), onSuccess: invalidate });
   const markAll  = useMutation({ mutationFn: () => appClient.notifications.markAllRead(), onSuccess: invalidate });
+  const removeOne = useMutation({ mutationFn: (id) => appClient.notifications.remove(id), onSuccess: invalidate });
+  const clearAll  = useMutation({ mutationFn: () => appClient.notifications.clearAll(), onSuccess: invalidate });
 
   useEffect(() => {
     const handler = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
@@ -101,16 +103,28 @@ export default function NotificationBell({ collapsed = false }) {
         )}>
           <div className="flex items-center justify-between px-3 py-2 border-b border-border">
             <p className="text-sm font-semibold">{t("Notifications")}</p>
-            {unread > 0 && (
-              <button
-                onClick={() => markAll.mutate()}
-                disabled={markAll.isPending}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <CheckCheck className="w-3.5 h-3.5" />
-                {t("Mark all read")}
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {unread > 0 && (
+                <button
+                  onClick={() => markAll.mutate()}
+                  disabled={markAll.isPending}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  {t("Mark all read")}
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  onClick={() => clearAll.mutate()}
+                  disabled={clearAll.isPending}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  {t("Clear all")}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="max-h-96 overflow-y-auto">
@@ -145,17 +159,28 @@ export default function NotificationBell({ collapsed = false }) {
                       {n.body && <span className="block text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</span>}
                       <span className="block text-[11px] text-muted-foreground/70 mt-1">{relativeTime(n.created_date)}</span>
                     </span>
-                    {!n.is_read && (
+                    <span className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
+                      {!n.is_read && (
+                        <span
+                          role="button"
+                          tabIndex={-1}
+                          onClick={(e) => { e.stopPropagation(); markRead.mutate(n.id); }}
+                          title={t("Mark read")}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      )}
                       <span
                         role="button"
                         tabIndex={-1}
-                        onClick={(e) => { e.stopPropagation(); markRead.mutate(n.id); }}
-                        title={t("Mark read")}
-                        className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 mt-0.5"
+                        onClick={(e) => { e.stopPropagation(); removeOne.mutate(n.id); }}
+                        title={t("Clear")}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
                       >
-                        <Check className="w-3.5 h-3.5" />
+                        <X className="w-3.5 h-3.5" />
                       </span>
-                    )}
+                    </span>
                   </button>
                 );
               })

@@ -67,5 +67,32 @@ export function createNotificationsRouter(pool) {
     }
   });
 
+  // DELETE /api/notifications - clear ALL notifications for this user+workspace.
+  router.delete("/", authenticate, withCompany(pool), async (req, res) => {
+    try {
+      const { rowCount } = await pool.query(
+        `DELETE FROM app.notifications WHERE user_id = $1 AND company_id = $2`,
+        [req.user.id, req.companyId]
+      );
+      res.json({ deleted: rowCount });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/notifications/:id - clear a single notification.
+  router.delete("/:id", authenticate, withCompany(pool), async (req, res) => {
+    try {
+      const { rowCount } = await pool.query(
+        `DELETE FROM app.notifications
+          WHERE id = $1 AND user_id = $2 AND company_id = $3`,
+        [req.params.id, req.user.id, req.companyId]
+      );
+      res.json({ deleted: rowCount });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
