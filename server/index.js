@@ -2934,15 +2934,6 @@ app.post("/api/integrations/upload", upload.single("file"), (req, res) => {
   res.json({ file_url: `${origin}/uploads/${safeName}`, relative_url: `/uploads/${safeName}` });
 });
 
-// ── Production static serving ─────────────────────────────────────────────────
-if (process.env.NODE_ENV === "production") {
-  const distDir = path.join(rootDir, "dist");
-  if (fs.existsSync(distDir)) {
-    app.use(express.static(distDir));
-    app.get("*", (_req, res) => res.sendFile(path.join(distDir, "index.html")));
-  }
-}
-
 // ── Route registration (module-level - happens at process start, not after DB init) ───
 // Registering here means routes are always available regardless of initDb() timing or failures.
 if (pool) {
@@ -2962,6 +2953,22 @@ if (pool) {
   );
   app.post("/api/auth/logout", (_req, res) => res.json({ ok: true }));
   app.post("/api/companies", (_req, res) => res.status(503).json({ error: "Database not configured - cannot create company without a DB connection." }));
+}
+
+// ── Production static serving ─────────────────────────────────────────────────
+// MUST be registered AFTER every /api route. The SPA catch-all matches every GET,
+// so registering it earlier shadows API GET endpoints (e.g. /api/auth/me) and
+// returns index.html instead of JSON. The /api guard lets unmatched API GETs fall
+// through to a real 404 instead of the SPA. Only active when a built dist/ exists.
+if (process.env.NODE_ENV === "production") {
+  const distDir = path.join(rootDir, "dist");
+  if (fs.existsSync(distDir)) {
+    app.use(express.static(distDir));
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api/")) return next();
+      res.sendFile(path.join(distDir, "index.html"));
+    });
+  }
 }
 
 // ── Start ─────────────────────────────────────────────────────────────────────
