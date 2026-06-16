@@ -265,6 +265,8 @@ function getStatus(record) {
   if (record.is_connection_error) return "error";
   const active = record.latest_job_status;
   if (active === "queued" || active === "running") return "syncing";
+  // Connected, but the most recent sync failed - surface it (with the reason).
+  if (record.is_sync_error || active === "failed") return "sync_failed";
   if (record.is_synced) return "synced";
   return "connected";
 }
@@ -274,6 +276,7 @@ const STATUS_BADGE = {
   connected:    "bg-secondary text-secondary-foreground",
   synced:       "bg-secondary text-secondary-foreground",
   syncing:      "bg-secondary text-secondary-foreground",
+  sync_failed:  "bg-destructive/10 text-destructive",
   error:        "bg-destructive/10 text-destructive",
 };
 
@@ -282,6 +285,7 @@ const STATUS_DOT = {
   connected:    "bg-foreground",
   synced:       "bg-foreground",
   syncing:      "bg-foreground animate-pulse",
+  sync_failed:  "bg-destructive",
   error:        "bg-destructive",
 };
 
@@ -290,6 +294,7 @@ const STATUS_LABEL = {
   connected:    "Connected",
   synced:       "Connected",
   syncing:      "Syncing…",
+  sync_failed:  "Sync failed",
   error:        "Error",
 };
 
@@ -669,7 +674,7 @@ function AuditLogList({ type }) {
 // ── Integration card ───────────────────────────────────────────────────────────
 function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDisconnect, isRetesting }) {
   const status = integration.comingSoon ? "disconnected" : getStatus(record);
-  const isConnected = status === "connected" || status === "synced" || status === "syncing";
+  const isConnected = ["connected", "synced", "syncing", "sync_failed"].includes(status);
 
   // Config detail lines shown below the status badge - array of { label, value }
   const configLines = isConnected && record?.config
@@ -747,6 +752,16 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
                 Synced {format(new Date(record.last_synced_date), "MMM d, yyyy")}
               </span>
             )}
+          </div>
+        )}
+
+        {/* Sync failure reason (from the DAG, via the dag-complete webhook) */}
+        {status === "sync_failed" && (record?.sync_error || record?.latest_job_error) && (
+          <div className="flex items-start gap-1.5 text-[11px] text-destructive bg-destructive/5 rounded-md px-2 py-1.5">
+            <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+            <span className="leading-snug break-words">
+              <span className="font-medium">Sync failed:</span> {record.sync_error || record.latest_job_error}
+            </span>
           </div>
         )}
 
