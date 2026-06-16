@@ -486,7 +486,7 @@ def cdp_click_ai_attributes_content_scrape():
     @task(trigger_rule="all_done")
     def notify(result, **context):
         """Tell the Node app the scrape is done so it can run the tag phase."""
-        endpoint = Variable.get("cdp_endpoint", default_var=os.environ.get("CDP_ENDPOINT", ""))
+        endpoint = Variable.get("cdp_ai_endpoint", default_var=os.environ.get("CDP_ENDPOINT", ""))
         if not endpoint or not result:
             _log.warning("No cdp_endpoint or result; skipping webhook.")
             return True

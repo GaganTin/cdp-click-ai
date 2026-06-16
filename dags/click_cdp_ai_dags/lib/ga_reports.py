@@ -35,7 +35,7 @@ _log = get_logger("ga")
 def _cdp_endpoint():
     try:
         from airflow.models import Variable
-        return Variable.get("cdp_endpoint", default_var=os.environ.get("CDP_ENDPOINT", ""))
+        return Variable.get("cdp_ai_endpoint", default_var=os.environ.get("CDP_ENDPOINT", ""))
     except Exception:
         return os.environ.get("CDP_ENDPOINT", "")
 
@@ -98,6 +98,14 @@ def on_dag_failure_callback(context):
     params = _params(context)
     exception = context.get("exception", "Unknown error, try again.")
     return notify_dag_complete(params, is_synced=False, error=exception)
+
+
+def report_success(results=None, **context):
+    """Shared "Report" step for every integration DAG: tell the Node app the sync
+    completed (dag-complete webhook, ``is_synced=True``). ``results`` is the
+    (ignored) upstream task output so this can sit downstream of an expanded task.
+    No-op for scheduled all-workspace runs (no job_id/company_id in conf)."""
+    return notify_dag_complete(_params(context), is_synced=True)
 
 
 # --------------------------------------------------------------------------- #

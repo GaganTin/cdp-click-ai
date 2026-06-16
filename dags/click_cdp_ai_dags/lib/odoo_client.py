@@ -25,8 +25,8 @@ _METHOD = {
 def _ssh_creds(client):
     try:
         from airflow.models import Variable
-        user = Variable.get(f"pg_ssh_username_{client}", default_var=None)
-        pkey = Variable.get(f"pg_ssh_pkey_{client}", default_var=None)
+        user = Variable.get(f"cdp_ai_pg_ssh_username_{client}", default_var=None)
+        pkey = Variable.get(f"cdp_ai_pg_ssh_pkey_{client}", default_var=None)
     except Exception:
         user = pkey = None
     return (user, pkey) if (user and pkey) else (None, None)

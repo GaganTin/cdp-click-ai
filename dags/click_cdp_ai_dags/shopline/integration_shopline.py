@@ -20,6 +20,7 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 
 from dags.click_cdp_ai_dags.lib import app_state
+from dags.click_cdp_ai_dags.lib import config as ga_config
 from dags.click_cdp_ai_dags.lib import trial_flow as tf
 from dags.click_cdp_ai_dags.lib import shopline_landing
 from dags.click_cdp_ai_dags.lib import commerce_integration
@@ -29,8 +30,7 @@ os.environ["no_proxy"] = "*"
 
 _log = get_logger("shopline")
 
-SHOPLINE_API_POOL = os.environ.get("SHOPLINE_API_POOL")
-_DEFAULT_ARGS = {"pool": SHOPLINE_API_POOL} if SHOPLINE_API_POOL else {}
+_DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_shopline_api_pool", "SHOPLINE_API_POOL")
 
 _DATASETS = ("order", "order_line", "product", "customer", "inventory_level")
 
@@ -88,8 +88,7 @@ def click_cdp_ai_integration_shopline():
 
     @task(trigger_rule="all_success")
     def report_success(results, **context):
-        params = (context["dag_run"].conf or {})
-        return tf.notify_dag_complete(params, is_synced=True)
+        return tf.report_success(results, **context)
 
     results = sync_client.expand(dict_config=get_config())
     report_success(results)

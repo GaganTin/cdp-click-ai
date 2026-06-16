@@ -25,6 +25,7 @@ from psycopg2.extras import RealDictCursor
 
 from dags.click_cdp_ai_dags.lib import config as ga_config
 from dags.click_cdp_ai_dags.lib import db
+from dags.click_cdp_ai_dags.lib import crypto
 from dags.click_cdp_ai_dags.lib.log import get_logger, ctx
 
 _log = get_logger("app_state")
@@ -229,7 +230,9 @@ def get_shopify_access_token(company_id, conn_kwargs=None):
                 (company_id,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            # Token is AES-256-GCM encrypted at rest by the Node app; decrypt is a
+            # no-op on any plaintext (legacy) value.
+            return crypto.decrypt(row[0]) if row else None
 
     return db.run_tx(ck, _do)
 
@@ -308,7 +311,9 @@ def get_shopline_access_token(company_id, conn_kwargs=None):
                 (company_id,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            # Token is AES-256-GCM encrypted at rest by the Node app; decrypt is a
+            # no-op on any plaintext (legacy) value.
+            return crypto.decrypt(row[0]) if row else None
 
     return db.run_tx(ck, _do)
 
@@ -341,7 +346,7 @@ def get_odoo_conn_kwargs(company_id, conn_kwargs=None):
         "port": cfg.get("pgDbPort"),
         "dbname": cfg.get("pgDbName"),
         "user": cfg.get("pgDbUser"),
-        "password": cfg.get("pgDbPassword"),
+        "password": crypto.decrypt(cfg.get("pgDbPassword")),
         "connect_timeout": 15,
     }
 

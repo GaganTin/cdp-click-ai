@@ -40,10 +40,9 @@ os.environ["no_proxy"] = "*"
 
 _log = get_logger("ga.path_funnel")
 
-# Set GA_API_POOL to an Airflow pool name (e.g. "ga_api") to cap GA API concurrency
-# across ALL runs (manual + daily); unset = no pool. Create the pool first.
-GA_API_POOL = os.environ.get("GA_API_POOL")
-_DEFAULT_ARGS = {"pool": GA_API_POOL} if GA_API_POOL else {}
+# Cap GA API concurrency via an Airflow pool: set the ga_api_pool Airflow
+# Variable (UI), or the GA_API_POOL env var; unset = no pool (create pool first).
+_DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_ga_api_pool", "GA_API_POOL")
 
 
 def _add_capsuite_param_dims(dict_config, gaConnector, list_dimensions):

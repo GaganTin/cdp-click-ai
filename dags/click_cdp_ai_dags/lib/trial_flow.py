@@ -21,13 +21,4 @@ get_params = _ga.get_params
 notify_dag_complete = _ga.notify_dag_complete
 on_dag_start_callback = _ga.on_dag_start_callback
 on_dag_failure_callback = _ga.on_dag_failure_callback
-
-
-def report_success(**context):
-    """PythonOperator callable: tell the Node app the sync completed.
-
-    No-op for scheduled all-workspace runs (no job_id/company_id in conf).
-    """
-    dag_run = context.get("dag_run")
-    params = (dag_run.conf if dag_run and dag_run.conf else {}) or {}
-    return notify_dag_complete(params, is_synced=True)
+report_success = _ga.report_success

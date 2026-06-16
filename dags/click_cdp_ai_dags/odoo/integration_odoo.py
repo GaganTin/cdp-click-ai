@@ -21,6 +21,7 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 
 from dags.click_cdp_ai_dags.lib import app_state
+from dags.click_cdp_ai_dags.lib import config as ga_config
 from dags.click_cdp_ai_dags.lib import trial_flow as tf
 from dags.click_cdp_ai_dags.lib import odoo_landing
 from dags.click_cdp_ai_dags.lib import commerce_integration
@@ -30,8 +31,7 @@ os.environ["no_proxy"] = "*"
 
 _log = get_logger("odoo")
 
-ODOO_API_POOL = os.environ.get("ODOO_API_POOL")
-_DEFAULT_ARGS = {"pool": ODOO_API_POOL} if ODOO_API_POOL else {}
+_DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_odoo_api_pool", "ODOO_API_POOL")
 
 # Views run in series within a client (mirrors the old orchestrator order).
 _VIEWS = ("sale", "purchase", "inventory", "membership")
@@ -90,8 +90,7 @@ def click_cdp_ai_integration_odoo():
 
     @task(trigger_rule="all_success")
     def report_success(results, **context):
-        params = (context["dag_run"].conf or {})
-        return tf.notify_dag_complete(params, is_synced=True)
+        return tf.report_success(results, **context)
 
     results = sync_client.expand(dict_config=get_config())
     report_success(results)

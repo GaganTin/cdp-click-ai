@@ -44,8 +44,7 @@ _log = get_logger("gsc")
 
 # Set GSC_API_POOL to an Airflow pool name (e.g. "gsc_api") to cap GSC API concurrency
 # across ALL runs (manual + daily); unset = no pool. Create the pool first.
-GSC_API_POOL = os.environ.get("GSC_API_POOL")
-_DEFAULT_ARGS = {"pool": GSC_API_POOL} if GSC_API_POOL else {}
+_DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_gsc_api_pool", "GSC_API_POOL")
 
 
 @dag(
@@ -142,8 +141,7 @@ def click_cdp_ai_gsc_keyword_performance():
 
     @task(trigger_rule="all_success")
     def report_success(results, **context):
-        params = (context["dag_run"].conf or {})
-        return tf.notify_dag_complete(params, is_synced=True)
+        return tf.report_success(results, **context)
 
     results = create_keyword_performance.expand(dict_config=get_config())
     report_success(results)

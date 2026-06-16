@@ -32,7 +32,6 @@ from airflow.decorators import dag
 from airflow.models import Param
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from airflow.api.common.trigger_dag import trigger_dag
 from airflow.utils.state import State
 
 from dags.click_cdp_ai_dags.lib import ga_reports as tf
@@ -49,42 +48,6 @@ _CHILD_CONF = {
     "is_debugging": "{{ (dag_run.conf.get('is_debugging', False) if dag_run.conf else False) }}",
     "dag_run_id": "{{ (dag_run.conf.get('dag_run_id') or '') if dag_run.conf else '' }}",
 }
-
-
-def trigger_anonymous_profile_mapping_dag(**context):
-    """Trigger trial_flow_anonymous_profile_mapping with the run parameters."""
-    dag_run = context['dag_run']
-    params = dag_run.conf if dag_run.conf else {}
-    str_client_name = params.get("str_client_name")
-    triggered_dag_run_id = params.get("dag_run_id")
-
-    is_debugging_param = params.get("is_debugging", False)
-    if isinstance(is_debugging_param, str):
-        is_debugging = is_debugging_param.lower() == 'true'
-    else:
-        is_debugging = bool(is_debugging_param)
-
-    if str_client_name:
-        conf = {
-            "str_client_name": str_client_name,
-            "is_debugging": is_debugging,
-            "dag_run_id": triggered_dag_run_id,
-        }
-        triggered = trigger_dag(dag_id='trial_flow_anonymous_profile_mapping', conf=conf, execution_date=context['execution_date'])
-        _log.info(f"DAG triggered successfully: {triggered.run_id}")
-    else:
-        _log.warning("No client name provided, triggering trial_flow_anonymous_profile_mapping DAG without parameters")
-        triggered = trigger_dag(dag_id='trial_flow_anonymous_profile_mapping', execution_date=context['execution_date'])
-        _log.info(f"DAG triggered successfully: {triggered.run_id}")
-    return True
-
-
-def report_success(**context):
-    """On full success, tell the Node app so it flips the job + integration to
-    synced in Postgres (no-op for scheduled all-workspace runs without a job_id)."""
-    dag_run = context['dag_run']
-    params = dag_run.conf if dag_run.conf else {}
-    return tf.notify_dag_complete(params, is_synced=True)
 
 
 @dag(
@@ -142,23 +105,16 @@ def click_cdp_ai_integration_ga_reports():
     task_content = _trigger('run_content', 'click_cdp_ai_integration_ga_reports_content')
     task_purchase = _trigger('run_purchase', 'click_cdp_ai_integration_ga_reports_purchase')
 
-    task_profile_mapping = PythonOperator(
-        task_id='trigger_anonymous_profile_mapping',
-        python_callable=trigger_anonymous_profile_mapping_dag,
-        provide_context=True,
-    )
-
     # Fires only when every report group succeeded -> reports completion to Postgres.
     task_report_success = PythonOperator(
         task_id='report_success',
-        python_callable=report_success,
+        python_callable=tf.report_success,
         provide_context=True,
         trigger_rule='all_success',
     )
 
     task_dag_start >> [task_path_funnel, task_utm, task_content, task_purchase]
-    [task_path_funnel, task_purchase] >> task_profile_mapping
-    [task_utm, task_content, task_profile_mapping] >> task_report_success
+    [task_path_funnel, task_utm, task_content, task_purchase] >> task_report_success
 
 
 click_cdp_ai_integration_ga_reports()

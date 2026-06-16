@@ -34,6 +34,7 @@ from airflow.decorators import dag, task
 from airflow.models import Param
 
 from dags.click_cdp_ai_dags.lib import app_state
+from dags.click_cdp_ai_dags.lib import config as ga_config
 from dags.click_cdp_ai_dags.lib import trial_flow as tf
 from dags.click_cdp_ai_dags.lib import shopify_landing
 from dags.click_cdp_ai_dags.lib import commerce_integration
@@ -45,8 +46,7 @@ _log = get_logger("shopify")
 
 # Optional global API ceiling across ALL runs (manual + daily). Create the pool
 # first, then set SHOPIFY_API_POOL to its name; unset = no pool.
-SHOPIFY_API_POOL = os.environ.get("SHOPIFY_API_POOL")
-_DEFAULT_ARGS = {"pool": SHOPIFY_API_POOL} if SHOPIFY_API_POOL else {}
+_DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_shopify_api_pool", "SHOPIFY_API_POOL")
 
 # Per-client dataset order. Datasets run in series within one client so the store
 # never has two concurrent bulk operations; refunds ride the orders window.
@@ -119,10 +119,7 @@ def click_cdp_ai_integration_shopify():
 
     @task(trigger_rule="all_success")
     def report_success(results, **context):
-        """Fires only when every client succeeded -> reports completion to Node.
-        No-op for the daily all-workspace run (no job_id/company_id in conf)."""
-        params = (context["dag_run"].conf or {})
-        return tf.notify_dag_complete(params, is_synced=True)
+        return tf.report_success(results, **context)
 
     results = sync_client.expand(dict_config=get_config())
     report_success(results)
