@@ -46,12 +46,13 @@ export function createAttributesRouter(pool) {
         [req.companyId]
       );
       const { rows: ga } = await pool.query(
-        `SELECT config, is_connected FROM app.data_integrations
+        `SELECT config, is_connected, is_synced FROM app.data_integrations
          WHERE company_id = $1 AND integration_type = 'googleAnalytics' LIMIT 1`,
         [req.companyId]
       );
       res.json({
         ga_connected:     ga[0]?.is_connected || false,
+        ga_synced:        ga[0]?.is_synced || false,
         ga_property_name: ga[0]?.config?.propertyName || null,
         ga_property_id:   ga[0]?.config?.propertyId || null,
         url_domain:       dom[0]?.url_domain || null,

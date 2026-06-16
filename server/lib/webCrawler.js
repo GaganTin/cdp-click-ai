@@ -251,7 +251,7 @@ export async function crawlPage(url, opts = {}) {
  * url_pattern) unioned with sitemap.xml entries. No page cap unless `limit`
  * is passed. Returns normalised, de-duplicated http(s) URLs.
  */
-export async function discoverUrls(pool, { urlPattern, urlDomain, limit = null, lookbackDays = 90, excludedPatterns = [] }) {
+export async function discoverUrls(pool, { companyId, urlPattern, urlDomain, limit = null, lookbackDays = 90, excludedPatterns = [] }) {
   const seen = new Set();
   const out = [];
 
@@ -267,31 +267,34 @@ export async function discoverUrls(pool, { urlPattern, urlDomain, limit = null, 
     out.push(decodeUrl(u.split("?")[0])); // store readable (decoded) form
   };
 
-  // 1) All distinct GA page locations in the lookback window (most-visited first).
-  try {
-    const params = [];
-    let where = "page_location IS NOT NULL AND page_location <> ''";
-    if (urlPattern) {
-      params.push(`%${urlPattern}%`);
-      where += ` AND page_location ILIKE $${params.length}`;
+  // 1) All distinct GA page locations FOR THIS COMPANY in the lookback window
+  //    (most-visited first). Company-scoped - never mix another tenant's pages.
+  if (companyId) {
+    try {
+      const params = [companyId];
+      let where = "company_id = $1 AND page_location IS NOT NULL AND page_location <> ''";
+      if (urlPattern) {
+        params.push(`%${urlPattern}%`);
+        where += ` AND page_location ILIKE $${params.length}`;
+      }
+      if (lookbackDays && lookbackDays > 0) {
+        const d = new Date(Date.now() - lookbackDays * 86_400_000);
+        const cutoff = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+        params.push(cutoff);
+        where += ` AND date >= $${params.length}`;
+      }
+      const { rows } = await pool.query(
+        `SELECT page_location, COUNT(*) AS hits
+         FROM ga_landing.path_exploration
+         WHERE ${where}
+         GROUP BY page_location
+         ORDER BY hits DESC`,
+        params
+      );
+      for (const r of rows) add(r.page_location);
+    } catch (e) {
+      console.warn("[crawler] GA discovery failed (non-fatal):", e.message);
     }
-    if (lookbackDays && lookbackDays > 0) {
-      const d = new Date(Date.now() - lookbackDays * 86_400_000);
-      const cutoff = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
-      params.push(cutoff);
-      where += ` AND date >= $${params.length}`;
-    }
-    const { rows } = await pool.query(
-      `SELECT page_location, COUNT(*) AS hits
-       FROM ga_landing.path_exploration
-       WHERE ${where}
-       GROUP BY page_location
-       ORDER BY hits DESC`,
-      params
-    );
-    for (const r of rows) add(r.page_location);
-  } catch (e) {
-    console.warn("[crawler] GA discovery failed (non-fatal):", e.message);
   }
 
   // 2) sitemap.xml (best-effort)

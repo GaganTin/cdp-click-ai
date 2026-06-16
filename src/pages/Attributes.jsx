@@ -81,6 +81,10 @@ function JobStatus({ job, onCancel, compact }) {
   if (job.status === "failed") {
     return <div className="text-[11px] text-destructive flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" /> Last run failed: {job.error_message}</div>;
   }
+  // Completed but the run left a note (e.g. nothing to crawl / no active attributes) - surface why.
+  if (job.status === "completed" && p.note) {
+    return <div className="text-[11px] text-muted-foreground flex items-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" /> {p.note}</div>;
+  }
   if (!ACTIVE_JOB(job)) return null;
 
   const counts = [
@@ -1610,7 +1614,7 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
 }
 
 // First-run guided checklist shown when there are no content attributes yet.
-function FirstRunChecklist({ gaConnected, onCreate, onSuggest }) {
+function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
   const navigate = useNavigate();
   const Step = ({ done, n, title, children }) => (
     <div className="flex items-start gap-3">
@@ -1638,14 +1642,24 @@ function FirstRunChecklist({ gaConnected, onCreate, onSuggest }) {
             </button>
           )}
         </Step>
-        <Step done={false} n={2} title="Create your first attribute">
+        <Step done={gaSynced} n={2} title="Sync your Google Analytics data">
+          {gaSynced ? "Synced - we know which pages your visitors viewed." : (
+            <>
+              Page discovery reads your synced GA pages, so a connection alone isn't enough - run a sync first.{" "}
+              <button onClick={() => navigate("/integrations")} className="underline hover:text-foreground inline-flex items-center gap-1">
+                Sync now <ArrowRight className="w-3 h-3" />
+              </button>
+            </>
+          )}
+        </Step>
+        <Step done={false} n={3} title="Create your first attribute">
           Name a dimension (e.g. “Country Interest”) and give the AI an instruction.
           <div className="flex items-center gap-2 mt-2">
             <Button size="sm" className="h-8 gap-1.5" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> New Attribute</Button>
             <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest}><Sparkles className="w-3.5 h-3.5" /> Suggest with AI</Button>
           </div>
         </Step>
-        <Step done={false} n={3} title="Reconstruct to tag your pages">
+        <Step done={false} n={4} title="Reconstruct to tag your pages">
           Open the attribute and hit <strong>Reconstruct</strong> - the AI crawls, tags, and propagates to profiles.
         </Step>
       </div>
@@ -2554,6 +2568,7 @@ export default function Attributes() {
     .reduce((n, a) => n + Number(a.pending_count || 0), 0);
   const showHeaderActions = isContent && contentSub === "attributes" && !selectedAttrId;
   const gaConnected = !!crawlSettings?.ga_connected;
+  const gaSynced = !!crawlSettings?.ga_synced;
 
   // Filter + sort + group the cards for the grid.
   const hasActiveFilters = Object.values(filters).some(Boolean);
@@ -2734,7 +2749,7 @@ export default function Attributes() {
                 {[1, 2, 3].map((i) => <div key={i} className="h-28 bg-secondary animate-pulse rounded-lg" />)}
               </div>
             ) : tabAttrs.length === 0 ? (
-              <FirstRunChecklist gaConnected={gaConnected} onCreate={() => setCreateOpen(true)} onSuggest={() => setSuggestOpen(true)} />
+              <FirstRunChecklist gaConnected={gaConnected} gaSynced={gaSynced} onCreate={() => setCreateOpen(true)} onSuggest={() => setSuggestOpen(true)} />
             ) : (
               <CardGrid {...gridProps} />
             )}

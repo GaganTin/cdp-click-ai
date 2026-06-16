@@ -102,6 +102,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   if (opts.scrape) {
   await setJob(pool, job.id, { phase: "discovering" });
   const urls = await discoverUrls(pool, {
+    companyId,
     urlPattern: cfg.url_pattern || "",
     urlDomain: domRows[0]?.url_domain || "",
     lookbackDays: DISCOVERY_LOOKBACK_DAYS,
@@ -110,6 +111,14 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   await mergeProgress(pool, job.id, {
     pages_total: urls.length, pages_crawled: 0, pages_tagged: 0, values_found: 0, profiles_tagged: 0,
   });
+  // No pages to crawl - almost always because GA data hasn't been synced yet
+  // (discovery reads ga_landing.path_exploration). Say so instead of silently
+  // "completing" with nothing.
+  if (urls.length === 0) {
+    await mergeProgress(pool, job.id, {
+      note: "No pages found to crawl. Connect Google Analytics AND run a sync (Integrations → Sync) so we know which pages your visitors viewed - a site domain with a sitemap.xml also works.",
+    });
+  }
 
   // One sitemap fetch reveals the whole site's <lastmod> set, so we can skip pages
   // that haven't changed without opening each one. Best-effort (empty map = no-op).
