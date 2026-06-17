@@ -301,7 +301,7 @@ function ValueRow({
           <ChevronDown className={`w-3 h-3 text-muted-foreground flex-shrink-0 transition-transform ${showPages ? "" : "-rotate-90"}`} />
           <span className="truncate">{value.display_label || value.value}</span>
         </button>
-        {pending && <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-500/50 text-amber-600">review</Badge>}
+        {pending && <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-yellow-500/50 text-yellow-600">review</Badge>}
         {value.is_approved && <Badge variant="secondary" className="text-[10px] h-4 px-1.5">approved</Badge>}
         <span className="text-[10px] text-muted-foreground tabular-nums w-20 text-right flex-shrink-0">
           {value.page_count || 0} pg · {value.profile_count || 0} ppl
@@ -309,7 +309,7 @@ function ValueRow({
         {suggestion && onAcceptSuggestion && (
           <button title={`Looks like "${suggestion.display_label || suggestion.value}" - merge into it`}
             onClick={() => onAcceptSuggestion(value, suggestion)}
-            className="text-[10px] px-1.5 py-0.5 rounded-full border border-amber-500/40 text-amber-600 hover:bg-amber-500/10 whitespace-nowrap flex items-center gap-1 flex-shrink-0">
+            className="text-[10px] px-1.5 py-0.5 rounded-full border border-yellow-500/40 text-yellow-600 hover:bg-yellow-500/10 whitespace-nowrap flex items-center gap-1 flex-shrink-0">
             <GitMerge className="w-3 h-3" /> {suggestion.display_label || suggestion.value}?
           </button>
         )}
@@ -723,7 +723,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
             <span>Extract from: <strong className="text-foreground">{EXTRACT_LABEL[attr.extract_from] || attr.extract_from}</strong></span>
             <span>Values per page: <strong className="text-foreground">{attr.value_type === "single" ? "Single" : "Multiple"}</strong></span>
             {attr.content_applied && (
-              <span className="inline-flex items-center gap-1 text-amber-600" title="Values are applied to content. Clone to change Extract from / Values per page.">
+              <span className="inline-flex items-center gap-1 text-yellow-600" title="Values are applied to content. Clone to change Extract from / Values per page.">
                 <Lock className="w-3 h-3" /> locked
               </span>
             )}
@@ -805,7 +805,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                   {pending.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-yellow-600 flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" /> Review queue · {pending.length}
                         </p>
                         <div className="flex items-center gap-2">
@@ -984,10 +984,10 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                     const ungrouped = approved.filter((v) => !v.group_name);
                     if (!ungrouped.length) return null;
                     return (
-                      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                      <div className="rounded-lg border border-yellow-500/40 bg-yellow-500/5 p-3 flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-amber-700">{ungrouped.length} value{ungrouped.length === 1 ? "" : "s"} not yet in a {attr.group_label} group</p>
+                          <p className="text-xs font-medium text-yellow-700">{ungrouped.length} value{ungrouped.length === 1 ? "" : "s"} not yet in a {attr.group_label} group</p>
                           <p className="text-[11px] text-muted-foreground mt-0.5">
                             Every value must belong to a group so it can be targeted. Assign {ungrouped.length === 1 ? "it" : "them"} below, or group automatically.
                           </p>
@@ -1394,7 +1394,7 @@ function ReviewPanel() {
             Pages the AI has tagged. Verify a page to confirm its labels; remove any wrong tag with the ✕ - it updates targeting immediately.
           </p>
           {(summary.new_pages > 0 || summary.new_labels > 0) && (
-            <p className="text-[11px] text-amber-600 mt-1 flex items-center gap-1">
+            <p className="text-[11px] text-yellow-600 mt-1 flex items-center gap-1">
               <AlertCircle className="w-3 h-3" />
               {summary.new_pages} new page{summary.new_pages === 1 ? "" : "s"} · {summary.new_labels} new label{summary.new_labels === 1 ? "" : "s"} to review
             </p>
@@ -1427,11 +1427,11 @@ function ReviewPanel() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {pages.map((pg) => (
-            <div key={pg.id} className={`border rounded-lg p-3 ${pg.needs_review ? "border-amber-500/40 bg-amber-500/5" : "border-border"}`}>
+            <div key={pg.id} className={`border rounded-lg p-3 ${pg.needs_review ? "border-yellow-500/40 bg-yellow-500/5" : "border-border"}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-xs font-medium truncate flex items-center gap-1.5">
-                    {pg.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" title="Needs review" />}
+                    {pg.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" title="Needs review" />}
                     {pg.title || decodeUrl(pg.url)}
                   </p>
                   <a href={pg.url} target="_blank" rel="noreferrer" className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 truncate">
@@ -1449,8 +1449,8 @@ function ReviewPanel() {
                 {(pg.tags || []).map((t) => (
                   <span key={t.value_id}
                     className={`group/tag inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
-                      t.is_approved ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700"
-                        : t.is_new ? "border-amber-500/50 bg-amber-500/10 text-amber-700"
+                      t.is_approved ? "border-foreground/40 bg-secondary text-foreground"
+                        : t.is_new ? "border-yellow-500/50 bg-yellow-500/10 text-yellow-700"
                         : "bg-background border-border"
                     }`}
                     title={`${t.attribute}: ${t.label || t.value}${t.is_approved ? " · verified" : t.is_new ? " · new" : " · pending"}`}>
@@ -1479,7 +1479,7 @@ function AttributeCard({ attr, onOpen, onDelete, onEdit, onClone }) {
             <h3 className="text-sm font-semibold truncate">{attr.name}</h3>
             {attr.status !== "draft" && <Badge variant="secondary" className="text-[10px]">{attr.status}</Badge>}
             {Number(attr.pending_count) > 0 && (
-              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-500/50 text-amber-600">{attr.pending_count} to review</Badge>
+              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-yellow-500/50 text-yellow-600">{attr.pending_count} to review</Badge>
             )}
           </div>
           {attr.description && <p className="text-xs text-muted-foreground line-clamp-2">{attr.description}</p>}
@@ -2107,7 +2107,7 @@ function AssignDialog({ attributeId, value, onClose }) {
         {conflicts ? (
           <div className="space-y-3">
             <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
               <p className="text-xs text-muted-foreground">
                 <strong className="text-foreground">{conflicts.list.length}</strong> {conflicts.list.length === 1 ? "person" : "people"} already have a different value for this single-value attribute. Moving them replaces their current value with <strong className="text-foreground">“{newLabel}”</strong>.
               </p>
@@ -2340,7 +2340,7 @@ function ResolveDuplicatesDialog({ attributeId, conflicts, onClose, onResolved }
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle className="font-heading">Resolve duplicate values</DialogTitle></DialogHeader>
         <div className="flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+          <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-muted-foreground">
             <strong className="text-foreground">{conflicts.length}</strong> {conflicts.length === 1 ? "person has" : "people have"} more than one value. Keep one each to switch to single value-per-person - the rest are removed.
           </p>
@@ -2730,7 +2730,7 @@ export default function Attributes() {
                   }`}>
                   {label}
                   {k === "review" && reviewCount > 0 && (
-                    <span className="text-[10px] h-4 min-w-4 px-1 rounded-full bg-amber-500 text-white flex items-center justify-center">{reviewCount}</span>
+                    <span className="text-[10px] h-4 min-w-4 px-1 rounded-full bg-yellow-500 text-white flex items-center justify-center">{reviewCount}</span>
                   )}
                 </button>
               ))}

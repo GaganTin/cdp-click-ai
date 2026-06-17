@@ -34,8 +34,8 @@ export default function EmailVerifyBanner() {
   };
 
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/30 dark:border-amber-800 text-sm">
-      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
+    <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-yellow-50 border-b border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800 text-sm">
+      <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
         <MailWarning className="w-4 h-4 flex-shrink-0" />
         <span>
           Please verify your email{user.email ? ` (${user.email})` : ""} to secure your account.
@@ -54,7 +54,7 @@ export default function EmailVerifyBanner() {
             try { sessionStorage.setItem(STORAGE_KEY, "true"); } catch { /* ignore */ }
             setDismissed(true);
           }}
-          className="text-amber-800/70 dark:text-amber-300/70 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+          className="text-yellow-800/70 dark:text-yellow-300/70 hover:text-yellow-900 dark:hover:text-yellow-200 transition-colors"
           aria-label="Dismiss"
         >
           <X className="w-4 h-4" />

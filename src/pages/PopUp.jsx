@@ -721,7 +721,7 @@ function PopupCalendar({ popups, onPreview }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ml-auto">
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-foreground" /> Active</span>
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-secondary border border-border" /> Draft</span>
-          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-amber-500" /> Overlapping</span>
+          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-yellow-500" /> Overlapping</span>
         </div>
       </div>
       <p className="text-[11px] text-muted-foreground/70 -mt-2">
@@ -760,7 +760,7 @@ function PopupCalendar({ popups, onPreview }) {
                         <span className={`text-[11px] inline-flex items-center justify-center ${today ? "bg-foreground text-background rounded-full w-5 h-5 font-semibold" : inMonth ? "text-foreground" : "text-muted-foreground/40"}`}>
                           {format(day, "d")}
                         </span>
-                        {dayActive >= 2 && <AlertTriangle className="w-3 h-3 text-amber-500" title={`${dayActive} pop ups overlap on this day`} />}
+                        {dayActive >= 2 && <AlertTriangle className="w-3 h-3 text-yellow-500" title={`${dayActive} pop ups overlap on this day`} />}
                       </div>
                     </div>
                   );

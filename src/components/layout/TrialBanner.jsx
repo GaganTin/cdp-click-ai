@@ -55,10 +55,10 @@ export default function TrialBanner() {
   return (
     <div className={`flex items-center justify-between gap-3 px-4 py-2.5 border-b text-sm ${
       isUrgent
-        ? "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800"
+        ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800"
         : "bg-secondary border-border"
     }`}>
-      <div className={`flex items-center gap-2 ${isUrgent ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground"}`}>
+      <div className={`flex items-center gap-2 ${isUrgent ? "text-yellow-800 dark:text-yellow-300" : "text-muted-foreground"}`}>
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
         {daysLeft === 0
           ? "Your free trial expires today."
