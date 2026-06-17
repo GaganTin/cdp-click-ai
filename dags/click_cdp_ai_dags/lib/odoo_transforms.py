@@ -4,7 +4,7 @@
 
 Odoo raw tables come straight from the shared SQL scripts in
 ``dags/sql_lib/customer/*.sql`` (selected per client via schema.json), so columns
-are defined by the SQL — no fixed column list. This module only reproduces the
+are defined by the SQL - no fixed column list. This module only reproduces the
 light post-processing the original build_odoo_landing_* DAGs applied:
 
   * flatten Odoo i18n jsonb fields ({"en_US": "..."} -> "...")

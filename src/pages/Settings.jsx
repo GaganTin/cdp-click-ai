@@ -497,7 +497,7 @@ function PreferencesTab() {
               <label key={key} className="flex items-start gap-2.5 text-sm cursor-pointer select-none">
                 <input
                   type="checkbox"
-                  className="rounded border-border mt-0.5"
+                  className="rounded border-border mt-0.5 accent-foreground"
                   checked={form.notifications?.[key] !== false}
                   onChange={e => setForm(p => ({
                     ...p,
@@ -1133,11 +1133,14 @@ function UsageBar({ label, used, limit, unlimited }) {
         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all ${
-              danger ? "bg-destructive" : warn ? "bg-foreground/60" : "bg-foreground"
+              danger ? "bg-destructive" : warn ? "bg-yellow-500" : "bg-foreground"
             }`}
             style={{ width: `${pct}%` }}
           />
         </div>
+      )}
+      {!unlimited && warn && !danger && (
+        <p className="text-[10px] text-yellow-700 font-medium">Approaching plan limit</p>
       )}
     </div>
   );

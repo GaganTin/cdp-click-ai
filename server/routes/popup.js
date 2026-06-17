@@ -121,20 +121,21 @@ function buildSegmentWhere(filterCriteria, segmentType) {
 }
 
 // Given a segment ID, return the array of capsuite_apid values for targeting
-async function resolveSegmentToCapsuiteApids(pool, segmentId) {
-  if (!segmentId) return [];
+async function resolveSegmentToCapsuiteApids(pool, companyId, segmentId) {
+  if (!segmentId || !companyId) return [];
   try {
     const { rows } = await pool.query(
-      `SELECT segment_type, metadata, company_id FROM app.segments WHERE id = $1`,
-      [segmentId]
+      `SELECT segment_type, metadata FROM app.segments WHERE id = $1 AND company_id = $2`,
+      [segmentId, companyId]
     );
     if (!rows.length) return [];
-    const { segment_type, metadata, company_id } = rows[0];
+    const { segment_type, metadata } = rows[0];
     const filterCriteria = metadata?.filter_criteria || null;
     const { where, params } = buildSegmentWhere(filterCriteria, segment_type);
-    // company_id is the next positional param after whatever buildSegmentWhere used.
+    // Scope the audience to the CALLER's company (never the segment row's), so a
+    // foreign segment id can't resolve another tenant's apids into this popup.
     const cIdx = params.length + 1;
-    const allParams = [...params, company_id];
+    const allParams = [...params, companyId];
 
     let sql;
     if (segment_type === "customer") {
@@ -186,14 +187,14 @@ function buildInteractionRules(rules, resolvedApids) {
   return irRules;
 }
 
-async function buildInteractionPayload(pool, popup, interactionServiceCompanyId) {
+async function buildInteractionPayload(pool, companyId, popup, interactionServiceCompanyId) {
   const now = new Date().toISOString();
   const oneYear = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
   const rules = popup.rules || {};
 
-  // Resolve segment targets → capsuite_apid lists
-  const anonApids = await resolveSegmentToCapsuiteApids(pool, rules.anonymous_segment_id);
-  const custApids = await resolveSegmentToCapsuiteApids(pool, rules.customer_segment_id);
+  // Resolve segment targets → capsuite_apid lists (scoped to the caller's company)
+  const anonApids = await resolveSegmentToCapsuiteApids(pool, companyId, rules.anonymous_segment_id);
+  const custApids = await resolveSegmentToCapsuiteApids(pool, companyId, rules.customer_segment_id);
   const resolvedApids = [...new Set([...anonApids, ...custApids])];
 
   return {
@@ -269,7 +270,7 @@ export function createPopupRouter(pool) {
       // Sync to interaction service (best-effort)
       try {
         const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
-        const payload = await buildInteractionPayload(pool, popup, isCompanyId);
+        const payload = await buildInteractionPayload(pool, cid, popup, isCompanyId);
         const irRes = await fetch(`${INTERACTION_SERVICE_URL}/interaction/`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -335,7 +336,7 @@ export function createPopupRouter(pool) {
       // Sync update to interaction service (best-effort)
       try {
         const isCompanyId = await getInteractionServiceCompanyId(pool, cid);
-        const payload = await buildInteractionPayload(pool, popup, isCompanyId);
+        const payload = await buildInteractionPayload(pool, cid, popup, isCompanyId);
         await fetch(`${INTERACTION_SERVICE_URL}/interaction/update`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

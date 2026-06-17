@@ -93,7 +93,7 @@ export default function OwnersTab({ currentUserId }) {
       const msg = {
         already_owner: "That user is already an owner",
         promoted: "User promoted to platform owner",
-        invited: "Invite saved — they'll become an owner when they sign up",
+        invited: "Invite saved - they'll become an owner when they sign up",
       }[r.status] || "Done";
       toast.success(msg);
       setInviteEmail("");

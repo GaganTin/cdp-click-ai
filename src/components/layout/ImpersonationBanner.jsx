@@ -2,7 +2,7 @@ import { Eye, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 
 // Shown when a platform owner is acting as another user (impersonation). The
-// session cookie has been swapped, so "Exit" simply logs out — the owner then
+// session cookie has been swapped, so "Exit" simply logs out - the owner then
 // signs back into their own account.
 export default function ImpersonationBanner() {
   const { user, logout } = useAuth();
@@ -12,7 +12,7 @@ export default function ImpersonationBanner() {
     <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-yellow-500/15 border-b border-yellow-500/30 text-sm">
       <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300 font-medium">
         <Eye className="w-4 h-4 flex-shrink-0" />
-        Viewing as {user.full_name || user.email} — impersonated by {user.impersonated_by}.
+        Viewing as {user.full_name || user.email} - impersonated by {user.impersonated_by}.
       </div>
       <button
         onClick={logout}

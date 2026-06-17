@@ -1,6 +1,7 @@
 // Behavioral-attribute reconstruct worker.
-// Jobs are rows in app.attribute_jobs. One job at a time, claimed with
-// FOR UPDATE SKIP LOCKED so multiple server instances are safe. Pipeline:
+// Jobs are rows in app.attribute_jobs. Up to ATTR_JOB_CONCURRENCY jobs run at
+// once (one per company), each claimed with FOR UPDATE SKIP LOCKED so multiple
+// server instances are safe. Pipeline:
 //   discover URLs → crawl (hybrid) → AI-tag pages → propagate to profiles.
 // AI-discovered values land as review-queue exceptions and do NOT affect
 // targeting until approved; only approved values propagate.
@@ -273,7 +274,10 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
         console.warn(`[attr] tag failed ${page.url}:`, e.message);
       }
       tagged++;
-      if (tagged % 5 === 0) await mergeProgress(pool, job.id, { pages_tagged: tagged, values_found: valuesFound });
+      // Heartbeat every page (bumps updated_date): a slow LLM call must never let a
+      // live job's updated_date drift past the stale-reset window, or a second worker
+      // could re-claim a still-running job (see resetStaleJobs / STALE_JOB_MINUTES).
+      await mergeProgress(pool, job.id, { pages_tagged: tagged, values_found: valuesFound });
     }
     await mergeProgress(pool, job.id, { pages_tagged: tagged, values_found: valuesFound });
   }
@@ -370,87 +374,115 @@ export async function repropagate(pool, companyId, attrIds) {
   await propagate(pool, companyId, attrIds, "customer");
   await pool.query(
     `UPDATE app.attribute_values av SET
-       page_count    = (SELECT COUNT(DISTINCT pav.page_id) FROM app.page_attribute_values pav WHERE pav.attribute_value_id = av.id),
-       profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv WHERE pv.attribute_value_id = av.id)
-     WHERE av.attribute_id = ANY($1::uuid[])`,
-    [attrIds]
+       page_count    = (SELECT COUNT(DISTINCT pav.page_id) FROM app.page_attribute_values pav WHERE pav.attribute_value_id = av.id AND pav.company_id = $2),
+       profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv WHERE pv.attribute_value_id = av.id AND pv.company_id = $2)
+     WHERE av.attribute_id = ANY($1::uuid[]) AND av.company_id = $2`,
+    [attrIds, companyId]
   );
 }
 
 // ── queue plumbing ────────────────────────────────────────────
+// A job is "stale" only if its updated_date hasn't advanced for this long. A live
+// worker heartbeats (mergeProgress) every crawled batch and every tagged page, so
+// the gap between heartbeats is bounded by a single crawl/LLM call - comfortably
+// under this window even on the SDK's worst-case retry timeout (~30 min). That
+// guarantees a job is reset ONLY when its worker actually died, so the concurrent
+// claim below can never re-run a job that's still in flight (no double-run).
+const STALE_JOB_MINUTES = Math.max(35, Number(process.env.ATTR_STALE_JOB_MINUTES) || 45);
 async function resetStaleJobs(pool) {
   try {
-    const { rowCount } = await pool.query(`
-      UPDATE app.attribute_jobs SET status = 'queued', updated_date = NOW()
-      WHERE status = 'running' AND updated_date < NOW() - INTERVAL '30 minutes'`);
+    const { rowCount } = await pool.query(
+      `UPDATE app.attribute_jobs SET status = 'queued', updated_date = NOW()
+       WHERE status = 'running' AND updated_date < NOW() - ($1::int * INTERVAL '1 minute')`,
+      [STALE_JOB_MINUTES]
+    );
     if (rowCount > 0) console.log(`[attr-queue] Reset ${rowCount} stale job(s) → queued`);
   } catch (e) {
     console.error("[attr-queue] resetStaleJobs:", e.message);
   }
 }
 
-// Single-flight across the process: only one attribute job runs at a time. A
-// concurrent call (e.g. a createJob kick fired while a job is mid-run) returns
-// immediately; the active drain loop picks up any newly-queued job in its next
-// iteration. This lets callers safely enqueue work during a run without ever
-// running two jobs in parallel.
-let _draining = false;
-async function processNextAttributeJob(pool) {
-  if (_draining) return;
-  _draining = true;
-  try {
-    for (;;) {
-      let job;
-      try {
-        const { rows } = await pool.query(`
-          UPDATE app.attribute_jobs
-          SET status = 'running', started_at = NOW(), updated_date = NOW()
-          WHERE id = (
-            SELECT id FROM app.attribute_jobs
-            WHERE status = 'queued'
-            ORDER BY created_date ASC
-            FOR UPDATE SKIP LOCKED
-            LIMIT 1
-          )
-          RETURNING *`);
-        job = rows[0];
-      } catch (e) {
-        console.error("[attr-queue] job claim error:", e.message);
-        return;
-      }
-      if (!job) return; // queue drained
+// Bounded-concurrency queue: up to ATTR_JOB_CONCURRENCY jobs run at once, but
+// NEVER two for the same company (the claim query below excludes any company
+// that already has a running job). This keeps one tenant's large "reconstruct
+// all" from blocking other tenants - their jobs run on the other worker slots -
+// while still serialising a single tenant's work so its DELETE+re-INSERT
+// propagation can never race itself. Set ATTR_JOB_CONCURRENCY=1 to fall back to
+// the old strict single-flight behaviour.
+const MAX_CONCURRENT_JOBS = Math.max(1, Number(process.env.ATTR_JOB_CONCURRENCY) || 3);
+let _activeWorkers = 0;
 
-      try {
-        const OPTS = {
-          behavioral:      { scrape: true,  tag: true,  scopedRetag: false },
-          refresh:         { scrape: true,  tag: false, scopedRetag: false },
-          tag:             { scrape: false, tag: true,  scopedRetag: false },
-          retag_attribute: { scrape: false, tag: true,  scopedRetag: true  },
-        };
-        const opts = OPTS[job.job_type];
-        if (opts) {
-          await runContentJob(pool, job, opts);
-        } else {
-          await setJob(pool, job.id, {
-            status: "failed", error_message: `Unsupported job_type "${job.job_type}"`,
-            completed_at: new Date().toISOString(),
-          });
-        }
-        console.log(`[attr-queue] Completed job ${job.id}`);
-      } catch (e) {
-        console.error(`[attr-queue] Job ${job.id} failed:`, e.message);
-        await setJob(pool, job.id, {
-          status: "failed", error_message: String(e.message || e), completed_at: new Date().toISOString(),
-        }).catch(() => {});
-        await pool.query(
-          `UPDATE app.attributes SET last_run_status = 'failed' WHERE id = $1`,
-          [job.attribute_id]
-        ).catch(() => {});
-      }
-      // loop: pick up the next queued job (incl. anything enqueued during this run)
+// Top up the worker pool to the concurrency cap. Each worker drains until no
+// job is currently claimable, then exits; a fresh enqueue (createJob) or the
+// periodic tick tops the pool back up. Synchronous loop, so no race on the count.
+async function processNextAttributeJob(pool) {
+  while (_activeWorkers < MAX_CONCURRENT_JOBS) {
+    _activeWorkers++;
+    drainAttributeJobs(pool)
+      .catch((e) => console.error("[attr-queue] worker crashed:", e.message))
+      .finally(() => { _activeWorkers--; });
+  }
+}
+
+async function drainAttributeJobs(pool) {
+  for (;;) {
+    let job;
+    try {
+      // Claim the oldest queued job whose company has no job already running.
+      // FOR UPDATE OF j SKIP LOCKED locks only the chosen row and lets parallel
+      // workers grab different rows concurrently.
+      const { rows } = await pool.query(`
+        UPDATE app.attribute_jobs
+        SET status = 'running', started_at = NOW(), updated_date = NOW()
+        WHERE id = (
+          SELECT j.id FROM app.attribute_jobs j
+          WHERE j.status = 'queued'
+            AND NOT EXISTS (
+              SELECT 1 FROM app.attribute_jobs r
+              WHERE r.company_id = j.company_id AND r.status = 'running'
+            )
+          ORDER BY j.created_date ASC
+          FOR UPDATE OF j SKIP LOCKED
+          LIMIT 1
+        )
+        RETURNING *`);
+      job = rows[0];
+    } catch (e) {
+      console.error("[attr-queue] job claim error:", e.message);
+      return;
     }
-  } finally {
-    _draining = false;
+    // Nothing claimable right now: queue empty, or every queued job belongs to a
+    // company that already has one running. A finishing worker re-tops the pool.
+    if (!job) return;
+
+    try {
+      const OPTS = {
+        behavioral:      { scrape: true,  tag: true,  scopedRetag: false },
+        refresh:         { scrape: true,  tag: false, scopedRetag: false },
+        tag:             { scrape: false, tag: true,  scopedRetag: false },
+        retag_attribute: { scrape: false, tag: true,  scopedRetag: true  },
+      };
+      const opts = OPTS[job.job_type];
+      if (opts) {
+        await runContentJob(pool, job, opts);
+      } else {
+        await setJob(pool, job.id, {
+          status: "failed", error_message: `Unsupported job_type "${job.job_type}"`,
+          completed_at: new Date().toISOString(),
+        });
+      }
+      console.log(`[attr-queue] Completed job ${job.id}`);
+    } catch (e) {
+      console.error(`[attr-queue] Job ${job.id} failed:`, e.message);
+      await setJob(pool, job.id, {
+        status: "failed", error_message: String(e.message || e), completed_at: new Date().toISOString(),
+      }).catch(() => {});
+      await pool.query(
+        `UPDATE app.attributes SET last_run_status = 'failed' WHERE id = $1`,
+        [job.attribute_id]
+      ).catch(() => {});
+    }
+    // loop: pick up the next claimable job (incl. anything enqueued during this run)
   }
 }
 

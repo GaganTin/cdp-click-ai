@@ -70,7 +70,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
   const userAction = useMutation({
     mutationFn: ({ fn, id }) => appClient.admin[fn](id),
     onSuccess: (r, { label }) => toast[r?.sent === false && r?.error ? "warning" : "success"](
-      r?.already_verified ? "Already verified" : `${label} ${r?.sent === false ? "(email not sent — check mail config)" : "sent"}`
+      r?.already_verified ? "Already verified" : `${label} ${r?.sent === false ? "(email not sent - check mail config)" : "sent"}`
     ),
     onError: (e) => toast.error(e.message || "Action failed"),
   });
@@ -277,7 +277,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                         onClick={() => userAction.mutate({ fn: "sendReset", id: u.id, label: "Password reset" })}
                         className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground"><KeyRound className="w-4 h-4" /></button>
                       <button title="Impersonate (view as this user)"
-                        onClick={() => { if (window.confirm(`View the app as ${u.email}? This replaces your current session — log out to return to your own.`)) impersonate.mutate(u.id); }}
+                        onClick={() => { if (window.confirm(`View the app as ${u.email}? This replaces your current session - log out to return to your own.`)) impersonate.mutate(u.id); }}
                         className="p-1.5 rounded-md hover:bg-secondary text-muted-foreground"><LogIn className="w-4 h-4" /></button>
                     </div>
                   </div>

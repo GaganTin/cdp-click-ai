@@ -56,7 +56,7 @@ const TABS = [
 ];
 
 const STATUS_STYLES = {
-  draft:     "bg-secondary text-secondary-foreground",
+  draft:     "bg-yellow-500/10 text-yellow-700 border border-yellow-500/40",
   scheduled: "bg-secondary text-foreground border border-border",
   sending:   "bg-secondary text-foreground border border-border",
   sent:      "bg-foreground text-background",
@@ -81,7 +81,7 @@ const REASON_STYLES = {
 };
 
 const STATUS_ACCENT = {
-  draft:     "#d1d5db",
+  draft:     "#eab308",
   scheduled: "#6b7280",
   sending:   "#374151",
   sent:      "#111827",
@@ -862,11 +862,12 @@ function AnalyticsTab() {
   const [filters, setFilters] = useState({});
   const [colOrder, setColOrder]   = useState(() => EDM_ANALYTICS_COLS.map(c => c.key));
   const [hiddenCols, setHiddenCols] = useState(() => new Set(EDM_ANALYTICS_COLS.filter(c => !c.defaultVisible).map(c => c.key)));
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo]     = useState("");
-  const [compare, setCompare]   = useState(false);
-  const [cmpFrom, setCmpFrom]   = useState("");
-  const [cmpTo, setCmpTo]       = useState("");
+  // Period + compare selections persist across refresh (localStorage).
+  const [dateFrom, setDateFrom] = useStickyState("", "edmAnalytics.dateFrom");
+  const [dateTo, setDateTo]     = useStickyState("", "edmAnalytics.dateTo");
+  const [compare, setCompare]   = useStickyState(false, "edmAnalytics.compare");
+  const [cmpFrom, setCmpFrom]   = useStickyState("", "edmAnalytics.cmpFrom");
+  const [cmpTo, setCmpTo]       = useStickyState("", "edmAnalytics.cmpTo");
   const [sortKey, setSortKey]   = useState("sent_at");
   const [sortDir, setSortDir]   = useState("desc");
   const [selected, setSelected] = useState(new Set());

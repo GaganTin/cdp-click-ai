@@ -431,7 +431,7 @@ export function createAdminRouter(pool) {
         await audit(null, req.user.id, "role_change", "user", existing[0].id, { is_platform_admin: true });
         return res.json({ ok: true, status: "promoted" });
       }
-      // No account yet — record a pending invite consumed on signup.
+      // No account yet - record a pending invite consumed on signup.
       await pool.query(
         `INSERT INTO app.platform_owner_invites (email, invited_by) VALUES ($1, $2)
          ON CONFLICT (email) DO UPDATE SET invited_by = EXCLUDED.invited_by, created_at = NOW()`,

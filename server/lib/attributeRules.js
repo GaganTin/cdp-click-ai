@@ -202,10 +202,13 @@ function condSql(scope, cond, params, ctx = {}) {
     if (op === "submitted" || op === "not_submitted") {
       if (!first) return null;
       params.push(first);
+      const pid = params.length;
+      params.push(ctx.companyId);
+      const co = params.length;
       const match = scope === "customer"
         ? "(pec.profile_id = p.member_id OR lower(pec.email) = lower(p.primary_email))"
         : "pec.visitor_id = p.visitor_id";
-      const ex = `EXISTS (SELECT 1 FROM app.popup_email_collected pec WHERE pec.popup_id = $${params.length}::uuid AND ${match})`;
+      const ex = `EXISTS (SELECT 1 FROM app.popup_email_collected pec WHERE pec.popup_id = $${pid}::uuid AND pec.company_id = $${co} AND ${match})`;
       return op === "not_submitted" ? `(NOT ${ex})` : ex;
     }
     return null;
@@ -215,8 +218,11 @@ function condSql(scope, cond, params, ctx = {}) {
     if (!first) return null;
     params.push(first);
     const cid = params.length;
+    params.push(ctx.companyId);
+    const co = params.length;
     if (op === "received" || op === "not_received") {
       const ex = `EXISTS (SELECT 1 FROM app.edm_sends es WHERE es.edm_campaign_id = $${cid}::uuid
+        AND es.company_id = $${co}
         AND es.status IN ('sent', 'delivered')
         AND (es.member_id = p.member_id OR lower(es.email) = lower(p.primary_email)))`;
       return op === "not_received" ? `(NOT ${ex})` : ex;
@@ -224,6 +230,7 @@ function condSql(scope, cond, params, ctx = {}) {
     if (op === "opened" || op === "clicked") {
       params.push(op === "opened" ? "open" : "click");
       return `EXISTS (SELECT 1 FROM app.edm_events ee WHERE ee.edm_campaign_id = $${cid}::uuid
+        AND ee.company_id = $${co}
         AND ee.event_type = $${params.length} AND lower(ee.email) = lower(p.primary_email))`;
     }
     return null;
@@ -233,10 +240,13 @@ function condSql(scope, cond, params, ctx = {}) {
     const arr = (Array.isArray(v) ? v : [v]).map((x) => String(x)).filter(Boolean);
     if (!arr.length) return null;
     params.push(arr);
+    const valIdx = params.length;
+    params.push(ctx.companyId);
+    const co = params.length;
     const ex = `EXISTS (SELECT 1 FROM app.profile_attribute_values pav
-      JOIN app.attributes aa ON aa.id = pav.attribute_id AND aa.status = 'active'
-      WHERE pav.entity_type = '${scope}' AND pav.entity_id = p.${t.id}
-        AND pav.attribute_value_id = ANY($${params.length}::uuid[]))`;
+      JOIN app.attributes aa ON aa.id = pav.attribute_id AND aa.status = 'active' AND aa.company_id = $${co}
+      WHERE pav.company_id = $${co} AND pav.entity_type = '${scope}' AND pav.entity_id = p.${t.id}
+        AND pav.attribute_value_id = ANY($${valIdx}::uuid[]))`;
     return op === "has_none" ? `(NOT ${ex})` : ex;
   }
 
@@ -408,13 +418,13 @@ export async function repropagateRule(pool, companyId, attributeId) {
   // 4) Recompute cached counts + mark run.
   await pool.query(
     `UPDATE app.attribute_values av
-     SET profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv WHERE pv.attribute_value_id = av.id)
-     WHERE av.attribute_id = $1`,
-    [attributeId]
+     SET profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv WHERE pv.attribute_value_id = av.id AND pv.company_id = $2)
+     WHERE av.attribute_id = $1 AND av.company_id = $2`,
+    [attributeId, companyId]
   );
   const { rows: pc } = await pool.query(
-    `SELECT COUNT(*) AS n FROM app.profile_attribute_values WHERE attribute_id = $1`,
-    [attributeId]
+    `SELECT COUNT(*) AS n FROM app.profile_attribute_values WHERE attribute_id = $1 AND company_id = $2`,
+    [attributeId, companyId]
   );
   await pool.query(
     `UPDATE app.attributes SET last_run_date = NOW(), last_run_status = 'success' WHERE id = $1`,

@@ -50,15 +50,9 @@ export default function TrialBanner() {
   // Dismissed (persisted in localStorage so it survives navigation and refresh)
   if (dismissed) return null;
 
-  const isUrgent = daysLeft <= warningDays;
-
   return (
-    <div className={`flex items-center justify-between gap-3 px-4 py-2.5 border-b text-sm ${
-      isUrgent
-        ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800"
-        : "bg-secondary border-border"
-    }`}>
-      <div className={`flex items-center gap-2 ${isUrgent ? "text-yellow-800 dark:text-yellow-300" : "text-muted-foreground"}`}>
+    <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b text-sm bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800">
+      <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
         {daysLeft === 0
           ? "Your free trial expires today."

@@ -42,8 +42,8 @@ Keep it short, plain, and business-focused.`;
         const result = await appClient.integrations.Core.InvokeLLM({ prompt });
         setExplanation(result);
       }
-    } catch {
-      setExplanation("Unable to generate explanation. Please try again.");
+    } catch (err) {
+      setExplanation(err?.payload?.error || err?.message || "Unable to generate explanation. Please try again.");
     }
     setLoading(false);
   };

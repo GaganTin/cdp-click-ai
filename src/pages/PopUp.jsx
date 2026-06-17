@@ -57,8 +57,8 @@ const TABS = [
   { key: "emails",    label: "Emails Collected", icon: Mail },
 ];
 
-const STATUS_ACCENT = { active: "hsl(var(--foreground))", draft: "hsl(var(--border))" };
-const STATUS_STYLE  = { active: "bg-foreground text-background", draft: "bg-secondary text-foreground border border-border" };
+const STATUS_ACCENT = { active: "hsl(var(--foreground))", draft: "#eab308" };
+const STATUS_STYLE  = { active: "bg-foreground text-background", draft: "bg-yellow-500/10 text-yellow-700 border border-yellow-500/40" };
 
 // ── Pre-built Templates ────────────────────────────────────────────────────────
 // Defined as visual-builder state (container + blocks) so that cloning one yields a
@@ -1177,11 +1177,12 @@ function AnalyticsTab() {
   const [selected, setSelected] = useState(new Set());
   const [sortKey, setSortKey]   = useState("");
   const [sortDir, setSortDir]   = useState("asc");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo,   setDateTo]   = useState("");
-  const [compare,  setCompare]  = useState(false);
-  const [cmpFrom,  setCmpFrom]  = useState("");
-  const [cmpTo,    setCmpTo]    = useState("");
+  // Period + compare selections persist across refresh (localStorage).
+  const [dateFrom, setDateFrom] = useStickyState("", "popupAnalytics.dateFrom");
+  const [dateTo,   setDateTo]   = useStickyState("", "popupAnalytics.dateTo");
+  const [compare,  setCompare]  = useStickyState(false, "popupAnalytics.compare");
+  const [cmpFrom,  setCmpFrom]  = useStickyState("", "popupAnalytics.cmpFrom");
+  const [cmpTo,    setCmpTo]    = useStickyState("", "popupAnalytics.cmpTo");
 
   const handleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");

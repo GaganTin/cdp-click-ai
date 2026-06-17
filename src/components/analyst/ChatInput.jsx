@@ -81,10 +81,10 @@ export default function ChatInput({
                 </button>
               </div>
 
-              {/* Context Skills */}
+              {/* Skills */}
               {contextSkills.length > 0 && (
                 <div className="px-3 py-2 space-y-0.5">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide px-2 pb-1">Context Skills</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide px-2 pb-1">Skills</p>
                   {contextSkills.map((skill) => {
                     const active = activeSkillIds.includes(skill.id);
                     return (
@@ -131,7 +131,7 @@ export default function ChatInput({
               {!hasSkills && (
                 <div className="px-5 py-3">
                   <p className="text-xs text-muted-foreground">
-                    No skills yet - create context skills or templates from the{" "}
+                    No skills yet - create skills or templates from the{" "}
                     <strong>Tools</strong> button above.
                   </p>
                 </div>

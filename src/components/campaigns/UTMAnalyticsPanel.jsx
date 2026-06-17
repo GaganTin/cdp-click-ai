@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { appClient } from "@/api/appClient";
+import { useStickyState } from "@/lib/useStickyState";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
 } from "recharts";
-import { Plus, Maximize2, Minimize2, X, TrendingUp, TrendingDown, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
@@ -247,15 +248,16 @@ function ChartEditDialog({ chart, onSave, onClose }) {
 }
 
 // ── Delta badge ───────────────────────────────────────────────────────────────
-function Delta({ curr, prev, isRate = false }) {
+// Up-arrow + green for a positive change ('+'), down-arrow + red for a negative
+// change ('-'), based purely on the direction of the change.
+function Delta({ curr, prev }) {
   if (prev == null || curr == null || Number(prev) === 0) return null;
   const pct = ((Number(curr) - Number(prev)) / Math.abs(Number(prev))) * 100;
-  const up = pct > 0;
-  const positive = isRate ? !up : up; // for rates, down is good
+  const positive = pct >= 0;
   return (
     <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${positive ? "text-green-600" : "text-red-500"}`}>
-      {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-      {Math.abs(pct).toFixed(1)}%
+      {positive ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+      {positive ? "+" : "-"}{Math.abs(pct).toFixed(1)}%
     </span>
   );
 }
@@ -264,14 +266,15 @@ function Delta({ curr, prev, isRate = false }) {
 export default function UTMAnalyticsPanel() {
   const now = new Date();
 
-  const [curStart, setCurStart] = useState(toInput(new Date(now - daysMs(30))));
-  const [curEnd,   setCurEnd]   = useState(toInput(now));
-  const [prevStart, setPrevStart] = useState(toInput(new Date(now - daysMs(61))));
-  const [prevEnd,   setPrevEnd]   = useState(toInput(new Date(now - daysMs(31))));
-  const [compare,  setCompare]  = useState(false);
+  // Period, compare toggle and filters persist across refresh (localStorage).
+  const [curStart, setCurStart] = useStickyState(toInput(new Date(now - daysMs(30))), "utmAnalytics.curStart");
+  const [curEnd,   setCurEnd]   = useStickyState(toInput(now), "utmAnalytics.curEnd");
+  const [prevStart, setPrevStart] = useStickyState(toInput(new Date(now - daysMs(61))), "utmAnalytics.prevStart");
+  const [prevEnd,   setPrevEnd]   = useStickyState(toInput(new Date(now - daysMs(31))), "utmAnalytics.prevEnd");
+  const [compare,  setCompare]  = useStickyState(false, "utmAnalytics.compare");
 
   // paramFilters: { [col]: string } - single selected value per column
-  const [paramFilters,    setParamFilters]    = useState({});
+  const [paramFilters,    setParamFilters]    = useStickyState({}, "utmAnalytics.paramFilters");
   // availableVals: { [col]: string[] } - distinct values fetched from DB
   const [availableVals,   setAvailableVals]   = useState({});
   const [showParamFilter, setShowParamFilter] = useState(false);
@@ -381,11 +384,11 @@ export default function UTMAnalyticsPanel() {
   const fmtPct = (v) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : "-";
 
   const KPI_DEFS = [
-    { label: "Sessions",       cur: curKpis?.total_sessions,      prev: prevKpis?.total_sessions,      fmt: fmt,    isRate: false },
-    { label: "Active Users",   cur: curKpis?.total_users,         prev: prevKpis?.total_users,         fmt: fmt,    isRate: false },
-    { label: "New Users",      cur: curKpis?.total_new_users,     prev: prevKpis?.total_new_users,     fmt: fmt,    isRate: false },
-    { label: "Avg Bounce",     cur: curKpis?.avg_bounce_rate,     prev: prevKpis?.avg_bounce_rate,     fmt: fmtPct, isRate: true  },
-    { label: "Avg Engagement", cur: curKpis?.avg_engagement_rate, prev: prevKpis?.avg_engagement_rate, fmt: fmtPct, isRate: false },
+    { label: "Sessions",       cur: curKpis?.total_sessions,      prev: prevKpis?.total_sessions,      fmt: fmt    },
+    { label: "Active Users",   cur: curKpis?.total_users,         prev: prevKpis?.total_users,         fmt: fmt    },
+    { label: "New Users",      cur: curKpis?.total_new_users,     prev: prevKpis?.total_new_users,     fmt: fmt    },
+    { label: "Avg Bounce",     cur: curKpis?.avg_bounce_rate,     prev: prevKpis?.avg_bounce_rate,     fmt: fmtPct },
+    { label: "Avg Engagement", cur: curKpis?.avg_engagement_rate, prev: prevKpis?.avg_engagement_rate, fmt: fmtPct },
   ];
 
   return (
@@ -512,7 +515,7 @@ export default function UTMAnalyticsPanel() {
             {compare && !loading && kpi.prev != null && (
               <div className="mt-1.5 flex flex-col items-center gap-0.5">
                 <p className="text-[10px] text-muted-foreground">prev: {kpi.fmt(kpi.prev)}</p>
-                <Delta curr={kpi.cur} prev={kpi.prev} isRate={kpi.isRate} />
+                <Delta curr={kpi.cur} prev={kpi.prev} />
               </div>
             )}
           </div>
@@ -572,13 +575,21 @@ function ColInfo({ text }) {
 }
 
 // ── GA UTM Links Table ────────────────────────────────────────────────────────
+const fmtNum = (v) => (v != null ? Number(v).toLocaleString() : "-");
+const fmtRate = (v) => (v != null ? `${(Number(v) * 100).toFixed(1)}%` : "-");
+
 const UTM_COLS = [
-  { key: "session_source",        label: "Source",   defaultVisible: true, filterable: true, type: "text" },
-  { key: "session_medium",        label: "Medium",   defaultVisible: true, filterable: true, type: "text" },
-  { key: "session_campaign_name", label: "Campaign", defaultVisible: true, filterable: true, type: "text" },
-  { key: "session_content",       label: "Content",  defaultVisible: true, filterable: true, type: "text" },
-  { key: "session_term",          label: "Term",     defaultVisible: true, filterable: true, type: "text" },
-  { key: "session_utm_id",        label: "UTM ID",   defaultVisible: true, filterable: true, type: "text" },
+  { key: "session_source",        label: "Source",      defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_medium",        label: "Medium",      defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_campaign_name", label: "Campaign",    defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_content",       label: "Content",     defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_term",          label: "Term",        defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_utm_id",        label: "UTM ID",      defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "sessions",              label: "Sessions",    defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "Total sessions in the period." },
+  { key: "active_users",          label: "Active Users",defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "Users with at least one session." },
+  { key: "new_users",             label: "New Users",   defaultVisible: false, filterable: false, numeric: true, align: "right", format: fmtNum,  info: "First-time visitors." },
+  { key: "bounce_rate",           label: "Bounce",      defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "Avg. bounce rate." },
+  { key: "engagement_rate",       label: "Engagement",  defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "Avg. engagement rate." },
 ];
 
 export function GAUtmLinksSection() {
@@ -587,7 +598,7 @@ export function GAUtmLinksSection() {
   const [search, setSearch]         = useState("");
   const [filters, setFilters]       = useState({});
   const [colOrder, setColOrder]     = useState(() => UTM_COLS.map(c => c.key));
-  const [hiddenCols, setHiddenCols] = useState(() => new Set());
+  const [hiddenCols, setHiddenCols] = useState(() => new Set(UTM_COLS.filter(c => c.defaultVisible === false).map(c => c.key)));
   const [selected, setSelected]     = useState(new Set());
   const [sortKey, setSortKey]       = useState("");
   const [sortDir, setSortDir]       = useState("asc");
@@ -619,10 +630,17 @@ export function GAUtmLinksSection() {
     return true;
   });
 
+  const sortCol = UTM_COLS.find(c => c.key === sortKey);
   const sorted = sortKey
     ? [...filtered].sort((a, b) => {
-        const av = String(a[sortKey] || ""), bv = String(b[sortKey] || "");
-        const cmp = av.localeCompare(bv);
+        let cmp;
+        if (sortCol?.numeric) {
+          const av = a[sortKey] == null ? -Infinity : Number(a[sortKey]);
+          const bv = b[sortKey] == null ? -Infinity : Number(b[sortKey]);
+          cmp = av - bv;
+        } else {
+          cmp = String(a[sortKey] || "").localeCompare(String(b[sortKey] || ""));
+        }
         return sortDir === "asc" ? cmp : - cmp;
       })
     : filtered;
@@ -680,7 +698,7 @@ export function GAUtmLinksSection() {
   return (
     <div className="mt-8">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        Distinct UTM Links from GA (last 30d)
+        UTM Performance from GA (last 30d)
       </h3>
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
@@ -727,8 +745,8 @@ export function GAUtmLinksSection() {
               {visibleCols.map(col => (
                 <th key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className="px-3 py-2 text-left font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors">
-                  <span className="inline-flex items-center gap-1">
+                  className={`px-3 py-2 font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors ${col.align === "right" ? "text-right" : "text-left"}`}>
+                  <span className={`inline-flex items-center gap-1 ${col.align === "right" ? "justify-end" : ""}`}>
                     {col.label}
                     {col.info && <ColInfo text={col.info} />}
                     {sortKey === col.key
@@ -754,8 +772,8 @@ export function GAUtmLinksSection() {
                       checked={isSelected} onChange={() => toggleRow(key)} />
                   </td>
                   {visibleCols.map(col => (
-                    <td key={col.key} className="px-3 py-1.5 max-w-[160px] truncate whitespace-nowrap">
-                      {row[col.key] || "-"}
+                    <td key={col.key} className={`px-3 py-1.5 max-w-[160px] truncate whitespace-nowrap ${col.align === "right" ? "text-right tabular-nums" : ""}`}>
+                      {col.format ? col.format(row[col.key]) : (row[col.key] || "-")}
                     </td>
                   ))}
                 </tr>

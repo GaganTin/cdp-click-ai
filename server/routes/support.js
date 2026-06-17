@@ -35,9 +35,18 @@ export function createSupportRouter(pool) {
     const safeType     = VALID_TYPES.includes(type)       ? type     : "feedback";
     const safePriority = VALID_PRIORITIES.includes(priority) ? priority : "normal";
 
-    const companyId = req.headers["x-company-id"] || null;
+    let companyId = req.headers["x-company-id"] || null;
 
     try {
+      // The x-company-id header is client-supplied; only stamp it if the user is an
+      // active member, so a ticket can't be mis-attributed to another tenant.
+      if (companyId) {
+        const { rows: m } = await pool.query(
+          `SELECT 1 FROM app.company_members WHERE company_id = $1 AND user_id = $2 AND status = 'active'`,
+          [companyId, req.user.id]
+        );
+        if (!m.length) companyId = null;
+      }
       // Stamp the account too so the platform-owner Studio can group tickets by
       // client. Derived from the submitting user (every user belongs to one account).
       const { rows: [ticket] } = await pool.query(

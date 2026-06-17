@@ -9,7 +9,7 @@ The original Shopify landing DAGs copy-pasted the same three steps ~7 times:
 
 ``ShopifyClient.run_bulk_query`` encapsulates that. Each dataset's inner query is
 a module-level ``*_query(start, end)`` builder ported verbatim from the originals.
-No Airflow, no Blob, no Mongo — pure I/O so it is unit-testable.
+No Airflow, no Blob, no Mongo - pure I/O so it is unit-testable.
 """
 
 import json

@@ -602,27 +602,27 @@ export default function Analyst() {
                   </div>
                 </div>
                 <DialogDescription>
-                  Shared across your workspace. Context skills inject AI instructions per session - Templates are one-click conversation starters.
+                  Shared across your workspace. Skills inject AI instructions per session - Templates are one-click conversation starters.
                   Use the <strong>+</strong> button in the chat input to add them to a session.
                 </DialogDescription>
               </DialogHeader>
 
               <div className="flex-1 overflow-y-auto min-h-0 mt-2 space-y-6 pr-1">
-                {/* Context Skills section */}
+                {/* Skills section */}
                 <div>
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Context Skills</span>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Skills</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
                       injected into system prompt
                     </span>
                   </div>
                   {contextSkills.length === 0 ? (
                     <div className="py-6 text-center border border-dashed border-border rounded-lg">
-                      <p className="text-sm text-muted-foreground">No context skills yet</p>
+                      <p className="text-sm text-muted-foreground">No skills yet</p>
                       <p className="text-xs text-muted-foreground/70 mt-1">Create one to inject persistent instructions into any chat session</p>
                       <Button variant="outline" size="sm" className="mt-3 h-7 text-xs gap-1"
                         onClick={() => { setSkillDraft({ name: "", description: "", content: "", type: "context" }); setSkillsView("create"); }}>
-                        <Plus className="w-3 h-3" /> Create context skill
+                        <Plus className="w-3 h-3" /> Create skill
                       </Button>
                     </div>
                   ) : (
@@ -751,7 +751,7 @@ export default function Analyst() {
                       disabled={skillsView === "edit"}
                       onClick={() => setSkillDraft((d) => ({ ...d, type: t }))}
                       className={`flex-1 py-1.5 text-xs rounded-md border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${skillDraft.type === t ? "bg-foreground text-background border-foreground" : "border-border hover:bg-secondary/50"}`}>
-                      {t === "context" ? "Context skill" : "Template"}
+                      {t === "context" ? "Skill" : "Template"}
                     </button>
                   ))}
                 </div>

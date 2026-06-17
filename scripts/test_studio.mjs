@@ -1,5 +1,5 @@
 /* ============================================================================
- *  test_studio.mjs — comprehensive end-to-end test of the Studio (platform-owner)
+ *  test_studio.mjs - comprehensive end-to-end test of the Studio (platform-owner)
  *  API logic. Creates isolated fixtures (a throwaway account + user + workspace),
  *  exercises every /api/admin endpoint and its edge cases against a RUNNING
  *  server, asserts outputs, then tears the fixtures down.
@@ -36,7 +36,7 @@ async function api(path, { method = "GET", token, body } = {}) {
 
 async function setup() {
   const realOwner = (await pool.query("SELECT id,email,account_id FROM app.users WHERE is_platform_admin=true LIMIT 1")).rows[0];
-  if (!realOwner) throw new Error("No platform owner in DB — run apply_platform_admin.cjs");
+  if (!realOwner) throw new Error("No platform owner in DB - run apply_platform_admin.cjs");
   ownerTok = createToken({ id: realOwner.id, email: realOwner.email });
   ids.realOwner = realOwner;
 
@@ -185,7 +185,7 @@ async function run() {
     check("signup consumes invite → auto-owner", ru?.is_platform_admin === true);
     check("invite removed after signup", (await pool.query("SELECT 1 FROM app.platform_owner_invites WHERE email=$1", [newEmail])).rowCount === 0);
   } else {
-    check("register endpoint available for invite-on-signup", false, `register returned ${reg.status} (code-based signup?) — skipping`);
+    check("register endpoint available for invite-on-signup", false, `register returned ${reg.status} (code-based signup?) - skipping`);
     await api(`/admin/owner-invites/${encodeURIComponent(newEmail)}`, { token: ownerTok, method: "DELETE" });
   }
   // cancel invite endpoint

@@ -327,7 +327,7 @@ export function createEdmRouter(pool) {
       if (!campaign.segment_id) return ok(res, { count: 0, sample: [], message: "No segment assigned" });
 
       const { rows: segment } = await pool.query(
-        `SELECT metadata FROM app.segments WHERE id=$1`, [campaign.segment_id]
+        `SELECT metadata FROM app.segments WHERE id=$1 AND company_id=$2`, [campaign.segment_id, companyId]
       );
 
       const { rows } = await pool.query(`

@@ -92,7 +92,7 @@ REFUND_LINE_COLUMNS = [
 
 
 # --------------------------------------------------------------------------- #
-# order — Shopify orders (header)
+# order - Shopify orders (header)
 # --------------------------------------------------------------------------- #
 def transform_order(records, client):
     rows = []
@@ -126,7 +126,7 @@ def transform_order(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# order_line — line items + shipping lines (joined to order header for created_at)
+# order_line - line items + shipping lines (joined to order header for created_at)
 # --------------------------------------------------------------------------- #
 def transform_order_line(records, client):
     orders, items = [], []
@@ -189,7 +189,7 @@ def transform_order_line(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# product — products + variants (variant grain)
+# product - products + variants (variant grain)
 # --------------------------------------------------------------------------- #
 def transform_product(records, client):
     products, variants = [], []
@@ -238,7 +238,7 @@ def transform_product(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# product_detail — collection memberships
+# product_detail - collection memberships
 # --------------------------------------------------------------------------- #
 def transform_product_detail(records, client):
     collections, products, variants = [], [], []
@@ -269,7 +269,7 @@ def transform_product_detail(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# product_image — featured image per product/variant
+# product_image - featured image per product/variant
 # --------------------------------------------------------------------------- #
 def transform_product_image(records, client):
     products, variants = [], []
@@ -307,7 +307,7 @@ def transform_product_image(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# customer — Shopify customers
+# customer - Shopify customers
 # --------------------------------------------------------------------------- #
 def transform_customer(records, client):
     rows = []
@@ -345,7 +345,7 @@ def transform_customer(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# inventory_level — inventory levels (full snapshot)
+# inventory_level - inventory levels (full snapshot)
 # --------------------------------------------------------------------------- #
 def transform_inventory_level(records, client):
     rows = []
@@ -372,7 +372,7 @@ def transform_inventory_level(records, client):
 
 
 # --------------------------------------------------------------------------- #
-# refund / refund_line — from orders[].refunds (inline list) + refundLineItems
+# refund / refund_line - from orders[].refunds (inline list) + refundLineItems
 # --------------------------------------------------------------------------- #
 def _iter_order_refunds(records):
     """Yield (order_native_id, refund) for each inline refund on each order node."""

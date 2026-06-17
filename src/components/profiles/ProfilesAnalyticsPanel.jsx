@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
+import { useStickyState } from "@/lib/useStickyState";
 import { Users, Ghost, MailCheck, Activity, ShoppingBag, UserPlus, BarChart2 } from "lucide-react";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock,
@@ -21,10 +21,11 @@ const pct = (num, denom) => (denom > 0 ? ((num / denom) * 100).toFixed(1) : "0.0
 const pctNum = (num, denom) => (denom > 0 ? (num / denom) * 100 : 0);
 
 export default function ProfilesAnalyticsPanel() {
-  const [range, setRange] = useState({ from: "", to: "" });
-  const [compare, setCompare] = useState(false);
-  const [compareRange, setCompareRange] = useState({ from: "", to: "" });
-  const [demoDim, setDemoDim] = useState("age_group");
+  // Period, compare and demographic-dimension selections persist across refresh.
+  const [range, setRange] = useStickyState({ from: "", to: "" }, "profilesAnalytics.range");
+  const [compare, setCompare] = useStickyState(false, "profilesAnalytics.compare");
+  const [compareRange, setCompareRange] = useStickyState({ from: "", to: "" }, "profilesAnalytics.compareRange");
+  const [demoDim, setDemoDim] = useStickyState("age_group", "profilesAnalytics.demoDim");
 
   const { data, isLoading } = useQuery({
     queryKey: ["profiles-analytics", range.from, range.to],

@@ -27,17 +27,18 @@ export function syncPrevPeriod(from, to) {
   return { from: iso(ps), to: iso(pe) };
 }
 
-// % change badge with up/down arrow. For "rate" metrics a decrease is good (green).
-export function Delta({ curr, prev, isRate = false }) {
+// % change badge: a positive change shows an up trend icon + green "+x%", a negative
+// change shows a down trend icon + red "-x%" (purely directional, matching the UTM
+// analytics delta). Extra props (e.g. isRate) passed by callers are ignored.
+export function Delta({ curr, prev }) {
   if (prev == null || curr == null || Number(prev) === 0) return null;
   const pct = ((Number(curr) - Number(prev)) / Math.abs(Number(prev))) * 100;
   if (!isFinite(pct)) return null;
-  const up = pct > 0;
-  const positive = isRate ? !up : up;
+  const positive = pct >= 0;
   return (
     <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${positive ? "text-green-600" : "text-red-500"}`}>
-      {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-      {Math.abs(pct).toFixed(1)}%
+      {positive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+      {positive ? "+" : "-"}{Math.abs(pct).toFixed(1)}%
     </span>
   );
 }

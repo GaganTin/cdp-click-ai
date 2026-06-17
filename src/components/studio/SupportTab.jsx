@@ -90,7 +90,7 @@ export default function SupportTab() {
               </div>
               <p className="text-sm text-muted-foreground whitespace-pre-wrap">{t.body}</p>
               <div className="text-xs text-muted-foreground pt-1 border-t border-border flex flex-wrap gap-x-3 gap-y-1">
-                <span>{t.account_name || "—"}</span>
+                <span>{t.account_name || "-"}</span>
                 <span>·</span>
                 <span>{t.user_name || t.user_email || "Unknown user"}</span>
                 {t.company_name && <><span>·</span><span>{t.company_name}</span></>}

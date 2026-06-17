@@ -1202,8 +1202,9 @@ app.patch("/api/entities/:entity/:id", authenticate, async (req, res) => {
     const cols = pickColumns(req.body, config.columns);
     if (cols.length === 0) return res.status(400).json({ error: "No valid fields to update." });
 
+    let companyId = null;
     if (config.multiTenant) {
-      const companyId = await companyGuard(req, res);
+      companyId = await companyGuard(req, res);
       if (!companyId) return;
 
       // Only the creator or an admin/owner can edit
@@ -1233,9 +1234,13 @@ app.patch("/api/entities/:entity/:id", authenticate, async (req, res) => {
     }
 
     const setClauses = cols.map((c, i) => `${c} = $${i + 1}`).join(", ");
+    const idIdx = cols.length + 1;
     const values = [...cols.map((c) => req.body[c]), req.params.id];
+    // Self-scope the write to the company (defence in depth beyond the SELECT above).
+    let whereScope = "";
+    if (companyId) { values.push(companyId); whereScope = ` AND company_id = $${cols.length + 2}`; }
     const { rows } = await p.query(
-      `UPDATE ${config.table} SET ${setClauses} WHERE id = $${values.length} RETURNING *`,
+      `UPDATE ${config.table} SET ${setClauses} WHERE id = $${idIdx}${whereScope} RETURNING *`,
       values
     );
     if (rows.length === 0) return res.status(404).json({ error: "Not found" });
@@ -1251,8 +1256,9 @@ app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
   try {
     const p = requirePool();
 
+    let companyId = null;
     if (config.multiTenant) {
-      const companyId = await companyGuard(req, res);
+      companyId = await companyGuard(req, res);
       if (!companyId) return;
       const { rows: item } = await p.query(
         `SELECT created_by FROM ${config.table} WHERE id = $1 AND company_id = $2`,
@@ -1269,7 +1275,10 @@ app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
       }
     }
 
-    await p.query(`DELETE FROM ${config.table} WHERE id = $1`, [req.params.id]);
+    const delParams = [req.params.id];
+    let delScope = "";
+    if (companyId) { delParams.push(companyId); delScope = " AND company_id = $2"; }
+    await p.query(`DELETE FROM ${config.table} WHERE id = $1${delScope}`, delParams);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -1630,15 +1639,20 @@ app.post("/api/integrations/llm", async (req, res) => {
 });
 
 // ── Chart Summaries (DB-cached AI explanations) ───────────────────────────────
-app.post("/api/chart-summaries/explain", async (req, res) => {
+app.post("/api/chart-summaries/explain", authenticate, async (req, res) => {
   if (!aiClient) return res.status(503).json({ error: "Azure OpenAI is not configured." });
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   const { chart_key, chart_title, chart_type, data } = req.body;
   if (!chart_key) return res.status(400).json({ error: "chart_key is required" });
   const p = requirePool();
   try {
+    // Cache is per workspace - chart_key is a static per-chart string, so without
+    // company_id one tenant's explanation would leak to (and be reused by) others.
     const existing = await p.query(
-      "SELECT summary FROM app.chart_summaries WHERE chart_key = $1",
-      [chart_key]
+      "SELECT summary FROM app.chart_summaries WHERE company_id = $1 AND chart_key = $2",
+      [companyId, chart_key]
     );
     if (existing.rows.length > 0) return res.json({ summary: existing.rows[0].summary });
 
@@ -1659,9 +1673,9 @@ Be plain, specific, and business-focused. Reference actual numbers from the data
 
     const summary = await runSimpleLLM(prompt, false);
     await p.query(
-      `INSERT INTO app.chart_summaries (chart_key, summary) VALUES ($1, $2)
-       ON CONFLICT (chart_key) DO UPDATE SET summary = EXCLUDED.summary, updated_date = NOW()`,
-      [chart_key, summary]
+      `INSERT INTO app.chart_summaries (company_id, chart_key, summary) VALUES ($1, $2, $3)
+       ON CONFLICT (company_id, chart_key) DO UPDATE SET summary = EXCLUDED.summary, updated_date = NOW()`,
+      [companyId, chart_key, summary]
     );
     return res.json({ summary });
   } catch (err) {
@@ -1849,11 +1863,13 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
 // ── Profiles: Anonymous (reads from app.anonymous_profiles) ───────────────────
 app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const { search = "", page = "1", limit = "20", source_medium, source, medium, has_form_complete, attribute_value_ids, attr_groups, sort, dir } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    const params = [];
-    const conditions = [];
+    const params = [companyId];
+    const conditions = ["company_id = $1"];
 
     if (search)       { params.push(`%${search.toLowerCase()}%`); conditions.push(`LOWER(visitor_id) LIKE $${params.length}`); }
     // source_mediums is an array of "source / medium" strings.
@@ -1897,12 +1913,14 @@ app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
 
 app.get("/api/profiles/anonymous-filters", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const [sm, src, med, camp] = await Promise.all([
-      pool.query(`SELECT DISTINCT UNNEST(source_mediums) AS sm FROM app.anonymous_profiles ORDER BY sm`),
-      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 1)) AS s FROM app.anonymous_profiles ORDER BY s`),
-      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 2)) AS m FROM app.anonymous_profiles ORDER BY m`),
-      pool.query(`SELECT DISTINCT top_campaign AS c FROM app.anonymous_profiles WHERE top_campaign IS NOT NULL AND top_campaign NOT IN ('', '(not set)') ORDER BY top_campaign`),
+      pool.query(`SELECT DISTINCT UNNEST(source_mediums) AS sm FROM app.anonymous_profiles WHERE company_id = $1 ORDER BY sm`, [companyId]),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 1)) AS s FROM app.anonymous_profiles WHERE company_id = $1 ORDER BY s`, [companyId]),
+      pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(UNNEST(source_mediums), ' / ', 2)) AS m FROM app.anonymous_profiles WHERE company_id = $1 ORDER BY m`, [companyId]),
+      pool.query(`SELECT DISTINCT top_campaign AS c FROM app.anonymous_profiles WHERE company_id = $1 AND top_campaign IS NOT NULL AND top_campaign NOT IN ('', '(not set)') ORDER BY top_campaign`, [companyId]),
     ]);
     res.json({
       source_mediums: sm.rows.map(x => x.sm).filter(Boolean),
@@ -1932,11 +1950,12 @@ app.get("/api/profiles/analytics", authenticate, async (req, res) => {
     if (from) { dParams.push(from); dClause += ` AND member_join_date >= $${dParams.length}`; }
     if (to)   { dParams.push(to);   dClause += ` AND member_join_date <= ($${dParams.length}::date + 1)`; }
 
-    const aParams = [];
+    const aParams = [companyId];
     let aClause = "";
     if (from) { aParams.push(from); aClause += ` AND last_seen >= $${aParams.length}`; }
     if (to)   { aParams.push(to);   aClause += ` AND last_seen <= ($${aParams.length}::date + 1)`; }
-    const aWhere = aClause ? `WHERE ${aClause.replace(/^ AND /, "")}` : "";
+    // Anonymous metrics are company-scoped just like the customer ones.
+    const aWhere = `WHERE company_id = $1${aClause}`;
 
     // Categorical breakdown over customer_profiles, excluding blanks/(not set).
     const groupQ = (col, { excludeNotSet = false } = {}) => pool.query(
@@ -2000,14 +2019,14 @@ app.get("/api/profiles/analytics", authenticate, async (req, res) => {
       pool.query(
         `SELECT top_source_medium AS name, COUNT(*)::int AS value
            FROM app.anonymous_profiles
-          WHERE top_source_medium IS NOT NULL AND top_source_medium NOT IN ('', '(not set)', '(none)')${aClause}
+          WHERE company_id = $1 AND top_source_medium IS NOT NULL AND top_source_medium NOT IN ('', '(not set)', '(none)')${aClause}
           GROUP BY 1 ORDER BY value DESC LIMIT 10`, aParams),
       pool.query(
         `SELECT COUNT(DISTINCT cp.member_id)::int AS value
            FROM app.customer_profiles cp
           WHERE ${scope.replace(/company_id/g, "cp.company_id")}${dClause}
             AND EXISTS (SELECT 1 FROM commerce."order" s
-                         WHERE s.customer_id = cp.member_id
+                         WHERE s.customer_id = cp.member_id AND s.company_id = cp.company_id
                            AND s.order_status IN ('completed', 'confirmed'))`, dParams)
         .catch(() => ({ rows: [{ value: 0 }] })), // commerce schema may be absent
     ]);
@@ -2399,6 +2418,8 @@ app.delete("/api/profiles/customers/:memberId", authenticate, async (req, res) =
 // names the Profiles UI already consumes.
 app.get("/api/profiles/customers/:memberId/transactions", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const memberId = req.params.memberId;
     // Most recent orders, each with its line items rolled up as JSON.
@@ -2413,13 +2434,13 @@ app.get("/api/profiles/customers/:memberId/transactions", authenticate, async (r
                          'unit_price', l.unit_price_net
                        ) ORDER BY l.unit_price_net DESC NULLS LAST)
                   FROM commerce.order_line l
-                 WHERE l.order_id = o.order_id
+                 WHERE l.order_id = o.order_id AND l.company_id = o.company_id
               ), '[]'::jsonb) AS items
          FROM commerce."order" o
-        WHERE o.customer_id = $1
+        WHERE o.customer_id = $1 AND o.company_id = $2
         ORDER BY o.order_date DESC NULLS LAST
         LIMIT 25`,
-      [memberId]
+      [memberId, companyId]
     );
     // Lifetime summary (counts only real orders, matching the card aggregates).
     const { rows: sum } = await pool.query(
@@ -2429,8 +2450,8 @@ app.get("/api/profiles/customers/:memberId/transactions", authenticate, async (r
               MIN(order_date)              AS first_order_date,
               MODE() WITHIN GROUP (ORDER BY currency) AS currency
          FROM commerce."order"
-        WHERE customer_id = $1 AND order_status IN ('completed', 'confirmed')`,
-      [memberId]
+        WHERE customer_id = $1 AND company_id = $2 AND order_status IN ('completed', 'confirmed')`,
+      [memberId, companyId]
     );
     res.json({ orders: rows, summary: sum[0] });
   } catch (err) {
@@ -2469,11 +2490,13 @@ async function segmentsForEntity(pool, companyId, scope, entityId) {
 // engagement is reported as the user_engagement event count.
 app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const memberId = req.params.memberId;
     const prof = await pool.query(
-      "SELECT primary_email, COALESCE(ga_visitor_ids, '{}') AS apids FROM app.customer_profiles WHERE member_id = $1",
-      [memberId]
+      "SELECT primary_email, COALESCE(ga_visitor_ids, '{}') AS apids FROM app.customer_profiles WHERE member_id = $1 AND company_id = $2",
+      [memberId, companyId]
     );
     if (!prof.rows.length) return res.status(404).json({ error: "Profile not found" });
     const email = prof.rows[0].primary_email || "";
@@ -2484,34 +2507,34 @@ app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, 
     const [topPage, topLink, engagement, topAttr, topProduct, topCategory, topChannel, emails, popups, utmLinks] = await Promise.all([
       hasApids ? pool.query(
         `SELECT page_location AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = ANY($1) AND event_name = 'page_view' AND page_location <> ''
-          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [apids]) : none,
+          WHERE company_id = $2 AND capsuite_apid = ANY($1) AND event_name = 'page_view' AND page_location <> ''
+          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [apids, companyId]) : none,
       hasApids ? pool.query(
         `SELECT link_url AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = ANY($1) AND link_url IS NOT NULL AND link_url <> ''
-          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [apids]) : none,
+          WHERE company_id = $2 AND capsuite_apid = ANY($1) AND link_url IS NOT NULL AND link_url <> ''
+          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [apids, companyId]) : none,
       hasApids ? pool.query(
         `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = ANY($1) AND event_name = 'user_engagement'`, [apids]) : { rows: [{ count: 0 }] },
+          WHERE company_id = $2 AND capsuite_apid = ANY($1) AND event_name = 'user_engagement'`, [apids, companyId]) : { rows: [{ count: 0 }] },
       pool.query(
         `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
            FROM app.profile_attribute_values pv
            JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
            JOIN app.attribute_values v ON v.id = pv.attribute_value_id
-          WHERE pv.entity_type = 'customer' AND pv.entity_id = $1
-          ORDER BY pv.score DESC LIMIT 1`, [memberId]),
+          WHERE pv.company_id = $2 AND pv.entity_type = 'customer' AND pv.entity_id = $1
+          ORDER BY pv.score DESC LIMIT 1`, [memberId, companyId]),
       pool.query(
         `SELECT product_name AS value, SUM(qty_ordered)::int AS qty FROM commerce.order_line
-          WHERE customer_id = $1 AND line_type = 'line_item' AND product_name IS NOT NULL
-          GROUP BY product_name ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId]),
+          WHERE company_id = $2 AND customer_id = $1 AND line_type = 'line_item' AND product_name IS NOT NULL
+          GROUP BY product_name ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId, companyId]),
       pool.query(
         `SELECT product_type AS value, SUM(qty_ordered)::int AS qty FROM commerce.order_line
-          WHERE customer_id = $1 AND product_type IS NOT NULL AND product_type <> ''
-          GROUP BY product_type ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId]),
+          WHERE company_id = $2 AND customer_id = $1 AND product_type IS NOT NULL AND product_type <> ''
+          GROUP BY product_type ORDER BY qty DESC NULLS LAST LIMIT 1`, [memberId, companyId]),
       pool.query(
         `SELECT channel AS value, COUNT(*)::int AS count FROM commerce."order"
-          WHERE customer_id = $1 AND channel IS NOT NULL AND channel <> ''
-          GROUP BY channel ORDER BY count DESC LIMIT 1`, [memberId]),
+          WHERE company_id = $2 AND customer_id = $1 AND channel IS NOT NULL AND channel <> ''
+          GROUP BY channel ORDER BY count DESC LIMIT 1`, [memberId, companyId]),
       email ? pool.query(
         `SELECT ec.name AS campaign, es.status, es.sent_at,
                 BOOL_OR(ee.event_type = 'open')  AS opened,
@@ -2519,24 +2542,24 @@ app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, 
            FROM app.edm_sends es
            JOIN app.edm_campaigns ec ON ec.id = es.edm_campaign_id
            LEFT JOIN app.edm_events ee ON ee.send_id = es.id
-          WHERE LOWER(es.email) = LOWER($1)
+          WHERE es.company_id = $2 AND LOWER(es.email) = LOWER($1)
           GROUP BY ec.name, es.status, es.sent_at
-          ORDER BY es.sent_at DESC NULLS LAST LIMIT 10`, [email]) : none,
+          ORDER BY es.sent_at DESC NULLS LAST LIMIT 10`, [email, companyId]) : none,
       pool.query(
         `SELECT DISTINCT ON (COALESCE(popup_name, popup_ref)) COALESCE(popup_name, popup_ref) AS name, collected_at AS at
            FROM app.popup_email_collected
-          WHERE ($1 <> '' AND LOWER(email) = LOWER($1)) OR (CARDINALITY($2::text[]) > 0 AND visitor_id = ANY($2))
-          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [email, apids]),
+          WHERE company_id = $3 AND (($1 <> '' AND LOWER(email) = LOWER($1)) OR (CARDINALITY($2::text[]) > 0 AND visitor_id = ANY($2)))
+          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [email, apids, companyId]),
       hasApids ? pool.query(
         `SELECT DISTINCT c.name, c.utm_source, c.utm_medium, c.utm_campaign, c.utm_term, c.utm_content, c.base_url
            FROM ga_landing.path_exploration pe
-           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name
-          WHERE pe.capsuite_apid = ANY($1)
+           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name AND c.company_id = $2
+          WHERE pe.company_id = $2 AND pe.capsuite_apid = ANY($1)
             AND pe.session_campaign_name <> '' AND pe.session_campaign_name <> '(not set)'
-          LIMIT 10`, [apids]) : none,
+          LIMIT 10`, [apids, companyId]) : none,
     ]);
 
-    const segments = await segmentsForEntity(pool, req.headers["x-company-id"], "customer", memberId);
+    const segments = await segmentsForEntity(pool, companyId, "customer", memberId);
 
     res.json({
       web: {
@@ -2560,38 +2583,40 @@ app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, 
 
 app.get("/api/profiles/anonymous/:visitorId/insights", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const vid = req.params.visitorId;
     const [topPage, topLink, engagement, topAttr, popups, utmLinks] = await Promise.all([
       pool.query(
         `SELECT page_location AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = $1 AND event_name = 'page_view' AND page_location <> ''
-          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [vid]),
+          WHERE company_id = $2 AND capsuite_apid = $1 AND event_name = 'page_view' AND page_location <> ''
+          GROUP BY page_location ORDER BY count DESC LIMIT 1`, [vid, companyId]),
       pool.query(
         `SELECT link_url AS value, COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = $1 AND link_url IS NOT NULL AND link_url <> ''
-          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [vid]),
+          WHERE company_id = $2 AND capsuite_apid = $1 AND link_url IS NOT NULL AND link_url <> ''
+          GROUP BY link_url ORDER BY count DESC LIMIT 1`, [vid, companyId]),
       pool.query(
         `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
-          WHERE capsuite_apid = $1 AND event_name = 'user_engagement'`, [vid]),
+          WHERE company_id = $2 AND capsuite_apid = $1 AND event_name = 'user_engagement'`, [vid, companyId]),
       pool.query(
         `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
            FROM app.profile_attribute_values pv
            JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
            JOIN app.attribute_values v ON v.id = pv.attribute_value_id
-          WHERE pv.entity_type = 'anonymous' AND pv.entity_id = $1
-          ORDER BY pv.score DESC LIMIT 1`, [vid]),
+          WHERE pv.company_id = $2 AND pv.entity_type = 'anonymous' AND pv.entity_id = $1
+          ORDER BY pv.score DESC LIMIT 1`, [vid, companyId]),
       pool.query(
         `SELECT DISTINCT ON (COALESCE(popup_name, popup_ref)) COALESCE(popup_name, popup_ref) AS name, collected_at AS at
-           FROM app.popup_email_collected WHERE visitor_id = $1
-          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [vid]),
+           FROM app.popup_email_collected WHERE company_id = $2 AND visitor_id = $1
+          ORDER BY COALESCE(popup_name, popup_ref), collected_at DESC LIMIT 10`, [vid, companyId]),
       pool.query(
         `SELECT DISTINCT c.name, c.utm_source, c.utm_medium, c.utm_campaign, c.utm_term, c.utm_content, c.base_url
            FROM ga_landing.path_exploration pe
-           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name
-          WHERE pe.capsuite_apid = $1
+           JOIN app.campaigns c ON c.utm_campaign = pe.session_campaign_name AND c.company_id = $2
+          WHERE pe.company_id = $2 AND pe.capsuite_apid = $1
             AND pe.session_campaign_name <> '' AND pe.session_campaign_name <> '(not set)'
-          LIMIT 10`, [vid]),
+          LIMIT 10`, [vid, companyId]),
     ]);
 
     // Pop-ups actually seen/clicked - from the interaction service's activity log
@@ -2606,13 +2631,13 @@ app.get("/api/profiles/anonymous/:visitorId/insights", authenticate, async (req,
            FROM interaction.activities ia
            JOIN interaction.interactions ii ON ii.id = ia.correlated_interaction_id
            JOIN app.popups pu ON pu.cdp_reference_id = ii.cdp_reference_id
-          WHERE ia.capsuite_apid = $1
+          WHERE ia.capsuite_apid = $1 AND pu.company_id = $2
           GROUP BY pu.name
-          ORDER BY MIN(ia.created_at) DESC LIMIT 10`, [vid]);
+          ORDER BY MIN(ia.created_at) DESC LIMIT 10`, [vid, companyId]);
       popupsSeen = seen.rows;
     }
 
-    const segments = await segmentsForEntity(pool, req.headers["x-company-id"], "anonymous", vid);
+    const segments = await segmentsForEntity(pool, companyId, "anonymous", vid);
 
     res.json({
       web: {
@@ -2715,15 +2740,15 @@ app.get("/api/segments/:id/export", authenticate, async (req, res) => {
         "preferred_language", "preferred_channel", "is_opt_in_email", "is_opt_in_sms", "is_subscriber_only",
         "ga_sessions", "seminar_count", "attribute_count", "member_join_date", "tags"];
       rows = ids.length ? (await pool.query(
-        `SELECT ${columns.join(", ")} FROM app.customer_profiles WHERE member_id = ANY($1::text[]) ORDER BY member_join_date DESC NULLS LAST`,
-        [ids]
+        `SELECT ${columns.join(", ")} FROM app.customer_profiles WHERE member_id = ANY($1::text[]) AND company_id = $2 ORDER BY member_join_date DESC NULLS LAST`,
+        [ids, companyId]
       )).rows : [];
     } else {
       columns = ["visitor_id", "first_seen", "last_seen", "sessions", "page_views", "total_events",
         "form_starts", "form_completes", "top_source_medium", "top_campaign"];
       rows = ids.length ? (await pool.query(
-        `SELECT ${columns.join(", ")} FROM app.anonymous_profiles WHERE visitor_id = ANY($1::text[]) ORDER BY last_seen DESC NULLS LAST`,
-        [ids]
+        `SELECT ${columns.join(", ")} FROM app.anonymous_profiles WHERE visitor_id = ANY($1::text[]) AND company_id = $2 ORDER BY last_seen DESC NULLS LAST`,
+        [ids, companyId]
       )).rows : [];
     }
 

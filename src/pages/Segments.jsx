@@ -770,7 +770,9 @@ export default function Segments() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <h3 className="text-sm font-semibold">{seg.name}</h3>
-                            {seg.status && seg.status !== "draft" && (
+                            {(!seg.status || seg.status === "draft") ? (
+                              <Badge className="text-[10px] bg-yellow-500/10 text-yellow-700 border border-yellow-500/40">draft</Badge>
+                            ) : (
                               <Badge variant="secondary" className="text-[10px]">{seg.status}</Badge>
                             )}
                             {seg.is_used && (

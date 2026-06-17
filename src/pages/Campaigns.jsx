@@ -538,7 +538,11 @@ export default function Campaigns() {
                                     {c.is_used && <Lock className="w-3 h-3 text-muted-foreground flex-shrink-0" />}
                                   </div>
                                 </td>
-                                <td className="px-3 py-2.5 text-muted-foreground capitalize whitespace-nowrap">{c.status || "-"}</td>
+                                <td className="px-3 py-2.5 whitespace-nowrap">
+                                  {c.status === "draft"
+                                    ? <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-700 border border-yellow-500/40 capitalize">draft</span>
+                                    : <span className="text-muted-foreground capitalize">{c.status || "-"}</span>}
+                                </td>
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{c.utm_source || "-"}</td>
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{c.utm_medium || "-"}</td>
                                 <td className="px-3 py-2.5 text-muted-foreground max-w-[120px] truncate whitespace-nowrap">{c.utm_campaign || "-"}</td>

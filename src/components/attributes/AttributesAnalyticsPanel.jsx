@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
+import { useStickyState } from "@/lib/useStickyState";
 import { Tag, CheckCircle2, AlertCircle, Layers, Users, Hash, BarChart2, ChevronRight } from "lucide-react";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock, AnalyticsLoading,
@@ -26,8 +26,9 @@ function FilterPills({ options, value, onChange }) {
 }
 
 export default function AttributesAnalyticsPanel({ onOpenAttribute }) {
-  const [sourceFilter, setSourceFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Filter selections persist across refresh (localStorage).
+  const [sourceFilter, setSourceFilter] = useStickyState("", "attributesAnalytics.sourceFilter");
+  const [statusFilter, setStatusFilter] = useStickyState("", "attributesAnalytics.statusFilter");
   const { data, isLoading } = useQuery({
     queryKey: ["attributes-analytics"],
     queryFn: () => appClient.attributes.analytics(),

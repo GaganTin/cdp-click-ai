@@ -1620,13 +1620,19 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
 // First-run guided checklist shown when there are no content attributes yet.
 function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
   const navigate = useNavigate();
-  const Step = ({ done, n, title, children }) => (
+  // The current step is the first one not yet done (steps 3 & 4 are never auto-done).
+  const doneFlags = [gaConnected, gaSynced, false, false];
+  const currentN = doneFlags.findIndex(d => !d) + 1; // 0 when everything is done
+  const Step = ({ done, n, title, current, children }) => (
     <div className="flex items-start gap-3">
-      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${done ? "bg-foreground text-background" : "border border-border text-muted-foreground"}`}>
+      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
+        done ? "bg-foreground text-background"
+        : current ? "bg-yellow-500/15 text-yellow-700 border border-yellow-500/50 ring-2 ring-yellow-500/20"
+        : "border border-border text-muted-foreground"}`}>
         {done ? <Check className="w-3.5 h-3.5" /> : n}
       </div>
       <div className="min-w-0 pt-0.5">
-        <p className="text-sm font-medium">{title}</p>
+        <p className={`text-sm font-medium ${current ? "text-yellow-700" : ""}`}>{title}</p>
         <div className="text-xs text-muted-foreground mt-0.5">{children}</div>
       </div>
     </div>
@@ -1639,14 +1645,14 @@ function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
         <p className="text-xs text-muted-foreground">The AI reads your website, tags each page, and visitors inherit those tags - even anonymous ones.</p>
       </div>
       <div className="space-y-4">
-        <Step done={gaConnected} n={1} title="Connect Google Analytics">
+        <Step done={gaConnected} n={1} current={currentN === 1} title="Connect Google Analytics">
           {gaConnected ? "Connected - the AI knows which site to crawl." : (
             <button onClick={() => navigate("/integrations")} className="underline hover:text-foreground inline-flex items-center gap-1">
               Connect now <ArrowRight className="w-3 h-3" />
             </button>
           )}
         </Step>
-        <Step done={gaSynced} n={2} title="Sync your Google Analytics data">
+        <Step done={gaSynced} n={2} current={currentN === 2} title="Sync your Google Analytics data">
           {gaSynced ? "Synced - we know which pages your visitors viewed." : (
             <>
               Page discovery reads your synced GA pages, so a connection alone isn't enough - run a sync first.{" "}
@@ -1656,14 +1662,14 @@ function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
             </>
           )}
         </Step>
-        <Step done={false} n={3} title="Create your first attribute">
+        <Step done={false} n={3} current={currentN === 3} title="Create your first attribute">
           Name a dimension (e.g. “Country Interest”) and give the AI an instruction.
           <div className="flex items-center gap-2 mt-2">
             <Button size="sm" className="h-8 gap-1.5" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> New Attribute</Button>
             <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest}><Sparkles className="w-3.5 h-3.5" /> Suggest with AI</Button>
           </div>
         </Step>
-        <Step done={false} n={4} title="Reconstruct to tag your pages">
+        <Step done={false} n={4} current={currentN === 4} title="Reconstruct to tag your pages">
           Open the attribute and hit <strong>Reconstruct</strong> - the AI crawls, tags, and propagates to profiles.
         </Step>
       </div>

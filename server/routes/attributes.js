@@ -98,7 +98,7 @@ export function createAttributesRouter(pool) {
         );
         const hitIds = pages.filter((p) => matchesExclusion(p.url, patterns)).map((p) => p.id);
         if (hitIds.length) {
-          await pool.query(`UPDATE app.web_pages SET is_excluded = true WHERE id = ANY($1::uuid[])`, [hitIds]);
+          await pool.query(`UPDATE app.web_pages SET is_excluded = true WHERE id = ANY($1::uuid[]) AND company_id = $2`, [hitIds, req.companyId]);
           const { rows: aff } = await pool.query(
             `SELECT DISTINCT attribute_id FROM app.page_attribute_values WHERE page_id = ANY($1::uuid[])`,
             [hitIds]
@@ -1358,11 +1358,14 @@ export function createAttributesRouter(pool) {
   });
 
   // Recent run history (for the "last runs" recap in the detail view).
+  // Per-attribute history is STRICTLY that attribute's own jobs - if the attribute
+  // was never run on its own, its history is empty (global "Reconstruct all" runs
+  // are not attributed to it here).
   router.get("/jobs", async (req, res) => {
     try {
       const params = [req.companyId];
       let where = "company_id = $1";
-      if (req.query.attribute_id) { params.push(req.query.attribute_id); where += ` AND (attribute_id = $2 OR attribute_id IS NULL)`; }
+      if (req.query.attribute_id) { params.push(req.query.attribute_id); where += ` AND attribute_id = $2`; }
       const limit = Math.min(Number(req.query.limit) || 10, 50);
       params.push(limit);
       const { rows } = await pool.query(

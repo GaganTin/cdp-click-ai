@@ -142,7 +142,7 @@ export default function NotificationBell({ collapsed = false }) {
                     onClick={() => onItemClick(n)}
                     className={cn(
                       "w-full text-left flex items-start gap-3 px-3 py-3 border-b border-border/60 last:border-0 hover:bg-secondary/60 transition-colors",
-                      !n.is_read && "bg-primary/[0.04]"
+                      !n.is_read && "bg-yellow-50 dark:bg-yellow-950/20"
                     )}
                   >
                     <span className={cn(

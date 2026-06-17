@@ -276,8 +276,8 @@ const STATUS_BADGE = {
   connected:    "bg-secondary text-secondary-foreground",
   synced:       "bg-secondary text-secondary-foreground",
   syncing:      "bg-secondary text-secondary-foreground",
-  sync_failed:  "bg-secondary text-secondary-foreground",
-  error:        "bg-destructive/10 text-destructive",
+  sync_failed:  "bg-yellow-500/10 text-yellow-700",
+  error:        "bg-yellow-500/10 text-yellow-700",
 };
 
 const STATUS_DOT = {
@@ -285,8 +285,8 @@ const STATUS_DOT = {
   connected:    "bg-foreground",
   synced:       "bg-foreground",
   syncing:      "bg-foreground animate-pulse",
-  sync_failed:  "bg-foreground",
-  error:        "bg-destructive",
+  sync_failed:  "bg-yellow-500",
+  error:        "bg-yellow-500",
 };
 
 const STATUS_LABEL = {

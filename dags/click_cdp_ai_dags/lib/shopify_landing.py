@@ -3,7 +3,7 @@
 """One-call Shopify dataset runner shared by the scheduled and trial-flow DAGs.
 
 ``run_dataset(dict_config, dataset)`` does the whole task body for one client and
-one dataset: resolve the access token (from the App DB, by company_id — never
+one dataset: resolve the access token (from the App DB, by company_id - never
 carried in XCom), resolve the incremental window, run the GraphQL bulk op,
 transform, and upsert into Postgres + advance the watermark.
 
