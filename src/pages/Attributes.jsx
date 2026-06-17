@@ -1051,7 +1051,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> {decodeUrl(pg.url)}
                           </a>
                         </div>
-                        {pg.fetch_method && <Badge variant="secondary" className="text-[9px] h-4 px-1.5 flex-shrink-0">{pg.fetch_method}</Badge>}
+                        {pg.fetch_method && pg.fetch_method !== "http" && <Badge variant="secondary" className="text-[9px] h-4 px-1.5 flex-shrink-0" title="Scraped with a headless browser">{pg.fetch_method}</Badge>}
                       </div>
                       <div className="flex flex-wrap gap-1 mt-2">
                         {(pg.values || []).map((v) => (
@@ -1252,12 +1252,10 @@ function PagesPanel() {
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         )}
-        {view !== "failed" && (
-          <button title={pg.is_excluded ? "Re-include in crawling" : "Exclude from crawling"} onClick={() => exclMut.mutate({ id: pg.id, is_excluded: !pg.is_excluded })}
-            className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
-            {pg.is_excluded ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
-          </button>
-        )}
+        <button title={pg.is_excluded ? "Re-include in crawling" : "Exclude from crawling"} onClick={() => exclMut.mutate({ id: pg.id, is_excluded: !pg.is_excluded })}
+          className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+          {pg.is_excluded ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
+        </button>
       </div>
       {view === "valid" && pg.tags?.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-1.5 pl-0.5">
@@ -1450,8 +1448,13 @@ function ReviewPanel() {
               <div className="flex flex-wrap gap-1 mt-2">
                 {(pg.tags || []).map((t) => (
                   <span key={t.value_id}
-                    className={`group/tag inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${t.is_new ? "border-amber-500/50 bg-amber-500/10 text-amber-700" : "bg-background border-border"}`}
-                    title={`${t.attribute}: ${t.label || t.value}`}>
+                    className={`group/tag inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
+                      t.is_approved ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700"
+                        : t.is_new ? "border-amber-500/50 bg-amber-500/10 text-amber-700"
+                        : "bg-background border-border"
+                    }`}
+                    title={`${t.attribute}: ${t.label || t.value}${t.is_approved ? " · verified" : t.is_new ? " · new" : " · pending"}`}>
+                    {t.is_approved && <Check className="w-2.5 h-2.5 flex-shrink-0" />}
                     <span className="text-muted-foreground">{t.attribute}:</span> {t.label || t.value}
                     <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: t.value_id })}
                       className="opacity-0 group-hover/tag:opacity-100 hover:text-destructive"><X className="w-2.5 h-2.5" /></button>

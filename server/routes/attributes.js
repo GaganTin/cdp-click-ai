@@ -513,6 +513,56 @@ export function createAttributesRouter(pool) {
 
   // Cross-attribute review feed: every AI-discovered value outside the curated
   // set, with sample pages, so users can verify and approve/merge/reject in one place.
+
+  // ── Verification sync (page review  <->  value approval) ─────────────────────
+  // A tag (page+value) is "verified" when its value is approved; a value spans
+  // many pages. Keep web_pages.last_reviewed_date and attribute_values.is_approved
+  // in lockstep, both directions.
+
+  // After page(s) are reviewed: approve every web_content value whose tagged pages
+  // are ALL now reviewed (so verifying the only page carrying "Telegram" approves
+  // the Telegram value). Re-propagates the affected attributes.
+  async function approveFullyReviewedValues(companyId) {
+    const { rows } = await pool.query(
+      `UPDATE app.attribute_values v
+       SET is_approved = true, is_exception = false, updated_date = NOW()
+       FROM app.attributes a
+       WHERE v.attribute_id = a.id AND a.source = 'web_content'
+         AND v.company_id = $1 AND v.is_approved = false AND v.is_blocked = false AND v.merged_into IS NULL
+         AND EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.attribute_value_id = v.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM app.page_attribute_values pav
+           JOIN app.web_pages wp ON wp.id = pav.page_id
+           WHERE pav.attribute_value_id = v.id AND wp.is_excluded = false AND wp.last_reviewed_date IS NULL
+         )
+       RETURNING v.attribute_id`,
+      [companyId]
+    );
+    const attrIds = [...new Set(rows.map((r) => r.attribute_id))];
+    if (attrIds.length) {
+      try { await repropagate(pool, companyId, attrIds); }
+      catch (e) { console.error("[attr] repropagate after auto-approve failed:", e.message); }
+    }
+  }
+
+  // After value(s) are approved: mark a page reviewed once ALL its tags' values are
+  // approved (fully verified). Pages with remaining pending tags stay needs_review
+  // (partially verified - the verified tags show a check, the rest stay pending).
+  async function markFullyApprovedPagesReviewed(companyId) {
+    await pool.query(
+      `UPDATE app.web_pages wp SET last_reviewed_date = NOW()
+       WHERE wp.company_id = $1 AND wp.is_excluded = false AND wp.last_reviewed_date IS NULL
+         AND EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM app.page_attribute_values pav
+           JOIN app.attribute_values av ON av.id = pav.attribute_value_id
+           LEFT JOIN app.attribute_values cav ON cav.id = av.merged_into
+           WHERE pav.page_id = wp.id AND COALESCE(cav.is_approved, av.is_approved) = false
+         )`,
+      [companyId]
+    );
+  }
+
   router.get("/review", async (req, res) => {
     try {
       const { rows } = await pool.query(
@@ -554,11 +604,13 @@ export function createAttributesRouter(pool) {
                 COALESCE(json_agg(DISTINCT jsonb_build_object(
                   'value_id', av.id, 'attribute_id', a.id, 'attribute', a.name,
                   'value', av.value, 'label', av.display_label,
+                  'is_approved', COALESCE(cav.is_approved, av.is_approved),
                   'is_new', (wp.last_reviewed_date IS NULL OR pav.created_date > wp.last_reviewed_date)
                 )), '[]'::json) AS tags
          FROM app.web_pages wp
          JOIN app.page_attribute_values pav ON pav.page_id = wp.id
          JOIN app.attribute_values av       ON av.id = pav.attribute_value_id
+         LEFT JOIN app.attribute_values cav ON cav.id = av.merged_into
          JOIN app.attributes a              ON a.id = pav.attribute_id
          WHERE wp.company_id = $1 AND wp.is_excluded = false
          GROUP BY wp.id
@@ -589,6 +641,9 @@ export function createAttributesRouter(pool) {
         [req.params.pageId, req.companyId]
       );
       if (!rows.length) return res.status(404).json({ error: "Page not found" });
+      // Verifying this page may complete the review of a value (all its pages now
+      // reviewed) -> approve it so the attribute-details values tab reflects it.
+      await approveFullyReviewedValues(req.companyId);
       res.json({ ok: true });
     } catch (err) { fail(res, err); }
   });
@@ -602,6 +657,7 @@ export function createAttributesRouter(pool) {
            AND id IN (SELECT DISTINCT page_id FROM app.page_attribute_values WHERE company_id = $1)`,
         [req.companyId]
       );
+      await approveFullyReviewedValues(req.companyId);
       res.json({ ok: true });
     } catch (err) { fail(res, err); }
   });
@@ -832,6 +888,8 @@ export function createAttributesRouter(pool) {
         try { await repropagate(pool, req.companyId, [rows[0].attribute_id]); }
         catch (e) { console.error("[attr] repropagate after value update failed:", e.message); }
       }
+      // Approving a value can fully-verify pages whose every tag is now approved.
+      if (req.body.is_approved === true) await markFullyApprovedPagesReviewed(req.companyId);
       res.json(rows[0]);
     } catch (err) { fail(res, err); }
   });
@@ -888,6 +946,8 @@ export function createAttributesRouter(pool) {
         try { await repropagate(pool, req.companyId, attrIds); }
         catch (e) { console.error("[attr] repropagate after bulk failed:", e.message); }
       }
+      // Approving values can fully-verify pages whose every tag is now approved.
+      if (action === "approve") await markFullyApprovedPagesReviewed(req.companyId);
       res.json({ ok: true, updated: rows.length });
     } catch (err) { fail(res, err); }
   });
