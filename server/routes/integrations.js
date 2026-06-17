@@ -217,13 +217,21 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
     if (!companyId) return;
     const urlDomain  = propertyName || "";
     const urlPattern = propertyName ? extractUrlPattern(propertyName) : "";
+    // UPSERT, not UPDATE: a freshly-registered workspace has no config rows yet,
+    // so a plain UPDATE touches 0 rows and the GA reports DAG finds no ga_reports
+    // for this capsuite_ref (build_configs returns [] -> nothing syncs). Inserting
+    // picks up the schema defaults (ga_reports / gsc_reports / etc.) when missing.
     await Promise.all([
       pool.query(
-        `UPDATE app.company_report_config SET url_domain=$1, updated_date=NOW() WHERE company_id=$2`,
+        `INSERT INTO app.company_report_config (company_id, url_domain)
+         VALUES ($2, $1)
+         ON CONFLICT (company_id) DO UPDATE SET url_domain = EXCLUDED.url_domain, updated_date = NOW()`,
         [urlDomain, companyId]
       ),
       pool.query(
-        `UPDATE app.web_content_html_elements SET url_pattern=$1, updated_date=NOW() WHERE company_id=$2`,
+        `INSERT INTO app.web_content_html_elements (company_id, url_pattern)
+         VALUES ($2, $1)
+         ON CONFLICT (company_id) DO UPDATE SET url_pattern = EXCLUDED.url_pattern, updated_date = NOW()`,
         [urlPattern, companyId]
       ),
     ]);
