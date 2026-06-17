@@ -561,6 +561,12 @@ function CompanyTab({ company, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [savingEdm, setSavingEdm] = useState(false);
 
+  // Delete-workspace danger zone (type-to-confirm).
+  const [showDelete, setShowDelete] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const wsName = full?.name || company?.name || "";
+
   // Hydrate the forms once the full company record loads.
   useEffect(() => {
     if (!full) return;
@@ -606,7 +612,23 @@ function CompanyTab({ company, onRefresh }) {
     }
   };
 
+  const deleteWorkspace = async () => {
+    setDeleting(true);
+    try {
+      await appClient.companies.delete(company.id, confirmName.trim());
+      toast.success("Workspace deleted");
+      // Drop the stored selection and hard-reload so the app re-resolves a valid
+      // workspace (or the no-workspace state) with all caches cleared.
+      localStorage.removeItem("cdp_company_id");
+      window.location.assign("/");
+    } catch (err) {
+      toast.error(err.message);
+      setDeleting(false);
+    }
+  };
+
   return (
+    <div className="space-y-8">
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
       <Section title="Company profile" description="Update your company's name, branding and details.">
         <form onSubmit={save} className="space-y-4">
@@ -713,6 +735,40 @@ function CompanyTab({ company, onRefresh }) {
           </div>
         </div>
       </SideCard>
+    </div>
+
+      {/* ── Danger zone ──────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-5 max-w-3xl">
+        <h2 className="font-heading text-lg font-semibold tracking-tight text-destructive">Danger zone</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Permanently delete this workspace and everything in it — profiles, integrations,
+          analytics, segments, campaigns, attributes and team access. This cannot be undone.
+        </p>
+        {!showDelete ? (
+          <Button variant="destructive" size="sm" className="mt-4 gap-1.5" onClick={() => setShowDelete(true)}>
+            <Trash2 className="w-3.5 h-3.5" /> Delete workspace
+          </Button>
+        ) : (
+          <div className="mt-4 space-y-3 max-w-md">
+            <Field label="Type the workspace name to confirm" hint={`Enter “${wsName}” exactly to enable deletion.`}>
+              <Input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={wsName} autoFocus />
+            </Field>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="destructive" size="sm" className="gap-1.5"
+                disabled={deleting || confirmName.trim() !== wsName}
+                onClick={deleteWorkspace}
+              >
+                <Trash2 className="w-3.5 h-3.5" /> {deleting ? "Deleting…" : "Permanently delete"}
+              </Button>
+              <Button variant="outline" size="sm" disabled={deleting}
+                onClick={() => { setShowDelete(false); setConfirmName(""); }}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1146,6 +1202,28 @@ function UsageBar({ label, used, limit, unlimited }) {
   );
 }
 
+// Plan cards show the quantitative bullets DERIVED from the structured `limits`
+// (the source of truth that admins edit in Studio), so they always match the plan
+// and update live when limits change. The free-text `features` array is then used
+// only for qualitative perks, with any limit restatements filtered out so the two
+// can't contradict each other.
+const num = (n) => Number(n).toLocaleString();
+const PLAN_LIMIT_BULLETS = [
+  ["workspaces",   (n) => n == null ? "Unlimited workspaces"        : `${num(n)} workspace${n === 1 ? "" : "s"}`],
+  ["team_members", (n) => n == null ? "Unlimited team members"      : `${num(n)} team member${n === 1 ? "" : "s"}`],
+  ["profiles",     (n) => n == null ? "Unlimited customer profiles" : `${num(n)} customer profiles`],
+  ["campaigns",    (n) => n == null ? "Unlimited email campaigns"   : `${num(n)} email campaigns`],
+  ["ai_tokens",    (n) => n == null ? "Unlimited AI tokens"         : `${num(n)} AI tokens`],
+];
+const LIMIT_WORDS = ["workspace", "profile", "campaign", "token", "member"];
+function planLimitBullets(limits) {
+  const l = limits || {};
+  return PLAN_LIMIT_BULLETS.filter(([k]) => k in l).map(([k, fmt]) => fmt(l[k] ?? null));
+}
+function qualitativeFeatures(features) {
+  return (features || []).filter(f => f && !LIMIT_WORDS.some(w => String(f).toLowerCase().includes(w)));
+}
+
 function BillingTab({ company }) {
   const { planConfig, upgradePlan, isFreePlan, isPaidPlan, isTrialExpired, daysLeft, upgradedAt, plans } = usePlan();
 
@@ -1309,7 +1387,9 @@ function BillingTab({ company }) {
                 </p>
               </div>
               <ul className="space-y-1.5">
-                {(p.features || []).map((f, i) => (
+                {/* Quantitative bullets derived from limits (always in sync), then
+                    qualitative perks from the free-text features. */}
+                {[...planLimitBullets(p.limits), ...qualitativeFeatures(p.features)].map((f, i) => (
                   <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
                     <CheckCircle2 className="w-3 h-3 text-primary mt-0.5 flex-shrink-0" />
                     {f}

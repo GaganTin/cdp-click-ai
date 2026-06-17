@@ -103,6 +103,8 @@ export const appClient = {
     get: (id) => request(`/companies/${id}`),
     update: (id, data) =>
       request(`/companies/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    delete: (id, confirmName) =>
+      request(`/companies/${id}`, { method: "DELETE", body: JSON.stringify({ confirm_name: confirmName }) }),
     getMembers: (id) => request(`/companies/${id}/members`),
     updateMember: (companyId, memberId, data) =>
       request(`/companies/${companyId}/members/${memberId}`, { method: "PATCH", body: JSON.stringify(data) }),

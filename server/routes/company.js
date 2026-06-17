@@ -218,6 +218,67 @@ export function createCompanyRouter(pool) {
     }
   });
 
+  // DELETE /api/companies/:id - permanently delete a workspace and ALL its data.
+  // Guards: admin only, the caller must type the exact workspace name
+  // (confirm_name), and an account may never be left with zero workspaces.
+  router.delete("/:id", authenticate, async (req, res) => {
+    const { id } = req.params;
+    const member = await getMembership(pool, id, req.user.id);
+    if (!isAdmin(member)) return res.status(403).json({ error: "Admin access required" });
+
+    const confirmName = typeof req.body?.confirm_name === "string" ? req.body.confirm_name.trim() : "";
+
+    const client = await pool.connect();
+    try {
+      const { rows: [company] } = await client.query(
+        "SELECT name, capsuite_ref, account_id FROM app.companies WHERE id = $1",
+        [id]
+      );
+      if (!company) return res.status(404).json({ error: "Workspace not found" });
+
+      // Type-to-confirm gate: the deliberate-action check against accidental deletes.
+      if (confirmName !== company.name) {
+        return res.status(400).json({ error: "The name you typed doesn't match the workspace name." });
+      }
+
+      // Never leave the account with no workspaces.
+      const { rows: [{ n }] } = await client.query(
+        "SELECT COUNT(*)::int AS n FROM app.companies WHERE account_id = $1 AND is_active = true",
+        [company.account_id]
+      );
+      if (n <= 1) {
+        return res.status(400).json({ error: "You can't delete your only workspace. Create another one first." });
+      }
+
+      await client.query("BEGIN");
+      // Audit BEFORE the delete: audit_log.company_id is ON DELETE SET NULL, so the
+      // record survives the cascade with account_id + resource_id intact.
+      await client.query(
+        `INSERT INTO app.audit_log (account_id, company_id, user_id, action, resource_type, resource_id, changes)
+         VALUES ($1, $2, $3, 'delete', 'workspace', $2, $4)`,
+        [company.account_id, id, req.user.id, JSON.stringify({ name: company.name })]
+      );
+      // Deleting the company row cascades every company_id-scoped table (members,
+      // profiles, integrations, ga_landing, commerce, attributes, popups, edm, …).
+      await client.query("DELETE FROM app.companies WHERE id = $1", [id]);
+      await client.query("COMMIT");
+
+      // Best-effort cleanup of sync watermarks keyed by capsuite_ref (no FK cascade),
+      // so a future workspace reusing the ref re-runs a clean first backfill.
+      Promise.allSettled([
+        pool.query("DELETE FROM ga_landing.ga_sync_control WHERE capsuite_ref = $1", [company.capsuite_ref]),
+        pool.query("DELETE FROM shopify.shopify_sync_control WHERE capsuite_ref = $1", [company.capsuite_ref]),
+      ]);
+
+      res.json({ ok: true });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
   // GET /api/companies/:id/members
   router.get("/:id/members", authenticate, async (req, res) => {
     const { id } = req.params;
