@@ -242,11 +242,16 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
   // interpolate. GA = everything its DAGs produce; GSC = the keyword report.
   const PURGE_TABLES = {
     googleAnalytics: [
-      "ga_landing.path_exploration", "ga_landing.path_exploration_duration", "ga_landing.funnel_report",
-      "ga_landing.utm_performance", "ga_landing.utm_daily_performance", "ga_landing.utm_daily_full_param_performance",
-      "ga_landing.utm_daily_utm_id_performance", "ga_landing.utm_ad_performance", "ga_landing.country_performance",
+      // Small aggregate tables that power the UTM / dashboard analytics. Purged
+      // FIRST so the UI stops showing data almost immediately — the big event
+      // tables below can be millions of rows and take far longer to delete.
+      "ga_landing.utm_performance", "ga_landing.utm_daily_performance",
+      "ga_landing.utm_daily_full_param_performance", "ga_landing.utm_daily_utm_id_performance",
+      "ga_landing.utm_ad_performance", "ga_landing.country_performance",
       "ga_landing.page_metrics", "ga_landing.page_utm_metrics", "ga_landing.website_metrics",
-      "ga_landing.event_list", "ga_landing.purchase_list",
+      "ga_landing.event_list", "ga_landing.funnel_report", "ga_landing.purchase_list",
+      // Large event-level tables (slowest) go last.
+      "ga_landing.path_exploration", "ga_landing.path_exploration_duration",
       // Anonymous visitor profiles are derived from path_exploration, so they go
       // stale the moment GA data is removed. Content attributes / tagged pages
       // (app.web_pages, app.attributes*) are deliberately NOT purged.
@@ -295,48 +300,51 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
   async function purgeIntegrationData(companyId, type) {
     const tables = PURGE_TABLES[type];
     if (!tables || !companyId) return 0;
+    // Each DELETE is isolated: a failure or lock-timeout on one table (e.g. the
+    // multi-million-row event tables) must NOT abort the loop and leave the
+    // remaining tables — including the small analytics ones the UI reads —
+    // populated. Failures are logged; the purge presses on.
+    let purged = 0;
+    const run = async (label, sql, params) => {
+      try { await pool.query(sql, params); return true; }
+      catch (e) { console.error(`[disconnect purge] ${type} ${label} failed:`, e.message); return false; }
+    };
     for (const t of tables) {
-      await pool.query(`DELETE FROM ${t} WHERE company_id = $1`, [companyId]);
+      if (await run(t, `DELETE FROM ${t} WHERE company_id = $1`, [companyId])) purged++;
     }
     // Neutral commerce rows contributed by this platform (other platforms' rows
     // for the same workspace are kept).
     const platform = PURGE_COMMERCE_PLATFORM[type];
     if (platform) {
       for (const t of COMMERCE_TABLES) {
-        await pool.query(
-          `DELETE FROM ${t} WHERE company_id = $1 AND source_platform = $2`,
-          [companyId, platform]
-        );
+        await run(t, `DELETE FROM ${t} WHERE company_id = $1 AND source_platform = $2`, [companyId, platform]);
       }
     }
     // Drop the unified profiles that came solely from this source (identities
     // cascade off app.customer_profiles via FK).
     const profileSource = PURGE_PROFILE_SOURCES[type];
     if (profileSource) {
-      await pool.query(
+      await run("app.customer_profiles",
         "DELETE FROM app.customer_profiles WHERE company_id = $1 AND member_source = $2",
-        [companyId, profileSource]
-      );
+        [companyId, profileSource]);
     }
     const reports = PURGE_REPORTS[type];
     if (reports) {
-      await pool.query(
+      await run("ga_landing.ga_sync_control",
         `DELETE FROM ga_landing.ga_sync_control
          WHERE report = ANY($1)
            AND capsuite_ref = (SELECT capsuite_ref FROM app.companies WHERE id = $2)`,
-        [reports, companyId]
-      );
+        [reports, companyId]);
     }
     // Platform sync-control watermarks (whole client, so reconnect = fresh backfill).
     const controlTable = PURGE_CONTROL_TABLES[type];
     if (controlTable) {
-      await pool.query(
+      await run(controlTable,
         `DELETE FROM ${controlTable}
          WHERE capsuite_ref = (SELECT capsuite_ref FROM app.companies WHERE id = $1)`,
-        [companyId]
-      );
+        [companyId]);
     }
-    return tables.length;
+    return purged;
   }
 
   // Builds an empty stub so the frontend always receives all 5 integration types

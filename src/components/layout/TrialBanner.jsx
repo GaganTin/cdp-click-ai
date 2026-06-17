@@ -59,7 +59,7 @@ export default function TrialBanner() {
           : daysLeft <= warningDays
           ? `Your free trial expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`
           : "You're on the free plan."}
-        {" "}Upgrade to unlock full access.
+        {" "}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <Link
