@@ -387,6 +387,10 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
            FROM app.integration_sync_jobs
            WHERE company_id = di.company_id
              AND integration_type = di.integration_type
+             -- Only jobs from the CURRENT connection session. A sync that failed
+             -- under a previous connection must not make a freshly (re)connected
+             -- integration read as "Sync failed" before any new sync has run.
+             AND created_date >= di.last_connected_date
            ORDER BY created_date DESC
            LIMIT 1
          ) lj ON true
@@ -419,6 +423,10 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
            FROM app.integration_sync_jobs
            WHERE company_id = di.company_id
              AND integration_type = di.integration_type
+             -- Only jobs from the CURRENT connection session. A sync that failed
+             -- under a previous connection must not make a freshly (re)connected
+             -- integration read as "Sync failed" before any new sync has run.
+             AND created_date >= di.last_connected_date
            ORDER BY created_date DESC
            LIMIT 1
          ) lj ON true

@@ -813,7 +813,7 @@ export default function Analyst() {
               <Textarea
                 value={draftPrompt}
                 onChange={e => setDraftPrompt(e.target.value)}
-                placeholder={`e.g. We are LinkedU, an education consultancy based in Hong Kong. Our members are mostly families exploring overseas study options for their children (ages 10–18). Our tone should be professional but warm. When suggesting campaigns, prioritise members registered via Seminar as they have the highest conversion rate. Our peak season is September–November.`}
+                placeholder={`e.g. We are a [industry] business based in [location]. Our customers are mostly [who they are and what they care about]. Our tone should be [e.g. professional but warm]. When suggesting campaigns, prioritise [the segment or channel that converts best]. Our peak season is [months].`}
                 className="mt-1 min-h-[180px] text-xs font-mono resize-y"
               />
               <p className="text-[10px] text-muted-foreground mt-1.5">
