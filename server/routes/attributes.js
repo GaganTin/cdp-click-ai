@@ -851,12 +851,18 @@ export function createAttributesRouter(pool) {
       if (action === "merge") {
         const target = req.body?.target_id;
         if (!target) return res.status(400).json({ error: "target_id is required to merge" });
+        // Target must belong to THIS company; merges stay within one attribute.
+        const { rows: tgt } = await pool.query(
+          `SELECT attribute_id FROM app.attribute_values WHERE id = $1 AND company_id = $2`,
+          [target, req.companyId]
+        );
+        if (!tgt.length) return res.status(404).json({ error: "Merge target not found" });
         const sources = ids.filter((id) => id !== target); // never merge the target into itself
         if (!sources.length) return res.status(400).json({ error: "Select values other than the merge target" });
         ({ rows } = await pool.query(
           `UPDATE app.attribute_values SET merged_into = $3, is_approved = false, updated_date = NOW()
-           WHERE id = ANY($1::uuid[]) AND company_id = $2 AND id <> $3 RETURNING attribute_id`,
-          [sources, req.companyId, target]
+           WHERE id = ANY($1::uuid[]) AND company_id = $2 AND attribute_id = $4 AND id <> $3 RETURNING attribute_id`,
+          [sources, req.companyId, target, tgt[0].attribute_id]
         ));
       } else if (action === "set_group") {
         const raw = req.body?.group_name;
@@ -907,13 +913,19 @@ export function createAttributesRouter(pool) {
     if (!target) return res.status(400).json({ error: "target_id is required" });
     if (target === req.params.valueId) return res.status(400).json({ error: "Cannot merge a value into itself" });
     try {
+      // Target must belong to THIS company; merges stay within one attribute.
+      const { rows: tgt } = await pool.query(
+        `SELECT attribute_id FROM app.attribute_values WHERE id = $1 AND company_id = $2`,
+        [target, req.companyId]
+      );
+      if (!tgt.length) return res.status(404).json({ error: "Merge target not found" });
       const { rows } = await pool.query(
         `UPDATE app.attribute_values
          SET merged_into = $3, is_approved = false, updated_date = NOW()
-         WHERE id = $1 AND company_id = $2 RETURNING *`,
-        [req.params.valueId, req.companyId, target]
+         WHERE id = $1 AND company_id = $2 AND attribute_id = $4 RETURNING *`,
+        [req.params.valueId, req.companyId, target, tgt[0].attribute_id]
       );
-      if (!rows.length) return res.status(404).json({ error: "Value not found" });
+      if (!rows.length) return res.status(404).json({ error: "Value not found, or not in the target's attribute" });
       // Canonical resolution changed → re-resolve profile tags immediately.
       try { await repropagate(pool, req.companyId, [rows[0].attribute_id]); }
       catch (e) { console.error("[attr] repropagate after merge failed:", e.message); }
@@ -996,10 +1008,20 @@ export function createAttributesRouter(pool) {
     );
     return rows.length > 0;
   };
-  // Scoped/automatic tag enqueue used by re-run + new-value flows. Coalesces:
-  // skips if an equivalent job is already queued/running.
+  // Scoped/automatic tag enqueue used by re-run + new-value flows. Coalesces
+  // against already-QUEUED work only - a job that's currently RUNNING must NOT
+  // cause this to be dropped (the worker is single-flight, so a newly queued job
+  // simply runs after the current one drains). Otherwise a new value added during
+  // a reconstruct would be silently lost until the next manual run.
   const enqueueTag = async (companyId, userId, attributeId, jobType = "tag") => {
-    if (await isBusy(companyId, attributeId)) return null;
+    const { rows } = await pool.query(
+      `SELECT id FROM app.attribute_jobs
+       WHERE company_id = $1 AND status = 'queued'
+         AND (attribute_id = $2 OR attribute_id IS NULL OR $2 IS NULL)
+       LIMIT 1`,
+      [companyId, attributeId]
+    );
+    if (rows.length) return null;   // an equivalent job is already waiting
     return createJob(companyId, userId, attributeId, jobType);
   };
 
@@ -1118,7 +1140,7 @@ export function createAttributesRouter(pool) {
       const a = await loadAttr(req.params.id, req.companyId);
       if (!a) return res.status(404).json({ error: "Attribute not found" });
       if (!req.body?.value_id || !req.body?.segment_id) return res.status(400).json({ error: "value_id and segment_id required" });
-      const { entityType: segType, ids } = await resolveSegmentEntities(pool, req.body.segment_id);
+      const { entityType: segType, ids } = await resolveSegmentEntities(pool, req.companyId, req.body.segment_id);
       // Manual attrs follow the segment's audience; rule attrs must match their scope.
       const entityType = a.source === "manual" ? (segType || "customer") : entityTypeFor(a);
       if (a.source !== "manual" && segType && segType !== entityType) {
@@ -1136,7 +1158,7 @@ export function createAttributesRouter(pool) {
       if (!req.body?.value_id) return res.status(400).json({ error: "value_id required" });
       const entityType = entityTypeFor(a, req.body.entity_type);
       const submitted = (req.body.identifiers || []).filter((x) => String(x || "").trim());
-      const ids = await resolveIdentifiers(pool, entityType, submitted);
+      const ids = await resolveIdentifiers(pool, req.companyId, entityType, submitted);
       await commitAssign(res, a, req.params.id, req.companyId, req.body.value_id, entityType, ids,
         req.body.confirm, { matched: ids.length, submitted: submitted.length });
     } catch (err) { fail(res, err); }
@@ -1147,7 +1169,7 @@ export function createAttributesRouter(pool) {
       const a = await loadAttr(req.params.id, req.companyId);
       if (!a) return res.status(404).json({ error: "Attribute not found" });
       const entityType = entityTypeFor(a, req.body.entity_type);
-      await unassign(pool, req.params.id, req.body.value_id, entityType, req.body.entity_id);
+      await unassign(pool, req.companyId, req.params.id, req.body.value_id, entityType, req.body.entity_id);
       res.json({ ok: true });
     } catch (err) { fail(res, err); }
   });
@@ -1177,7 +1199,7 @@ export function createAttributesRouter(pool) {
         );
         resolved += rowCount;
       }
-      if (resolved) await recomputeManualCounts(pool, req.params.id);
+      if (resolved) await recomputeManualCounts(pool, req.companyId, req.params.id);
       res.json({ resolved });
     } catch (err) { fail(res, err); }
   });

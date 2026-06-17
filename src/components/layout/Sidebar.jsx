@@ -6,6 +6,7 @@ import {
   Check, Plus, Settings, MousePointer2, Tag, Rocket, Upload, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { usePreferences } from "@/lib/PreferencesContext";
@@ -104,6 +105,7 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, currentCompany, logout, switchCompany } = useAuth();
+  const queryClient = useQueryClient();
   const { t } = usePreferences();
   const isAnalyst = location.pathname === "/";
   const [collapsed, setCollapsed] = useState(isAnalyst);
@@ -200,7 +202,7 @@ export default function Sidebar() {
                 icon={Building2}
                 label={c.name}
                 active={c.id === currentCompany?.id}
-                onClick={() => switchCompany(c)}
+                onClick={() => { switchCompany(c); queryClient.clear(); }}
               />
             ))}
             <div className="border-t border-border mt-1 pt-1">

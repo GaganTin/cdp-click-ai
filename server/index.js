@@ -2453,10 +2453,10 @@ async function segmentsForEntity(pool, companyId, scope, entityId) {
   for (const s of segs) {
     const fc = s.metadata?.filter_criteria || {};
     const built = scope === "anonymous" ? anonWhere(fc) : customerWhere(fc);
-    const params = [entityId, ...built.params];
-    const shifted = String(built.where || "TRUE").replace(/\$(\d+)/g, (_, n) => `$${Number(n) + 1}`);
+    const params = [entityId, companyId, ...built.params];
+    const shifted = String(built.where || "TRUE").replace(/\$(\d+)/g, (_, n) => `$${Number(n) + 2}`);
     try {
-      const r = await pool.query(`SELECT 1 FROM ${table} p WHERE p.${idcol} = $1 AND (${shifted}) LIMIT 1`, params);
+      const r = await pool.query(`SELECT 1 FROM ${table} p WHERE p.${idcol} = $1 AND p.company_id = $2 AND (${shifted}) LIMIT 1`, params);
       if (r.rows.length) out.push({ id: s.id, name: s.name });
     } catch { /* a segment whose criteria can't be evaluated is simply skipped */ }
   }
@@ -2679,7 +2679,7 @@ app.get("/api/segments/:id/size", authenticate, async (req, res) => {
       [req.params.id, companyId, req.user.id]
     );
     if (!rows.length) return res.status(404).json({ error: "Segment not found" });
-    const count = await countSegmentEntities(pool, req.params.id);
+    const count = await countSegmentEntities(pool, companyId, req.params.id);
     res.json({ count });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -2700,7 +2700,7 @@ app.get("/api/segments/:id/export", authenticate, async (req, res) => {
     const seg = segRows[0];
     const fc = seg.metadata?.filter_criteria || {};
     const criteria = summarizeCriteria(fc);
-    const { entityType, ids } = await resolveSegmentEntities(pool, seg.id);
+    const { entityType, ids } = await resolveSegmentEntities(pool, companyId, seg.id);
 
     const csvCell = (v) => {
       if (v == null) return "";

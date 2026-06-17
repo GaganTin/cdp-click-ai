@@ -7,6 +7,10 @@
 
 import { crawlPage, discoverUrls, contentHash, closeBrowser, isValidTitle, fetchSitemapLastmod, normUrl } from "./webCrawler.js";
 import { tagPage, isAIConfigured } from "./attributeAI.js";
+import { triggerContentScrape } from "./contentScrapeTrigger.js";
+
+// Cap how many blocked pages we hand to the Selenium DAG in one escalation.
+const MAX_ESCALATE = 500;
 
 const DISCOVERY_LOOKBACK_DAYS = 90;  // crawl every distinct page seen in the last 90 days
 const CRAWL_CONCURRENCY = 5;
@@ -127,6 +131,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   // 4) Crawl (hybrid, incremental)
   await setJob(pool, job.id, { phase: "scraping" });
   let crawled = 0, skipped = 0;
+  const blockedUrls = [];   // pages the fast crawler couldn't read (escalated to Selenium)
   await runBatches(urls, CRAWL_CONCURRENCY, async (url) => {
     if (await isCancelled(pool, job.id)) return;
     try {
@@ -177,8 +182,11 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
         [companyId, url, res.title || "", text, excerpt, hash,
          text.split(/\s+/).filter(Boolean).length, res.ok && validTitle, res.ok, validTitle, res.method, meta]
       );
+      // Fast crawler got a blocked / empty / JS-only page - mark for Selenium escalation.
+      if (!(res.ok && validTitle)) blockedUrls.push(url);
     } catch (e) {
       console.warn(`[attr] crawl failed ${url}:`, e.message);
+      blockedUrls.push(url);
     } finally {
       crawled++;
       if (crawled % CRAWL_CONCURRENCY === 0) await mergeProgress(pool, job.id, { pages_crawled: crawled });
@@ -186,6 +194,25 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   });
   await mergeProgress(pool, job.id, { pages_crawled: crawled, pages_skipped: skipped });
   await closeBrowser();
+
+  // Auto-escalate: pages the fast in-process crawler couldn't read (Cloudflare /
+  // bot-block / JS-rendered / empty) go to the Selenium DAG, which uses a real
+  // headless browser. Fire-and-forget - when the DAG finishes, its scrape-complete
+  // webhook enqueues a tag job that re-tags the rescued pages. No-op when Airflow
+  // is not configured (triggerContentScrape returns {triggered:false}), so we
+  // simply keep the Node results - never blocked on the DAG.
+  if (blockedUrls.length) {
+    try {
+      const r = await triggerContentScrape(pool, companyId, { pageUrls: blockedUrls.slice(0, MAX_ESCALATE) });
+      if (r?.triggered) {
+        await mergeProgress(pool, job.id, {
+          note: `${blockedUrls.length} page(s) couldn't be read by the fast crawler - deep-scraping them with Selenium; they'll be tagged automatically when it finishes.`,
+        });
+      }
+    } catch (e) {
+      console.warn("[attr] deep-scrape escalation failed (non-fatal):", e.message);
+    }
+  }
   } // end opts.scrape
 
   if (await isCancelled(pool, job.id)) return;
@@ -204,7 +231,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
     await mergeProgress(pool, job.id, { tagging_note: "AI not configured - skipped tagging." });
   } else {
     const { rows: pages } = await pool.query(
-      `SELECT id, url, title, content, content_hash, metadata
+      `SELECT id, url, title, content, content_hash, needs_retag, metadata
        FROM app.web_pages
        WHERE company_id = $1 AND is_valid = true AND is_excluded = false AND content <> ''`,
       [companyId]
@@ -213,8 +240,9 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
     for (const page of pages) {
       if (await isCancelled(pool, job.id)) return;
       const marker = `${page.content_hash}:${sig}`;
-      // scopedRetag always re-evaluates (a new value may now match this page).
-      if (!opts.scopedRetag && page.metadata?.tagged_sig === marker) { tagged++; continue; }
+      // Re-tag when: scopedRetag (new-value flow), the page is flagged needs_retag
+      // (e.g. a per-page "re-tag"), or the content+attribute signature changed.
+      if (!opts.scopedRetag && !page.needs_retag && page.metadata?.tagged_sig === marker) { tagged++; continue; }
       try {
         const results = await tagPage(page, attributes);
         for (const r of results) {
@@ -322,7 +350,8 @@ async function propagate(pool, companyId, attrIds, entityType) {
        AND p.${idCol} IS NOT NULL AND p.${idCol} <> ''
      GROUP BY p.${idCol}, pav.attribute_id, cav.id
      ON CONFLICT (company_id, entity_type, entity_id, attribute_value_id)
-     DO UPDATE SET score = EXCLUDED.score, last_seen = NOW(), source = 'web_content'`,
+     DO UPDATE SET score = EXCLUDED.score, last_seen = NOW(), source = 'web_content'
+       WHERE app.profile_attribute_values.source = 'web_content'`,
     [companyId, attrIds, entityType, scopeVals]
   );
 }
@@ -360,56 +389,69 @@ async function resetStaleJobs(pool) {
   }
 }
 
+// Single-flight across the process: only one attribute job runs at a time. A
+// concurrent call (e.g. a createJob kick fired while a job is mid-run) returns
+// immediately; the active drain loop picks up any newly-queued job in its next
+// iteration. This lets callers safely enqueue work during a run without ever
+// running two jobs in parallel.
+let _draining = false;
 async function processNextAttributeJob(pool) {
-  let job;
+  if (_draining) return;
+  _draining = true;
   try {
-    const { rows } = await pool.query(`
-      UPDATE app.attribute_jobs
-      SET status = 'running', started_at = NOW(), updated_date = NOW()
-      WHERE id = (
-        SELECT id FROM app.attribute_jobs
-        WHERE status = 'queued'
-        ORDER BY created_date ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT 1
-      )
-      RETURNING *`);
-    job = rows[0];
-  } catch (e) {
-    console.error("[attr-queue] job claim error:", e.message);
-    return;
-  }
-  if (!job) return;
+    for (;;) {
+      let job;
+      try {
+        const { rows } = await pool.query(`
+          UPDATE app.attribute_jobs
+          SET status = 'running', started_at = NOW(), updated_date = NOW()
+          WHERE id = (
+            SELECT id FROM app.attribute_jobs
+            WHERE status = 'queued'
+            ORDER BY created_date ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          RETURNING *`);
+        job = rows[0];
+      } catch (e) {
+        console.error("[attr-queue] job claim error:", e.message);
+        return;
+      }
+      if (!job) return; // queue drained
 
-  try {
-    const OPTS = {
-      behavioral:      { scrape: true,  tag: true,  scopedRetag: false },
-      refresh:         { scrape: true,  tag: false, scopedRetag: false },
-      tag:             { scrape: false, tag: true,  scopedRetag: false },
-      retag_attribute: { scrape: false, tag: true,  scopedRetag: true  },
-    };
-    const opts = OPTS[job.job_type];
-    if (opts) {
-      await runContentJob(pool, job, opts);
-    } else {
-      await setJob(pool, job.id, {
-        status: "failed", error_message: `Unsupported job_type "${job.job_type}"`,
-        completed_at: new Date().toISOString(),
-      });
+      try {
+        const OPTS = {
+          behavioral:      { scrape: true,  tag: true,  scopedRetag: false },
+          refresh:         { scrape: true,  tag: false, scopedRetag: false },
+          tag:             { scrape: false, tag: true,  scopedRetag: false },
+          retag_attribute: { scrape: false, tag: true,  scopedRetag: true  },
+        };
+        const opts = OPTS[job.job_type];
+        if (opts) {
+          await runContentJob(pool, job, opts);
+        } else {
+          await setJob(pool, job.id, {
+            status: "failed", error_message: `Unsupported job_type "${job.job_type}"`,
+            completed_at: new Date().toISOString(),
+          });
+        }
+        console.log(`[attr-queue] Completed job ${job.id}`);
+      } catch (e) {
+        console.error(`[attr-queue] Job ${job.id} failed:`, e.message);
+        await setJob(pool, job.id, {
+          status: "failed", error_message: String(e.message || e), completed_at: new Date().toISOString(),
+        }).catch(() => {});
+        await pool.query(
+          `UPDATE app.attributes SET last_run_status = 'failed' WHERE id = $1`,
+          [job.attribute_id]
+        ).catch(() => {});
+      }
+      // loop: pick up the next queued job (incl. anything enqueued during this run)
     }
-    console.log(`[attr-queue] Completed job ${job.id}`);
-  } catch (e) {
-    console.error(`[attr-queue] Job ${job.id} failed:`, e.message);
-    await setJob(pool, job.id, {
-      status: "failed", error_message: String(e.message || e), completed_at: new Date().toISOString(),
-    }).catch(() => {});
-    await pool.query(
-      `UPDATE app.attributes SET last_run_status = 'failed' WHERE id = $1`,
-      [job.attribute_id]
-    ).catch(() => {});
+  } finally {
+    _draining = false;
   }
-
-  await processNextAttributeJob(pool); // drain
 }
 
 export function startAttributeQueueWorker(pool) {

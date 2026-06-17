@@ -74,7 +74,8 @@ function JobStatus({ job, onCancel, compact }) {
   if (!job) return null;
   const p = job.progress || {};
   const phaseLabel = {
-    queued: "Queued…", discovering: "Discovering pages…", crawling: "Crawling pages…",
+    queued: "Queued…", discovering: "Discovering pages…",
+    scraping: "Crawling pages…", crawling: "Crawling pages…",
     tagging: "Tagging with AI…", propagating: "Updating profiles…", done: "Done",
   }[job.phase] || job.phase || job.status;
 
@@ -98,7 +99,7 @@ function JobStatus({ job, onCancel, compact }) {
   const start = job.started_at || job.created_date;
   const elapsed = start ? Math.max(0, Math.floor((Date.now() - new Date(start).getTime()) / 1000)) : null;
   let eta = null;
-  if (job.phase === "crawling" && p.pages_total && (p.pages_crawled || 0) >= 5 && elapsed > 0) {
+  if (job.phase === "scraping" && p.pages_total && (p.pages_crawled || 0) >= 5 && elapsed > 0) {
     const rate = p.pages_crawled / elapsed;
     const remaining = Math.max(0, p.pages_total - p.pages_crawled);
     if (rate > 0) { const s = Math.round(remaining / rate); eta = s >= 60 ? `~${Math.ceil(s / 60)}m left` : `~${s}s left`; }

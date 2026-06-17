@@ -11,8 +11,8 @@ export async function assignEntities(pool, companyId, attributeId, valueId, enti
   if (single) {
     await pool.query(
       `DELETE FROM app.profile_attribute_values
-       WHERE attribute_id = $1 AND source = 'manual' AND entity_type = $2 AND entity_id = ANY($3::text[])`,
-      [attributeId, entityType, ids]
+       WHERE company_id = $1 AND attribute_id = $2 AND source = 'manual' AND entity_type = $3 AND entity_id = ANY($4::text[])`,
+      [companyId, attributeId, entityType, ids]
     );
   }
   const { rowCount } = await pool.query(
@@ -22,7 +22,7 @@ export async function assignEntities(pool, companyId, attributeId, valueId, enti
      ON CONFLICT (company_id, entity_type, entity_id, attribute_value_id) DO NOTHING`,
     [companyId, entityType, attributeId, valueId, ids]
   );
-  await recomputeManualCounts(pool, attributeId);
+  await recomputeManualCounts(pool, companyId, attributeId);
   return ids.length;
 }
 
@@ -69,21 +69,22 @@ export async function findMultiAssigned(pool, companyId, attributeId) {
   return rows;
 }
 
-export async function unassign(pool, attributeId, valueId, entityType, entityId) {
+export async function unassign(pool, companyId, attributeId, valueId, entityType, entityId) {
   await pool.query(
     `DELETE FROM app.profile_attribute_values
-     WHERE attribute_id = $1 AND attribute_value_id = $2 AND entity_type = $3 AND entity_id = $4 AND source = 'manual'`,
-    [attributeId, valueId, entityType, entityId]
+     WHERE company_id = $1 AND attribute_id = $2 AND attribute_value_id = $3 AND entity_type = $4 AND entity_id = $5 AND source = 'manual'`,
+    [companyId, attributeId, valueId, entityType, entityId]
   );
-  await recomputeManualCounts(pool, attributeId);
+  await recomputeManualCounts(pool, companyId, attributeId);
 }
 
-export async function recomputeManualCounts(pool, attributeId) {
+export async function recomputeManualCounts(pool, companyId, attributeId) {
   await pool.query(
     `UPDATE app.attribute_values av
-     SET profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv WHERE pv.attribute_value_id = av.id)
-     WHERE av.attribute_id = $1`,
-    [attributeId]
+     SET profile_count = (SELECT COUNT(*) FROM app.profile_attribute_values pv
+                          WHERE pv.attribute_value_id = av.id AND pv.company_id = $2)
+     WHERE av.attribute_id = $1 AND av.company_id = $2`,
+    [attributeId, companyId]
   );
 }
 
@@ -196,46 +197,60 @@ export function anonWhere(fc) {
 }
 
 // Live count of profiles matching a segment's filter_criteria (no row fetch).
-export async function countSegmentEntities(pool, segmentId) {
-  const { rows } = await pool.query(`SELECT segment_type, metadata FROM app.segments WHERE id = $1`, [segmentId]);
+export async function countSegmentEntities(pool, companyId, segmentId) {
+  const { rows } = await pool.query(
+    `SELECT segment_type, metadata FROM app.segments WHERE id = $1 AND company_id = $2`,
+    [segmentId, companyId]
+  );
   if (!rows.length) return 0;
   const fc = rows[0].metadata?.filter_criteria || {};
   if (rows[0].segment_type === "customer") {
     const { where, params } = customerWhere(fc);
-    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM app.customer_profiles p WHERE ${where}`, params);
+    params.push(companyId);
+    const r = await pool.query(`SELECT COUNT(*)::int AS n FROM app.customer_profiles p WHERE (${where}) AND p.company_id = $${params.length}`, params);
     return r.rows[0].n;
   }
   const { where, params } = anonWhere(fc);
-  const r = await pool.query(`SELECT COUNT(*)::int AS n FROM app.anonymous_profiles p WHERE ${where}`, params);
+  params.push(companyId);
+  const r = await pool.query(`SELECT COUNT(*)::int AS n FROM app.anonymous_profiles p WHERE (${where}) AND p.company_id = $${params.length}`, params);
   return r.rows[0].n;
 }
 
-export async function resolveSegmentEntities(pool, segmentId) {
-  const { rows } = await pool.query(`SELECT segment_type, metadata FROM app.segments WHERE id = $1`, [segmentId]);
+export async function resolveSegmentEntities(pool, companyId, segmentId) {
+  const { rows } = await pool.query(
+    `SELECT segment_type, metadata FROM app.segments WHERE id = $1 AND company_id = $2`,
+    [segmentId, companyId]
+  );
   if (!rows.length) return { entityType: null, ids: [] };
   const fc = rows[0].metadata?.filter_criteria || {};
   if (rows[0].segment_type === "customer") {
     const { where, params } = customerWhere(fc);
-    const r = await pool.query(`SELECT member_id FROM app.customer_profiles p WHERE ${where} LIMIT 100000`, params);
+    params.push(companyId);
+    const r = await pool.query(`SELECT member_id FROM app.customer_profiles p WHERE (${where}) AND p.company_id = $${params.length} LIMIT 100000`, params);
     return { entityType: "customer", ids: r.rows.map((x) => x.member_id).filter(Boolean) };
   }
   const { where, params } = anonWhere(fc);
-  const r = await pool.query(`SELECT visitor_id FROM app.anonymous_profiles p WHERE ${where} LIMIT 100000`, params);
+  params.push(companyId);
+  const r = await pool.query(`SELECT visitor_id FROM app.anonymous_profiles p WHERE (${where}) AND p.company_id = $${params.length} LIMIT 100000`, params);
   return { entityType: "anonymous", ids: r.rows.map((x) => x.visitor_id).filter(Boolean) };
 }
 
-// Resolve a list of identifiers (email / member_id / visitor_id) to entity_ids.
-export async function resolveIdentifiers(pool, entityType, identifiers) {
+// Resolve a list of identifiers (email / member_id / visitor_id) to entity_ids,
+// scoped to this company so an import never matches another tenant's profiles.
+export async function resolveIdentifiers(pool, companyId, entityType, identifiers) {
   const list = [...new Set((identifiers || []).map((x) => String(x || "").trim()).filter(Boolean))];
   if (!list.length) return [];
   if (entityType === "customer") {
     const r = await pool.query(
       `SELECT member_id FROM app.customer_profiles
-       WHERE member_id = ANY($1::text[]) OR lower(primary_email) = ANY($2::text[])`,
-      [list, list.map((x) => x.toLowerCase())]
+       WHERE company_id = $3 AND (member_id = ANY($1::text[]) OR lower(primary_email) = ANY($2::text[]))`,
+      [list, list.map((x) => x.toLowerCase()), companyId]
     );
     return r.rows.map((x) => x.member_id);
   }
-  const r = await pool.query(`SELECT visitor_id FROM app.anonymous_profiles WHERE visitor_id = ANY($1::text[])`, [list]);
+  const r = await pool.query(
+    `SELECT visitor_id FROM app.anonymous_profiles WHERE company_id = $2 AND visitor_id = ANY($1::text[])`,
+    [list, companyId]
+  );
   return r.rows.map((x) => x.visitor_id);
 }
