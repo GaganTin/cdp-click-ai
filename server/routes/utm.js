@@ -204,8 +204,9 @@ export function createUtmRouter(pool) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // GET /api/utm/links?days=30 - distinct UTM-param combinations seen in GA,
-  // each with its aggregated performance metrics from utm_performance.
+  // GET /api/utm/links?days=30 - source/medium/campaign combinations seen in GA,
+  // each with its aggregated performance metrics. Includes auto-attributed
+  // traffic (direct / organic / referral) - nothing is excluded.
   router.get("/links", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
@@ -221,12 +222,11 @@ export function createUtmRouter(pool) {
                 ROUND(AVG(engagement_rate)::numeric, 3) AS engagement_rate
          FROM ${FULL}
          WHERE company_id = $1 AND date >= $2
-           AND session_campaign_name <> ALL($3::text[])
          GROUP BY session_source, session_medium, session_campaign_name,
                   session_content, session_term, session_utm_id
          ORDER BY sessions DESC NULLS LAST
          LIMIT 500`,
-        [cid, start, AUTO_VALUES]
+        [cid, start]
       );
       res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }

@@ -10,8 +10,8 @@ export const FALLBACK_PLANS = [
     description: "Try everything free for 30 days. Solo use only - no team members.",
     cta_label: "Start free trial", cta_href: "/register", cta_external: false,
     is_highlighted: false, sort_order: 1, trial_days: 30, warning_days: 7,
-    features: ["Solo user only (no team members)", "1,000 customer profiles", "5 email campaigns", "1,000 AI tokens", "UTM tracking", "Read-only access after trial ends"],
-    limits: { profiles: 1000, campaigns: 5, ai_tokens: 1000, team_members: 1, workspaces: 1 },
+    features: ["Solo user only (no team members)", "5 workspaces", "1,000 customer profiles", "5 email campaigns", "1,000 AI tokens", "UTM tracking", "Read-only access after trial ends"],
+    limits: { profiles: 1000, campaigns: 5, ai_tokens: 1000, team_members: 1, workspaces: 5 },
     is_active: true,
   },
   {

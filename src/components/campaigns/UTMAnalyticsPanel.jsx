@@ -38,12 +38,12 @@ function chartParams(s, e, paramFilters = {}) {
 function fetchChart(key, s, e, paramFilters = {}) {
   const p = chartParams(s, e, paramFilters);
   switch (key) {
-    case "source":     return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "sessions", excludeAuto: true, limit: 10 });
-    case "medium":     return appClient.utm.breakdown({ ...p, dim: "session_medium", metric: "sessions", excludeAuto: true, limit: 10 });
-    case "campaign":   return appClient.utm.breakdown({ ...p, dim: "session_campaign_name", metric: "sessions", excludeAuto: true, limit: 15 });
+    case "source":     return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "sessions", limit: 10 });
+    case "medium":     return appClient.utm.breakdown({ ...p, dim: "session_medium", metric: "sessions", limit: 10 });
+    case "campaign":   return appClient.utm.breakdown({ ...p, dim: "session_campaign_name", metric: "sessions", limit: 15 });
     case "daily":      return appClient.utm.timeseries(p);
-    case "bounce":     return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "bounce_rate", excludeAuto: true, minSessions: 50, limit: 10 });
-    case "engagement": return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "engagement_rate", excludeAuto: true, minSessions: 50, limit: 10 });
+    case "bounce":     return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "bounce_rate", minSessions: 50, limit: 10 });
+    case "engagement": return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "engagement_rate", minSessions: 50, limit: 10 });
     case "device":     return appClient.utm.breakdown({ ...p, dim: "device", metric: "sessions", limit: 10 });
     case "country":    return appClient.utm.countries({ start: p.start, end: p.end, limit: 10 });
     case "utm_id":     return appClient.utm.utmIds({ start: p.start, end: p.end, limit: 15 });
@@ -595,6 +595,7 @@ const UTM_COLS = [
 export function GAUtmLinksSection() {
   const [utmLinks, setUtmLinks]     = useState([]);
   const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState(null);
   const [search, setSearch]         = useState("");
   const [filters, setFilters]       = useState({});
   const [colOrder, setColOrder]     = useState(() => UTM_COLS.map(c => c.key));
@@ -611,7 +612,7 @@ export function GAUtmLinksSection() {
   useEffect(() => {
     appClient.utm.links(30)
       .then(rows => { setUtmLinks(rows || []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(e => { setError(e?.message || "Failed to load GA UTM data"); setLoading(false); });
   }, []);
 
   const setFilter  = (k, v) => setFilters(p => ({ ...p, [k]: v }));
@@ -693,12 +694,31 @@ export function GAUtmLinksSection() {
     );
   }
 
-  if (utmLinks.length === 0) return null;
+  // A genuine fetch failure is surfaced (so it isn't mistaken for "no data");
+  // a successful-but-empty result still hides the section to keep the tab clean.
+  if (error) {
+    return (
+      <p className="mt-8 text-xs text-muted-foreground">
+        Couldn't load GA UTM data: {error}
+      </p>
+    );
+  }
+  // Loaded but nothing to show: the GA data has no traffic in the window yet.
+  // Say so rather than rendering nothing, which reads as "broken".
+  if (utmLinks.length === 0) {
+    return (
+      <p className="mt-8 text-xs text-muted-foreground">
+        No Google Analytics traffic found for the last 30 days. Connect and sync
+        Google Analytics, and this table will list the source / medium / campaign
+        combinations seen in your data.
+      </p>
+    );
+  }
 
   return (
     <div className="mt-8">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        UTM Performance from GA (last 30d)
+        GA Traffic Performance (last 30d)
       </h3>
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
