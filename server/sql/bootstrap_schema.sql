@@ -2349,10 +2349,11 @@ CREATE INDEX IF NOT EXISTS edm_events_lower_email_idx  ON app.edm_events(LOWER(e
 CREATE INDEX IF NOT EXISTS popup_email_collected_popup_profile_idx ON app.popup_email_collected(popup_id, profile_id);
 CREATE INDEX IF NOT EXISTS popup_email_collected_popup_visitor_idx ON app.popup_email_collected(popup_id, visitor_id);
 
--- Purchases: order count / spend / last order correlate shopify.sale by member_id
--- (the rule subquery filters member_id without a company_id, so the existing
--- (company_id, member_id) composite can't serve it).
-CREATE INDEX IF NOT EXISTS shopify_sale_member_only_idx ON shopify.sale(member_id);
+-- Purchases: order count / spend / last order correlate commerce."order" by
+-- customer_id = profile.member_id (see server/lib/attributeRules.js ORDER_*).
+-- The supporting index (commerce_order_customer_only_idx) is defined in
+-- 14_commerce.sql instead of here, because commerce."order" does not exist yet
+-- at this point in the build order (14 runs after 13).
 
 -- Attribute-value relation: EXISTS on profile_attribute_values matches by
 -- (entity_type, entity_id, attribute_value_id) without a company filter
@@ -2568,6 +2569,10 @@ CREATE TABLE IF NOT EXISTS commerce.refund_line (
 -- ── Indexes (tenant scoping + the app's read paths) ──────────────────────────
 CREATE INDEX IF NOT EXISTS commerce_order_company_idx          ON commerce."order" (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."order" (company_id, customer_id);
+-- customer_id-only: the rule engine's purchase subqueries filter customer_id =
+-- profile.member_id WITHOUT a company_id, so the composite above can't serve them
+-- (see server/lib/attributeRules.js). Was wrongly on shopify.sale in 13.
+CREATE INDEX IF NOT EXISTS commerce_order_customer_only_idx    ON commerce."order" (customer_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_company_idx     ON commerce.order_line (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_order_idx       ON commerce.order_line (order_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_company_idx       ON commerce.customer (company_id);

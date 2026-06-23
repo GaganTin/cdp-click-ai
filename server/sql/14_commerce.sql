@@ -189,6 +189,10 @@ CREATE TABLE IF NOT EXISTS commerce.refund_line (
 -- ── Indexes (tenant scoping + the app's read paths) ──────────────────────────
 CREATE INDEX IF NOT EXISTS commerce_order_company_idx          ON commerce."order" (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."order" (company_id, customer_id);
+-- customer_id-only: the rule engine's purchase subqueries filter customer_id =
+-- profile.member_id WITHOUT a company_id, so the composite above can't serve them
+-- (see server/lib/attributeRules.js). Was wrongly on shopify.sale in 13.
+CREATE INDEX IF NOT EXISTS commerce_order_customer_only_idx    ON commerce."order" (customer_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_company_idx     ON commerce.order_line (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_order_idx       ON commerce.order_line (order_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_company_idx       ON commerce.customer (company_id);
