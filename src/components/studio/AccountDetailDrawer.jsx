@@ -8,9 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
   X, Users, Building2, Crown, Mail, KeyRound, LogIn, Trash2,
-  SlidersHorizontal, Receipt, MailCheck,
+  SlidersHorizontal, Receipt, MailCheck, DollarSign,
 } from "lucide-react";
-import { fmtDate, fmtRelative, toDateInput, StatusPill, trialLabel } from "./helpers.jsx";
+import { fmtDate, fmtRelative, toDateInput, StatusPill, trialLabel, fmtCost } from "./helpers.jsx";
 
 const LIMIT_FIELDS = [
   ["profiles",     "Profiles"],
@@ -235,10 +235,10 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                       </div>
                       <StatusPill active={w.is_active !== false} />
                     </div>
-                    <div className="grid grid-cols-4 gap-2 mt-3 text-center">
-                      {[["Members", w.member_count], ["Profiles", w.profiles], ["Campaigns", w.campaigns], ["AI tokens", w.ai_tokens]].map(([l, v]) => (
+                    <div className="grid grid-cols-5 gap-2 mt-3 text-center">
+                      {[["Members", w.member_count], ["Profiles", w.profiles], ["Campaigns", w.campaigns], ["AI tokens", w.ai_tokens], ["AI cost", w.ai_cost, true]].map(([l, v, money]) => (
                         <div key={l}>
-                          <p className="text-sm font-semibold tabular-nums">{Number(v).toLocaleString()}</p>
+                          <p className="text-sm font-semibold tabular-nums">{money ? fmtCost(v) : Number(v).toLocaleString()}</p>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{l}</p>
                         </div>
                       ))}
@@ -248,6 +248,60 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                 {!data.workspaces.length && <p className="text-sm text-muted-foreground">No workspaces.</p>}
               </div>
             </section>
+
+            {/* AI usage & cost */}
+            {data.ai_usage && (
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" /> AI usage &amp; cost
+                </h3>
+                <div className="grid grid-cols-3 gap-2 text-center border border-border rounded-lg p-3 bg-secondary/20">
+                  {[
+                    ["Total cost", fmtCost(data.ai_usage.total_cost, data.ai_usage.currency)],
+                    ["Total tokens", Number(data.ai_usage.total_tokens).toLocaleString()],
+                    ["In / Out", `${Number(data.ai_usage.input_tokens).toLocaleString()} / ${Number(data.ai_usage.output_tokens).toLocaleString()}`],
+                  ].map(([l, v]) => (
+                    <div key={l}>
+                      <p className="text-sm font-semibold tabular-nums">{v}</p>
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{l}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {data.ai_usage.by_user?.length > 0 && (
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="text-left font-medium px-3 py-2">By user</th>
+                          <th className="text-right font-medium px-3 py-2">Tokens</th>
+                          <th className="text-right font-medium px-3 py-2">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.ai_usage.by_user.map((r) => (
+                          <tr key={r.user_id || "unattributed"} className="border-t border-border">
+                            <td className="px-3 py-2 truncate">{r.email || r.full_name || "Unattributed"}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{Number(r.tokens).toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fmtCost(r.cost, data.ai_usage.currency)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {data.ai_usage.by_feature?.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.ai_usage.by_feature.map((f) => (
+                      <span key={f.feature} className="text-[11px] px-2 py-1 rounded-md bg-secondary text-muted-foreground">
+                        {f.feature.replace(/_/g, " ")}: {fmtCost(f.cost, data.ai_usage.currency)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
 
             {/* Users */}
             <section className="space-y-3">

@@ -47,6 +47,13 @@ async function triggerAirflowDag(dagId, payload) {
     signal: AbortSignal.timeout(15_000),
   });
 
+  // A run with this (deterministic) run id already exists- almost always a slow
+  // run we re-triggered, not a real error. Signal "already running" so the caller
+  // can leave the job alone instead of recording a false failure.
+  if (resp.status === 409) {
+    return { alreadyExists: true, dag_run_id: payload.dag_run_id };
+  }
+
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText);
     throw new Error(`Airflow ${resp.status}: ${text}`);
@@ -54,15 +61,155 @@ async function triggerAirflowDag(dagId, payload) {
   return resp.json();
 }
 
+// Read the current state of a specific DAG run (queued|running|success|failed),
+// or "not_found" if Airflow has no such run, or null if Airflow is unreachable /
+// returns something unexpected (caller should treat null as "don't assume").
+async function getAirflowDagRunState(dagId, runId) {
+  const base = (process.env.AIRFLOW_BASE_URL || "").replace(/\/$/, "");
+  if (!base || !dagId || !runId) return null;
+  const user = process.env.AIRFLOW_USER || "admin";
+  const pass = process.env.AIRFLOW_PASS || "";
+
+  try {
+    const resp = await fetch(
+      `${base}/api/v1/dags/${dagId}/dagRuns/${encodeURIComponent(runId)}`,
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`,
+        },
+        signal: AbortSignal.timeout(15_000),
+      }
+    );
+    if (resp.status === 404) return "not_found";
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data?.state || null;
+  } catch (e) {
+    console.error(`[Queue] getAirflowDagRunState ${runId}:`, e.message);
+    return null;
+  }
+}
+
+// Mark a job (and its integration row) completed, mirroring the dag-complete
+// webhook so reconciliation and dev-mode share one code path.
+async function markJobCompleted(pool, job, { detail = "Sync completed" } = {}) {
+  await pool.query(
+    `UPDATE app.integration_sync_jobs
+     SET status='completed', completed_at=NOW(), updated_date=NOW()
+     WHERE id=$1`,
+    [job.id]
+  );
+  await pool.query(
+    `UPDATE app.data_integrations
+     SET is_synced=true, last_synced_date=NOW(),
+         is_sync_error=false, sync_error=null, updated_date=NOW()
+     WHERE integration_type=$1 AND company_id=$2`,
+    [job.integration_type, job.company_id]
+  );
+  await pool.query(
+    `INSERT INTO app.integration_audit_log
+       (company_id, integration_type, action, actor, detail)
+     VALUES ($1,$2,'sync_completed','system',$3)`,
+    [job.company_id, job.integration_type, detail]
+  );
+  await notifyCompany(pool, {
+    companyId: job.company_id,
+    type: "sync_status",
+    title: `${integrationLabel(job.integration_type)} sync completed`,
+    body: "Your latest data has finished syncing.",
+    link: "/integrations",
+    metadata: { integration_type: job.integration_type, status: "completed", job_id: job.id },
+  });
+}
+
+// Mark a job (and its integration row) failed, mirroring the dag-complete webhook.
+async function markJobFailed(pool, job, message) {
+  await pool.query(
+    `UPDATE app.integration_sync_jobs
+     SET status='failed', error_message=$1, completed_at=NOW(), updated_date=NOW()
+     WHERE id=$2`,
+    [message, job.id]
+  );
+  await pool.query(
+    `UPDATE app.data_integrations
+     SET is_sync_error=true, sync_error=$1, updated_date=NOW()
+     WHERE integration_type=$2 AND company_id=$3`,
+    [message, job.integration_type, job.company_id]
+  );
+  await pool.query(
+    `INSERT INTO app.integration_audit_log
+       (company_id, integration_type, action, actor, detail)
+     VALUES ($1,$2,'sync_failed','system',$3)`,
+    [job.company_id, job.integration_type, message]
+  );
+  await notifyCompany(pool, {
+    companyId: job.company_id,
+    type: "sync_status",
+    title: `${integrationLabel(job.integration_type)} sync failed`,
+    body: "We couldn't complete the sync. Open Integrations to retry.",
+    link: "/integrations",
+    metadata: { integration_type: job.integration_type, status: "failed", job_id: job.id },
+  });
+}
+
+// Recover jobs stuck in 'running'. A job is only "stuck" if the server crashed
+// mid-run- NOT just because it has been running a while (a GA initial backfill is
+// 3-5 years of data across 4 child DAGs and routinely exceeds 15 min). So before
+// touching anything we ask Airflow what the run is actually doing, and only
+// re-queue runs that are genuinely gone. Re-queuing a live run would re-trigger
+// it, collide on the deterministic run id (409) and surface a false "Sync failed".
 async function resetStaleJobs(pool) {
   try {
-    const { rowCount } = await pool.query(`
-      UPDATE app.integration_sync_jobs
-      SET status = 'queued', updated_date = NOW()
+    const { rows: stale } = await pool.query(`
+      SELECT * FROM app.integration_sync_jobs
       WHERE status = 'running'
         AND started_at < NOW() - INTERVAL '15 minutes'
     `);
-    if (rowCount > 0) console.log(`[Queue] Reset ${rowCount} stale job(s) → queued`);
+    if (!stale.length) return;
+
+    const isDev = !process.env.AIRFLOW_BASE_URL;
+
+    for (const job of stale) {
+      const dagId = DAG_MAP[job.integration_type];
+      const runId = job.airflow_run_id;
+
+      // No Airflow to consult (dev mode), or no run id recorded yet: fall back to
+      // the original crash-recovery behaviour and re-queue.
+      if (isDev || !dagId || !runId) {
+        await pool.query(
+          `UPDATE app.integration_sync_jobs SET status='queued', updated_date=NOW() WHERE id=$1`,
+          [job.id]
+        );
+        console.log(`[Queue] Reset stale job ${job.id} → queued (no Airflow state to check)`);
+        continue;
+      }
+
+      const state = await getAirflowDagRunState(dagId, runId);
+
+      if (state === "running" || state === "queued") {
+        // Alive and still working- leave it. Do NOT re-queue.
+        console.log(`[Queue] Stale job ${job.id} still ${state} in Airflow; leaving as running`);
+      } else if (state === "success") {
+        // Finished, but the dag-complete webhook never landed- reconcile.
+        console.log(`[Queue] Stale job ${job.id} succeeded in Airflow; reconciling → completed`);
+        await markJobCompleted(pool, job, { detail: "Reconciled from Airflow (completion webhook missed)" });
+      } else if (state === "failed") {
+        console.log(`[Queue] Stale job ${job.id} failed in Airflow; reconciling → failed`);
+        await markJobFailed(pool, job, "DAG run failed (reconciled from Airflow; no completion webhook received)");
+      } else if (state === "not_found") {
+        // No such run- the trigger was lost (e.g. crash around trigger time).
+        // Safe to re-queue: the retry creates a fresh run with no collision.
+        await pool.query(
+          `UPDATE app.integration_sync_jobs SET status='queued', updated_date=NOW() WHERE id=$1`,
+          [job.id]
+        );
+        console.log(`[Queue] Stale job ${job.id} has no Airflow run; reset → queued`);
+      } else {
+        // state === null: Airflow unreachable / unexpected. Be conservative- leave
+        // the job running and re-check next poll rather than risk a false failure.
+        console.log(`[Queue] Stale job ${job.id}: Airflow state unknown; will re-check next poll`);
+      }
+    }
   } catch (e) {
     console.error("[Queue] resetStaleJobs:", e.message);
   }
@@ -108,7 +255,7 @@ async function processNextJob(pool) {
   const isDev = !process.env.AIRFLOW_BASE_URL;
 
   try {
-    await triggerAirflowDag(dagId, {
+    const trigger = await triggerAirflowDag(dagId, {
       dag_run_id: runId,
       conf: {
         str_client_name:  meta.client_name || process.env.CLIENT_NAME || "default",
@@ -127,66 +274,20 @@ async function processNextJob(pool) {
       [runId, job.id]
     );
 
-    // In dev mode (no Airflow), resolve immediately so the UI doesn't hang
-    if (isDev) {
-      await pool.query(
-        `UPDATE app.integration_sync_jobs
-         SET status='completed', completed_at=NOW(), updated_date=NOW()
-         WHERE id=$1`,
-        [job.id]
-      );
-      await pool.query(
-        `UPDATE app.data_integrations
-         SET is_synced=true, last_synced_date=NOW(),
-             is_sync_error=false, sync_error=null, updated_date=NOW()
-         WHERE integration_type=$1 AND company_id=$2`,
-        [job.integration_type, job.company_id]
-      );
-      await pool.query(
-        `INSERT INTO app.integration_audit_log
-           (company_id, integration_type, action, actor, detail)
-         VALUES ($1,$2,'sync_completed','system','Dev mode auto-complete')`,
-        [job.company_id, job.integration_type]
-      );
-      await notifyCompany(pool, {
-        companyId: job.company_id,
-        type: "sync_status",
-        title: `${integrationLabel(job.integration_type)} sync completed`,
-        body: "Your latest data has finished syncing.",
-        link: "/integrations",
-        metadata: { integration_type: job.integration_type, status: "completed", job_id: job.id },
-      });
+    // The run already exists (we re-triggered a still-running sync). Leave the job
+    // 'running' so the dag-complete webhook can resolve it- recording a failure
+    // here would be wrong, the DAG is fine.
+    if (trigger?.alreadyExists) {
+      console.log(`[Queue] DAG run ${runId} already exists- job ${job.id} left running`);
+    } else if (isDev) {
+      // In dev mode (no Airflow), resolve immediately so the UI doesn't hang.
+      await markJobCompleted(pool, job, { detail: "Dev mode auto-complete" });
+    } else {
+      console.log(`[Queue] Triggered ${dagId}- job ${job.id} (${job.integration_type})`);
     }
-
-    console.log(`[Queue] Triggered ${dagId}- job ${job.id} (${job.integration_type})`);
   } catch (e) {
     console.error(`[Queue] DAG trigger failed for job ${job.id}:`, e.message);
-    await pool.query(
-      `UPDATE app.integration_sync_jobs
-       SET status='failed', error_message=$1, completed_at=NOW(), updated_date=NOW()
-       WHERE id=$2`,
-      [e.message, job.id]
-    );
-    await pool.query(
-      `UPDATE app.data_integrations
-       SET is_sync_error=true, sync_error=$1, updated_date=NOW()
-       WHERE integration_type=$2 AND company_id=$3`,
-      [e.message, job.integration_type, job.company_id]
-    );
-    await pool.query(
-      `INSERT INTO app.integration_audit_log
-         (company_id, integration_type, action, actor, detail)
-       VALUES ($1,$2,'sync_failed','system',$3)`,
-      [job.company_id, job.integration_type, e.message]
-    );
-    await notifyCompany(pool, {
-      companyId: job.company_id,
-      type: "sync_status",
-      title: `${integrationLabel(job.integration_type)} sync failed`,
-      body: "We couldn't complete the sync. Open Integrations to retry.",
-      link: "/integrations",
-      metadata: { integration_type: job.integration_type, status: "failed", job_id: job.id },
-    });
+    await markJobFailed(pool, job, e.message);
   }
 
   // Drain: keep processing until the queue is empty

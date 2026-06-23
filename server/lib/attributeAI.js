@@ -31,13 +31,26 @@ export function isAIConfigured() {
 
 const MAX_CONTENT_CHARS = 6000;
 
+// Hand the token split to an optional usage callback (used by callers to ledger
+// AI cost). Never lets a tracking error break the tagging itself.
+function reportUsage(onUsage, resp) {
+  if (!onUsage || !resp?.usage) return;
+  try {
+    onUsage({
+      input: resp.usage.prompt_tokens || 0,
+      output: resp.usage.completion_tokens || 0,
+      model: deployment(),
+    });
+  } catch { /* tracking is best-effort */ }
+}
+
 /**
  * Tag one page against a list of attributes.
  * @param {{title?:string, url?:string, content?:string}} page
  * @param {Array<{id:string, name:string, description:string, value_type:string, enumValues:string[]}>} attributes
  * @returns {Promise<Array<{attribute_id:string, values:string[]}>>}
  */
-export async function tagPage(page, attributes) {
+export async function tagPage(page, attributes, onUsage = null) {
   const client = getClient();
   if (!client) throw new Error("Azure OpenAI is not configured.");
   if (!attributes?.length) return [];
@@ -78,6 +91,8 @@ Respond with a JSON object whose keys are the exact attribute names above and wh
     temperature: 0,
   });
 
+  reportUsage(onUsage, resp);
+
   let parsed = {};
   try {
     parsed = JSON.parse(resp.choices[0].message.content || "{}");
@@ -105,7 +120,7 @@ Respond with a JSON object whose keys are the exact attribute names above and wh
  * @param {string[]} values e.g. ["England", "Japan", "France"]
  * @returns {Promise<Record<string,string>>} { England: "Europe", Japan: "Asia", ... }
  */
-export async function groupValues(groupLabel, values) {
+export async function groupValues(groupLabel, values, onUsage = null) {
   const client = getClient();
   if (!client) throw new Error("Azure OpenAI is not configured.");
   if (!values?.length) return {};
@@ -122,6 +137,8 @@ Return ONLY a JSON object that maps each value (spelled exactly as given) to a c
     max_completion_tokens: 1500,
     temperature: 0,
   });
+
+  reportUsage(onUsage, resp);
 
   try {
     const parsed = JSON.parse(resp.choices[0].message.content || "{}");
@@ -142,7 +159,7 @@ Return ONLY a JSON object that maps each value (spelled exactly as given) to a c
  * @param {string[]} existing names of attributes that already exist (so we don't repeat them)
  * @returns {Promise<Array<{name:string, description:string, value_type:'single'|'multi', example_values:string[]}>>}
  */
-export async function suggestAttributes(pages, existing = []) {
+export async function suggestAttributes(pages, existing = [], onUsage = null) {
   const client = getClient();
   if (!client) throw new Error("Azure OpenAI is not configured.");
   if (!pages?.length) return [];
@@ -174,6 +191,8 @@ Return ONLY a JSON object of the form {"attributes":[{"name":...,"description":.
     max_completion_tokens: 1500,
     temperature: 0.3,
   });
+
+  reportUsage(onUsage, resp);
 
   try {
     const parsed = JSON.parse(resp.choices[0].message.content || "{}");

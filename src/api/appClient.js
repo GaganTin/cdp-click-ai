@@ -172,6 +172,8 @@ export const appClient = {
     updateTicket:  (id, data) => request(`/admin/tickets/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     listPlans:     () => request("/admin/plans"),
     updatePlan:    (id, data) => request(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    listAiPricing: () => request("/admin/ai-pricing"),
+    updateAiPricing: (model, data) => request(`/admin/ai-pricing/${encodeURIComponent(model)}`, { method: "PATCH", body: JSON.stringify(data) }),
   },
   support: {
     listTickets:  () => request("/support/tickets"),

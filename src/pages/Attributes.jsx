@@ -73,6 +73,7 @@ function closestMatch(value, candidates, threshold = 0.72) {
 // ── Live job status banner ────────────────────────────────────
 function JobStatus({ job, onCancel, compact }) {
   const { t } = usePreferences();
+  const [confirmCancel, setConfirmCancel] = useState(false);
   if (!job) return null;
   const p = job.progress || {};
   const phaseLabel = {
@@ -108,14 +109,31 @@ function JobStatus({ job, onCancel, compact }) {
   }
 
   return (
-    <div className={`flex items-center gap-2 ${compact ? "text-[11px]" : "text-xs"} text-muted-foreground`}>
-      <Loader2 className="w-3.5 h-3.5 animate-spin text-foreground" />
-      <span className="font-medium text-foreground">{phaseLabel}</span>
-      {counts && <span>· {counts}</span>}
-      {elapsed != null && <span>· {fmt(elapsed)} {t("elapsed")}</span>}
-      {eta && <span className="text-foreground">· {eta}</span>}
-      {onCancel && <button onClick={onCancel} className="ml-1 hover:text-foreground underline">{t("cancel")}</button>}
-    </div>
+    <>
+      <div className={`flex items-center gap-2 ${compact ? "text-[11px]" : "text-xs"} text-muted-foreground`}>
+        <Loader2 className="w-3.5 h-3.5 animate-spin text-foreground" />
+        <span className="font-medium text-foreground">{phaseLabel}</span>
+        {counts && <span>· {counts}</span>}
+        {elapsed != null && <span>· {fmt(elapsed)} {t("elapsed")}</span>}
+        {eta && <span className="text-foreground">· {eta}</span>}
+        {onCancel && <button onClick={() => setConfirmCancel(true)} className="ml-1 hover:text-foreground underline">{t("cancel")}</button>}
+      </div>
+
+      {/* Cancelling stops the run mid-flight: AI tagging + profile updates for this
+          run won't be applied, and the progress shown here resets to a fresh run. */}
+      <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><AlertCircle className="w-4 h-4 text-destructive" /> {t("Cancel this run?")}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("This will stop the crawl right away. The AI tagging and profile updates for this run won't be applied, and you'll have to start a brand-new run to finish - the progress shown here resets to zero.")}
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmCancel(false)}>{t("Keep running")}</Button>
+            <Button variant="destructive" size="sm" onClick={() => { setConfirmCancel(false); onCancel?.(); }}>{t("Cancel run")}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

@@ -32,12 +32,27 @@ export function createBillingRouter(pool) {
                 (SELECT COUNT(*) FROM app.edm_campaigns ec WHERE ec.company_id = c.id) AS campaigns,
                 (SELECT COALESCE(SUM(ue.quantity), 0) FROM app.usage_events ue
                    WHERE ue.company_id = c.id AND ue.event_type = 'ai_token')     AS ai_tokens,
+                (SELECT COALESCE(SUM(au.cost), 0) FROM app.ai_usage au
+                   WHERE au.company_id = c.id)                                    AS ai_cost,
                 (SELECT COUNT(*) FROM app.customer_profiles cp WHERE cp.company_id = c.id) AS profiles
            FROM app.companies c
           WHERE c.account_id = $1
           ORDER BY c.created_date`,
         [accountId]
       );
+
+      // Account-wide AI spend straight from the cost ledger (includes rows whose
+      // workspace was later deleted, which is why it's keyed on account_id).
+      const { rows: aiRows } = await pool.query(
+        `SELECT COALESCE(SUM(total_tokens), 0)  AS tokens,
+                COALESCE(SUM(input_tokens), 0)   AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)  AS output_tokens,
+                COALESCE(SUM(cost), 0)           AS cost,
+                COALESCE(MAX(currency), 'USD')   AS currency
+           FROM app.ai_usage WHERE account_id = $1`,
+        [accountId]
+      );
+      const ai = aiRows[0] || {};
 
       // Account-wide team members = DISTINCT users across all workspaces (a user
       // who belongs to several workspaces counts once against the team limit).
@@ -49,19 +64,28 @@ export function createBillingRouter(pool) {
         [accountId]
       );
 
+      const money = (v) => Math.round((parseFloat(v) || 0) * 1e6) / 1e6;
+
       const workspaces = wsRows.map((w) => ({
         id: w.id,
         name: w.name,
         team_members: num(w.team_members),
         campaigns: num(w.campaigns),
         ai_tokens: num(w.ai_tokens),
+        ai_cost: money(w.ai_cost),
         profiles: num(w.profiles),
       }));
 
       const overall = {
         team_members: num(tm[0]?.n),
         campaigns: workspaces.reduce((s, w) => s + w.campaigns, 0),
-        ai_tokens: workspaces.reduce((s, w) => s + w.ai_tokens, 0),
+        // AI totals come from the cost ledger (account-keyed) so they stay correct
+        // even after a workspace is deleted.
+        ai_tokens: num(ai.tokens),
+        ai_input_tokens: num(ai.input_tokens),
+        ai_output_tokens: num(ai.output_tokens),
+        ai_cost: money(ai.cost),
+        ai_currency: ai.currency || "USD",
         profiles: workspaces.reduce((s, w) => s + w.profiles, 0),
         workspaces_count: workspaces.length,
       };
@@ -71,6 +95,8 @@ export function createBillingRouter(pool) {
         team_members: overall.team_members,
         campaigns: overall.campaigns,
         ai_tokens: overall.ai_tokens,
+        ai_cost: overall.ai_cost,
+        ai_currency: overall.ai_currency,
         profiles: overall.profiles,
         workspaces_count: overall.workspaces_count,
         overall,

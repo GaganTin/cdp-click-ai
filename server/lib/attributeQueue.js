@@ -9,6 +9,7 @@
 import { crawlPage, discoverUrls, contentHash, closeBrowser, isValidTitle, fetchSitemapLastmod, normUrl } from "./webCrawler.js";
 import { tagPage, isAIConfigured } from "./attributeAI.js";
 import { triggerContentScrape } from "./contentScrapeTrigger.js";
+import { recordAiUsage } from "./aiUsage.js";
 
 // Cap how many blocked pages we hand to the Selenium DAG in one escalation.
 const MAX_ESCALATE = 500;
@@ -245,7 +246,11 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
       // (e.g. a per-page "re-tag"), or the content+attribute signature changed.
       if (!opts.scopedRetag && !page.needs_retag && page.metadata?.tagged_sig === marker) { tagged++; continue; }
       try {
-        const results = await tagPage(page, attributes);
+        const results = await tagPage(page, attributes, (u) => recordAiUsage(pool, {
+          companyId, feature: "attribute_tag", model: u.model,
+          inputTokens: u.input, outputTokens: u.output,
+          metadata: { page_id: page.id, job_id: job.id },
+        }));
         for (const r of results) {
           // replace this page's tags for this attribute
           await pool.query(

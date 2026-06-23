@@ -2,6 +2,7 @@ import { Router } from "express";
 import crypto from "crypto";
 import { authenticate, requirePlatformAdmin, createToken, setAuthCookie } from "../middleware/auth.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.js";
+import { clearPricingCache } from "../lib/aiUsage.js";
 
 // ============================================================================
 //  Platform-owner ("Studio") API. Everything here is PLATFORM-scoped, not
@@ -46,11 +47,15 @@ export function createAdminRouter(pool) {
           (SELECT COUNT(*) FROM app.accounts
              WHERE plan = 'free' AND plan_expires_at IS NOT NULL
                AND plan_expires_at > NOW() AND plan_expires_at <= NOW() + INTERVAL '7 days') AS expiring_7d,
-          (SELECT COUNT(*) FROM app.support_tickets WHERE status IN ('open', 'in_progress')) AS open_tickets
+          (SELECT COUNT(*) FROM app.support_tickets WHERE status IN ('open', 'in_progress')) AS open_tickets,
+          (SELECT COALESCE(SUM(total_tokens), 0) FROM app.ai_usage)                          AS total_ai_tokens,
+          (SELECT COALESCE(SUM(cost), 0)         FROM app.ai_usage)                          AS total_ai_cost
       `);
       const r = rows[0];
       // pg returns COUNT() as text; coerce to numbers for the UI.
       const stats = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, parseInt(v, 10)]));
+      // Cost is a decimal - keep its fractional part (the parseInt map truncated it).
+      stats.total_ai_cost = Math.round((parseFloat(r.total_ai_cost) || 0) * 1e6) / 1e6;
 
       // Daily signups for the last 30 days (zero-filled) for the Overview trend.
       const { rows: daily } = await pool.query(`
@@ -88,6 +93,8 @@ export function createAdminRouter(pool) {
                ow.email AS owner_email, ow.full_name AS owner_name,
                (SELECT COUNT(*) FROM app.users u     WHERE u.account_id = a.id) AS user_count,
                (SELECT COUNT(*) FROM app.companies c WHERE c.account_id = a.id) AS workspace_count,
+               (SELECT COALESCE(SUM(au.total_tokens), 0) FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_tokens,
+               (SELECT COALESCE(SUM(au.cost), 0)         FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_cost,
                GREATEST(
                  (SELECT MAX(u.last_login_at) FROM app.users u      WHERE u.account_id = a.id),
                  (SELECT MAX(al.occurred_at)  FROM app.audit_log al WHERE al.account_id = a.id)
@@ -104,6 +111,8 @@ export function createAdminRouter(pool) {
         ...r,
         user_count: parseInt(r.user_count, 10),
         workspace_count: parseInt(r.workspace_count, 10),
+        ai_tokens: parseInt(r.ai_tokens, 10) || 0,
+        ai_cost: Math.round((parseFloat(r.ai_cost) || 0) * 1e6) / 1e6,
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -121,7 +130,7 @@ export function createAdminRouter(pool) {
       `, [req.params.id]);
       if (!acct.length) return res.status(404).json({ error: "Account not found" });
 
-      const [users, workspaces] = await Promise.all([
+      const [users, workspaces, aiTotals, aiByUser, aiByFeature] = await Promise.all([
         pool.query(`
           SELECT id, email, full_name, last_login_at, is_email_verified,
                  is_platform_admin, is_active, created_date
@@ -134,10 +143,43 @@ export function createAdminRouter(pool) {
                  (SELECT COUNT(*) FROM app.customer_profiles cp WHERE cp.company_id = c.id) AS profiles,
                  (SELECT COUNT(*) FROM app.edm_campaigns ec     WHERE ec.company_id = c.id) AS campaigns,
                  (SELECT COALESCE(SUM(ue.quantity), 0) FROM app.usage_events ue
-                    WHERE ue.company_id = c.id AND ue.event_type = 'ai_token') AS ai_tokens
+                    WHERE ue.company_id = c.id AND ue.event_type = 'ai_token') AS ai_tokens,
+                 (SELECT COALESCE(SUM(au.cost), 0) FROM app.ai_usage au
+                    WHERE au.company_id = c.id) AS ai_cost
             FROM app.companies c WHERE c.account_id = $1 ORDER BY c.created_date
         `, [req.params.id]),
+        // Account-wide AI spend (the per-account cost rollup).
+        pool.query(`
+          SELECT COALESCE(SUM(input_tokens), 0)  AS input_tokens,
+                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                 COALESCE(SUM(total_tokens), 0)  AS total_tokens,
+                 COALESCE(SUM(cost), 0)          AS total_cost,
+                 COALESCE(MAX(currency), 'USD')  AS currency
+            FROM app.ai_usage WHERE account_id = $1
+        `, [req.params.id]),
+        // Per-user breakdown (a user can span several of the account's workspaces).
+        pool.query(`
+          SELECT au.user_id, u.email, u.full_name,
+                 COALESCE(SUM(au.total_tokens), 0) AS tokens,
+                 COALESCE(SUM(au.cost), 0)         AS cost
+            FROM app.ai_usage au
+            LEFT JOIN app.users u ON u.id = au.user_id
+           WHERE au.account_id = $1
+           GROUP BY au.user_id, u.email, u.full_name
+           ORDER BY cost DESC
+        `, [req.params.id]),
+        // Per-feature breakdown (analyst / chart_summary / attribute_* / ...).
+        pool.query(`
+          SELECT feature,
+                 COALESCE(SUM(total_tokens), 0) AS tokens,
+                 COALESCE(SUM(cost), 0)         AS cost
+            FROM app.ai_usage WHERE account_id = $1
+           GROUP BY feature ORDER BY cost DESC
+        `, [req.params.id]),
       ]);
+
+      const money = (v) => Math.round((parseFloat(v) || 0) * 1e6) / 1e6;
+      const t = aiTotals.rows[0] || {};
 
       res.json({
         account: acct[0],
@@ -148,7 +190,22 @@ export function createAdminRouter(pool) {
           profiles: parseInt(w.profiles, 10),
           campaigns: parseInt(w.campaigns, 10),
           ai_tokens: parseInt(w.ai_tokens, 10),
+          ai_cost: money(w.ai_cost),
         })),
+        ai_usage: {
+          input_tokens: parseInt(t.input_tokens, 10) || 0,
+          output_tokens: parseInt(t.output_tokens, 10) || 0,
+          total_tokens: parseInt(t.total_tokens, 10) || 0,
+          total_cost: money(t.total_cost),
+          currency: t.currency || "USD",
+          by_user: aiByUser.rows.map((r) => ({
+            user_id: r.user_id, email: r.email, full_name: r.full_name,
+            tokens: parseInt(r.tokens, 10) || 0, cost: money(r.cost),
+          })),
+          by_feature: aiByFeature.rows.map((r) => ({
+            feature: r.feature, tokens: parseInt(r.tokens, 10) || 0, cost: money(r.cost),
+          })),
+        },
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -333,6 +390,47 @@ export function createAdminRouter(pool) {
       );
       if (!rows.length) return res.status(404).json({ error: "Plan not found" });
       await audit(null, req.user.id, "update", "plan", req.params.id, req.body);
+      res.json(rows[0]);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /api/admin/ai-pricing ─────────────────────────────────────────────
+  // Editable $/1M-token rates per model, used to cost AI usage at insert time.
+  router.get("/ai-pricing", async (_req, res) => {
+    try {
+      const { rows } = await pool.query("SELECT * FROM app.ai_model_pricing ORDER BY model");
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── PATCH /api/admin/ai-pricing/:model ────────────────────────────────────
+  // Update (or create) a model's rates. New rates apply to FUTURE usage only -
+  // already-recorded costs are frozen on their ledger rows.
+  router.patch("/ai-pricing/:model", async (req, res) => {
+    const { input_per_1m, output_per_1m, currency } = req.body;
+    const num = (v) => (v === "" || v == null ? null : Number(v));
+    const inP = num(input_per_1m), outP = num(output_per_1m);
+    if ((inP != null && (isNaN(inP) || inP < 0)) || (outP != null && (isNaN(outP) || outP < 0))) {
+      return res.status(400).json({ error: "Rates must be non-negative numbers" });
+    }
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency, updated_date)
+         VALUES ($1, COALESCE($2, 0), COALESCE($3, 0), COALESCE($4, 'USD'), NOW())
+         ON CONFLICT (model) DO UPDATE SET
+           input_per_1m  = COALESCE($2, app.ai_model_pricing.input_per_1m),
+           output_per_1m = COALESCE($3, app.ai_model_pricing.output_per_1m),
+           currency      = COALESCE($4, app.ai_model_pricing.currency),
+           updated_date  = NOW()
+         RETURNING *`,
+        [req.params.model, inP, outP, currency || null]
+      );
+      clearPricingCache();
+      await audit(null, req.user.id, "update", "ai_pricing", req.params.model, { input_per_1m: inP, output_per_1m: outP, currency });
       res.json(rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });

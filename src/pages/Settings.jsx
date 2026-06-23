@@ -1217,6 +1217,16 @@ function UsageBar({ label, used, limit, unlimited }) {
 // only for qualitative perks, with any limit restatements filtered out so the two
 // can't contradict each other.
 const num = (n) => Number(n).toLocaleString();
+// Money: tiny AI costs need more precision than 2dp (a few cents → $0.0042).
+function fmtCost(v, currency = "USD") {
+  const n = Number(v) || 0;
+  const digits = n > 0 && n < 1 ? 4 : 2;
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: digits }).format(n);
+  } catch {
+    return `$${n.toFixed(digits)}`;
+  }
+}
 const PLAN_LIMIT_BULLETS = [
   ["workspaces",   (n) => n == null ? "Unlimited workspaces"        : `${num(n)} workspace${n === 1 ? "" : "s"}`],
   ["team_members", (n) => n == null ? "Unlimited team members"      : `${num(n)} team member${n === 1 ? "" : "s"}`],
@@ -1331,6 +1341,29 @@ function BillingTab({ company }) {
         )}
       </Section>
 
+      {/* AI usage & cost */}
+      <Section title={t("AI usage & cost")} description={t("Total AI tokens consumed and their cost across all your workspaces.")}>
+        {usageLoading ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[1,2,3,4].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: t("Total AI cost"), value: fmtCost(usage?.ai_cost ?? usage?.overall?.ai_cost ?? 0, usage?.ai_currency) },
+              { label: t("Total tokens"),  value: num(usage?.overall?.ai_tokens ?? usage?.ai_tokens ?? 0) },
+              { label: t("Input tokens"),  value: num(usage?.overall?.ai_input_tokens ?? 0) },
+              { label: t("Output tokens"), value: num(usage?.overall?.ai_output_tokens ?? 0) },
+            ].map(({ label, value }) => (
+              <div key={label} className="border border-border rounded-lg px-5 py-4">
+                <p className="text-xl font-semibold tabular-nums">{value}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Section>
+
       {/* Usage by workspace */}
       {usage?.workspaces?.length > 0 && (
         <Section title={t("Usage by workspace")} description={t("How the account total breaks down across your workspaces.")}>
@@ -1343,6 +1376,7 @@ function BillingTab({ company }) {
                   <th className="text-right font-medium px-4 py-2.5">{t("Profiles")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("Campaigns")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("AI tokens")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("AI cost")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1356,6 +1390,7 @@ function BillingTab({ company }) {
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.profiles.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.campaigns.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.ai_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(w.ai_cost ?? 0, usage?.ai_currency)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1366,6 +1401,7 @@ function BillingTab({ company }) {
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.profiles ?? usage.profiles ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.campaigns ?? usage.campaigns ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.ai_tokens ?? usage.ai_tokens ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(usage.overall?.ai_cost ?? usage.ai_cost ?? 0, usage?.ai_currency)}</td>
                 </tr>
               </tfoot>
             </table>

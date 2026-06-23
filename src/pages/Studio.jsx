@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   LayoutGrid, CreditCard, ShieldCheck, Search, Building2, Users,
-  TrendingUp, Clock, AlertTriangle, Download, Activity, LifeBuoy,
+  TrendingUp, Clock, AlertTriangle, Download, Activity, LifeBuoy, DollarSign,
 } from "lucide-react";
-import { fmtDate, fmtRelative, downloadCsv, trialLabel, trialDaysLeft, PlanBadge, StatusPill } from "@/components/studio/helpers.jsx";
+import { fmtDate, fmtRelative, downloadCsv, trialLabel, trialDaysLeft, PlanBadge, StatusPill, fmtCost } from "@/components/studio/helpers.jsx";
 import AccountDetailDrawer from "@/components/studio/AccountDetailDrawer.jsx";
 import PlansTab from "@/components/studio/PlansTab.jsx";
 import OwnersTab from "@/components/studio/OwnersTab.jsx";
@@ -94,6 +94,8 @@ function OverviewTab({ onOpenAccount }) {
       { key: "plan", label: "Plan" },
       { key: "user_count", label: "Users" },
       { key: "workspace_count", label: "Workspaces" },
+      { key: "ai_tokens", label: "AI tokens" },
+      { label: "AI cost (USD)", get: (a) => (Number(a.ai_cost) || 0).toFixed(6) },
       { label: "Signed up", get: (a) => fmtDate(a.created_date) },
       { label: "Last active", get: (a) => (a.last_activity ? new Date(a.last_activity).toISOString() : "") },
       { label: "Status", get: (a) => (a.is_active !== false ? "active" : "suspended") },
@@ -103,7 +105,7 @@ function OverviewTab({ onOpenAccount }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         <StatCard icon={Building2} label="Clients" value={stats?.total_accounts ?? "-"}
           sub={stats ? `${stats.paid_accounts} paid · ${stats.free_accounts} free` : ""} />
         <StatCard icon={Users} label="Users" value={stats?.total_users ?? "-"}
@@ -112,6 +114,8 @@ function OverviewTab({ onOpenAccount }) {
           sub={stats ? `${stats.suspended_accounts} suspended` : ""} />
         <StatCard icon={Clock} label="Active trials" value={stats?.active_trials ?? "-"}
           sub={stats ? `${stats.expired_trials} expired` : ""} />
+        <StatCard icon={DollarSign} label="AI cost" value={stats ? fmtCost(stats.total_ai_cost) : "-"}
+          sub={stats ? `${Number(stats.total_ai_tokens || 0).toLocaleString()} tokens` : ""} />
         <StatCard icon={AlertTriangle} label="Expiring ≤7d" value={stats?.expiring_7d ?? "-"}
           sub={expiringOnly ? "filtering" : "click to filter"}
           onClick={() => setExpiringOnly((v) => !v)} active={expiringOnly} />
@@ -153,6 +157,7 @@ function OverviewTab({ onOpenAccount }) {
               <th className="text-left font-medium px-4 py-2.5">Plan</th>
               <th className="text-right font-medium px-4 py-2.5">Users</th>
               <th className="text-right font-medium px-4 py-2.5">Workspaces</th>
+              <th className="text-right font-medium px-4 py-2.5">AI cost</th>
               <th className="text-left font-medium px-4 py-2.5">Signed up</th>
               <th className="text-left font-medium px-4 py-2.5">Last active</th>
               <th className="text-left font-medium px-4 py-2.5">Status</th>
@@ -160,9 +165,9 @@ function OverviewTab({ onOpenAccount }) {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-6 text-muted-foreground">Loading…</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-muted-foreground">Loading…</td></tr>
             ) : !shown.length ? (
-              <tr><td colSpan={7} className="px-4 py-6 text-muted-foreground">No clients found.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-6 text-muted-foreground">No clients found.</td></tr>
             ) : shown.map((a) => {
               const trial = trialLabel(a);
               return (
@@ -182,6 +187,7 @@ function OverviewTab({ onOpenAccount }) {
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">{a.user_count}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{a.workspace_count}</td>
+                  <td className="px-4 py-3 text-right tabular-nums" title={`${Number(a.ai_tokens || 0).toLocaleString()} tokens`}>{fmtCost(a.ai_cost)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtDate(a.created_date)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtRelative(a.last_activity)}</td>
                   <td className="px-4 py-3"><StatusPill active={a.is_active !== false} /></td>

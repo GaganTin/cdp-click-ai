@@ -3,6 +3,7 @@ import { authenticate, withCompany } from "../middleware/auth.js";
 import { processNextAttributeJob, repropagate } from "../lib/attributeQueue.js";
 import { crawlPage, contentHash, matchesExclusion, decodeUrl, isValidTitle } from "../lib/webCrawler.js";
 import { tagPage, isAIConfigured, groupValues, suggestAttributes } from "../lib/attributeAI.js";
+import { recordAiUsage } from "../lib/aiUsage.js";
 import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
 import { triggerContentScrape } from "../lib/contentScrapeTrigger.js";
 import { ruleFieldRegistry, previewRule, repropagateRule } from "../lib/attributeRules.js";
@@ -679,7 +680,11 @@ export function createAttributesRouter(pool) {
         `SELECT name FROM app.attributes WHERE company_id = $1 AND source = 'web_content'`,
         [req.companyId]
       );
-      const suggestions = await suggestAttributes(pages, existing.map((e) => e.name));
+      const suggestions = await suggestAttributes(pages, existing.map((e) => e.name), (u) =>
+        recordAiUsage(pool, {
+          companyId: req.companyId, userId: req.user?.id, feature: "attribute_suggest",
+          model: u.model, inputTokens: u.input, outputTokens: u.output,
+        }));
       res.json({ suggestions });
     } catch (err) { fail(res, err); }
   });
@@ -1138,7 +1143,12 @@ export function createAttributesRouter(pool) {
         [req.params.id]
       );
       if (!vals.length) return res.json({ ok: true, grouped: 0 });
-      const mapping = await groupValues(label, vals.map((v) => v.value));
+      const mapping = await groupValues(label, vals.map((v) => v.value), (u) =>
+        recordAiUsage(pool, {
+          companyId: req.companyId, userId: req.user?.id, feature: "attribute_group",
+          model: u.model, inputTokens: u.input, outputTokens: u.output,
+          metadata: { attribute_id: req.params.id },
+        }));
       let grouped = 0;
       for (const v of vals) {
         const g = mapping[v.value];
@@ -1347,7 +1357,11 @@ export function createAttributesRouter(pool) {
       for (const page of pages) {
         if (page._failed) { samples.push({ url: page.url, title: page.title, values: [], error: `Could not read: ${page._failed}` }); continue; }
         try {
-          const [r] = await tagPage(page, [attribute]);
+          const [r] = await tagPage(page, [attribute], (u) => recordAiUsage(pool, {
+            companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
+            model: u.model, inputTokens: u.input, outputTokens: u.output,
+            metadata: { attribute_id: attribute.id, test: true },
+          }));
           samples.push({ url: page.url, title: page.title, values: r?.values || [] });
         } catch (e) {
           samples.push({ url: page.url, title: page.title, values: [], error: e.message });

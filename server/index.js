@@ -30,6 +30,7 @@ import { createPopupRouter } from "./routes/popup.js";
 import { createUtmRouter } from "./routes/utm.js";
 import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } from "./middleware/auth.js";
 import { resolveSegmentEntities, countSegmentEntities, customerWhere, anonWhere } from "./lib/attributeManual.js";
+import { recordAiUsage } from "./lib/aiUsage.js";
 
 dotenv.config();
 
@@ -1096,7 +1097,8 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
 }
 
 // ── Simple LLM call (chart editor, explainers) ────────────────────────────────
-async function runSimpleLLM(prompt, jsonMode = false) {
+// Pass usageCtx ({ companyId, userId, feature }) to ledger token spend + cost.
+async function runSimpleLLM(prompt, jsonMode = false, usageCtx = null) {
   if (!aiClient) throw new Error("Azure OpenAI is not configured.");
   const response = await aiClient.chat.completions.create({
     model: azureDeployment,
@@ -1105,6 +1107,14 @@ async function runSimpleLLM(prompt, jsonMode = false) {
     max_completion_tokens: 2000,
     temperature: 0.2,
   });
+  if (usageCtx && response.usage) {
+    recordAiUsage(pool, {
+      ...usageCtx,
+      model: azureDeployment,
+      inputTokens: response.usage.prompt_tokens,
+      outputTokens: response.usage.completion_tokens,
+    });
+  }
   return response.choices[0].message.content || "";
 }
 
@@ -1443,6 +1453,17 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
         replyContent = `I encountered an error while processing your request: ${err.message}`;
       }
 
+      // Ledger the token spend + cost for billing (per user / workspace / account).
+      recordAiUsage(p, {
+        companyId,
+        userId: req.user?.id,
+        feature: "analyst",
+        model: azureDeployment,
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        metadata: { conversation_id: convId },
+      });
+
       const assistantMsg = {
         role: "assistant",
         content: replyContent,
@@ -1671,7 +1692,10 @@ Explain:
 
 Be plain, specific, and business-focused. Reference actual numbers from the data.`;
 
-    const summary = await runSimpleLLM(prompt, false);
+    const summary = await runSimpleLLM(prompt, false, {
+      companyId, userId: req.user?.id, feature: "chart_summary",
+      metadata: { chart_key },
+    });
     await p.query(
       `INSERT INTO app.chart_summaries (company_id, chart_key, summary) VALUES ($1, $2, $3)
        ON CONFLICT (company_id, chart_key) DO UPDATE SET summary = EXCLUDED.summary, updated_date = NOW()`,

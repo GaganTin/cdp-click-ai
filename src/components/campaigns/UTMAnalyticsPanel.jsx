@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { appClient } from "@/api/appClient";
 import { useStickyState } from "@/lib/useStickyState";
 import {
@@ -46,7 +47,6 @@ function fetchChart(key, s, e, paramFilters = {}) {
     case "engagement": return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "engagement_rate", minSessions: 50, limit: 10 });
     case "device":     return appClient.utm.breakdown({ ...p, dim: "device", metric: "sessions", limit: 10 });
     case "country":    return appClient.utm.countries({ start: p.start, end: p.end, limit: 10 });
-    case "utm_id":     return appClient.utm.utmIds({ start: p.start, end: p.end, limit: 15 });
     default:           return Promise.resolve([]);
   }
 }
@@ -188,7 +188,6 @@ const DATA_KEYS = [
   { key: "engagement", label: "Engagement Rate by Source (%)" },
   { key: "device",     label: "Sessions by Device" },
   { key: "country",    label: "Top Countries" },
-  { key: "utm_id",     label: "Sessions by UTM ID" },
 ];
 
 const DEFAULT_CHARTS = [
@@ -199,7 +198,6 @@ const DEFAULT_CHARTS = [
   { id: "5", title: "Sessions by Campaign",  dataKey: "campaign",   chartType: "bar",            size: "normal" },
   { id: "6", title: "Sessions by Medium",    dataKey: "medium",     chartType: "bar",            size: "normal" },
   { id: "7", title: "Top Countries",         dataKey: "country",    chartType: "horizontal-bar", size: "normal" },
-  { id: "8", title: "Sessions by UTM ID",    dataKey: "utm_id",     chartType: "horizontal-bar", size: "normal" },
 ];
 
 // ── Chart edit dialog ─────────────────────────────────────────────────────────
@@ -563,13 +561,36 @@ export default function UTMAnalyticsPanel() {
 }
 
 // ── Shared column info tooltip ────────────────────────────────────────────────
+// The tooltip is portaled to <body> with fixed positioning so it escapes the
+// table's overflow-auto scroll container, which would otherwise clip it.
 function ColInfo({ text }) {
+  const iconRef = useRef(null);
+  const [coords, setCoords] = useState(null);
+
+  const show = () => {
+    const r = iconRef.current?.getBoundingClientRect();
+    if (r) setCoords({ left: r.left + r.width / 2, top: r.top });
+  };
+  const hide = () => setCoords(null);
+
   return (
-    <span className="relative group ml-0.5 inline-flex items-center cursor-default" onClick={e => e.stopPropagation()}>
-      <Info className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-56 p-2.5 text-[11px] leading-relaxed bg-popover border border-border rounded-lg shadow-lg text-foreground font-normal text-left whitespace-normal">
-        {text}
-      </span>
+    <span
+      ref={iconRef}
+      className="ml-0.5 inline-flex items-center cursor-default"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+    >
+      <Info className="w-3 h-3 opacity-40 hover:opacity-80 transition-opacity" />
+      {coords && createPortal(
+        <span
+          style={{ position: "fixed", left: coords.left, top: coords.top - 8, transform: "translate(-50%, -100%)" }}
+          className="pointer-events-none z-[100] w-56 p-2.5 text-[11px] leading-relaxed bg-popover border border-border rounded-lg shadow-lg text-foreground font-normal normal-case tracking-normal text-left whitespace-normal"
+        >
+          {text}
+        </span>,
+        document.body
+      )}
     </span>
   );
 }

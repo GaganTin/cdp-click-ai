@@ -28,6 +28,18 @@ export function toDateInput(v) {
   return d.toISOString().slice(0, 10);
 }
 
+// Currency for AI-cost columns. Small amounts (< $1) get 4 dp so a few cents of
+// usage doesn't render as "$0.00".
+export function fmtCost(v, currency = "USD") {
+  const n = Number(v) || 0;
+  const digits = n > 0 && n < 1 ? 4 : 2;
+  try {
+    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: digits }).format(n);
+  } catch {
+    return `$${n.toFixed(digits)}`;
+  }
+}
+
 export function PlanBadge({ plan }) {
   const paid = plan === "paid";
   return (
