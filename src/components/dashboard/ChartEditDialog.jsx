@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Sparkles } from "lucide-react";
+import { parseChartConfig } from "@/lib/utils";
 import { toast } from "sonner";
 
 // Plain edit dialog - lets user rename title/description
@@ -44,8 +45,7 @@ export function ChartEditAIDialog({ chart, onSave, onClose }) {
   const handleSubmit = async () => {
     if (!prompt.trim()) return;
     setLoading(true);
-    let currentConfig = {};
-    try { currentConfig = JSON.parse(chart.chart_config); } catch {}
+    const currentConfig = parseChartConfig(chart.chart_config);
 
     const result = await appClient.integrations.Core.InvokeLLM({
       prompt: `You are a data visualization assistant. The user has a chart with this configuration:

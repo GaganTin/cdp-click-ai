@@ -31,6 +31,7 @@ import {
   AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { usePreferences } from "@/lib/PreferencesContext";
 import CampaignEditor from "@/components/edm/CampaignEditor";
 import CampaignStats from "@/components/edm/CampaignStats";
 import TemplateEditor from "@/components/edm/TemplateEditor";
@@ -91,12 +92,13 @@ const STATUS_ACCENT = {
 
 // ── Email / template preview dialog ───────────────────────────────────────────
 function PreviewDialog({ open, onClose, html, title, subject }) {
+  const { t } = usePreferences();
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="w-[96vw] max-w-3xl h-[90vh] p-0 flex flex-col gap-0" aria-describedby={undefined}>
         <DialogHeader className="px-5 py-3 border-b border-border flex-shrink-0">
-          <DialogTitle className="text-sm font-semibold truncate">{title || "Preview"}</DialogTitle>
-          {subject && <p className="text-xs text-muted-foreground mt-0.5 truncate">Subject: {subject}</p>}
+          <DialogTitle className="text-sm font-semibold truncate">{title || t("Preview")}</DialogTitle>
+          {subject && <p className="text-xs text-muted-foreground mt-0.5 truncate">{t("Subject")}: {subject}</p>}
         </DialogHeader>
         <div className="flex-1 overflow-auto bg-secondary/10 p-6">
           <div className="max-w-[650px] mx-auto rounded-xl overflow-hidden border border-border shadow-md bg-white">
@@ -136,6 +138,7 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
   const [confirmSend, setConfirmSend] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const { canUseFeatures } = usePlan();
+  const { t } = usePreferences();
   const Icon = STATUS_ICONS[campaign.status] || Clock;
   const canSend = ["draft", "scheduled"].includes(campaign.status) && canUseFeatures;
   const canEdit = ["draft", "scheduled"].includes(campaign.status);
@@ -158,7 +161,7 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
             </div>
             <Badge className={`${STATUS_STYLES[campaign.status]} text-[10px] h-4 px-1.5 gap-0.5 flex items-center flex-shrink-0 mt-0.5`}>
               <Icon className={`w-2.5 h-2.5 ${campaign.status === "sending" ? "animate-spin" : ""}`} />
-              {campaign.status}
+              {t(campaign.status)}
             </Badge>
           </div>
 
@@ -182,13 +185,13 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
             <div className="flex items-center gap-4 pt-1 border-t border-border">
               {campaign.total_recipients > 0 && campaign.open_count > 0 && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground">Opens</p>
+                  <p className="text-[10px] text-muted-foreground">{t("Opens")}</p>
                   <p className="text-sm font-semibold">{Math.round((campaign.open_count / campaign.total_recipients) * 100)}%</p>
                 </div>
               )}
               {campaign.total_recipients > 0 && campaign.click_count > 0 && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground">Clicks</p>
+                  <p className="text-[10px] text-muted-foreground">{t("Clicks")}</p>
                   <p className="text-sm font-semibold">{Math.round((campaign.click_count / campaign.total_recipients) * 100)}%</p>
                 </div>
               )}
@@ -198,31 +201,31 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
 
         <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-1">
           <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setPreviewOpen(true)}>
-            <Eye className="w-3 h-3" /> Preview
+            <Eye className="w-3 h-3" /> {t("Preview")}
           </Button>
           {canSend && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setConfirmSend(true)}>
-              <Send className="w-3 h-3" /> Send
+              <Send className="w-3 h-3" /> {t("Send")}
             </Button>
           )}
           {canEdit && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
-              <Pencil className="w-3 h-3" /> Edit
+              <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
           )}
           {["sent", "archived"].includes(campaign.status) && (
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onStats(campaign)}>
-              <BarChart2 className="w-3 h-3" /> Stats
+              <BarChart2 className="w-3 h-3" /> {t("Stats")}
             </Button>
           )}
           {canDelete && (
-            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" title="Delete draft" onClick={() => onDelete(campaign.id)}>
+            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" title={t("Delete draft")} onClick={() => onDelete(campaign.id)}>
               <Trash2 className="w-3 h-3" />
             </Button>
           )}
           {canArchive && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 ml-auto text-muted-foreground hover:text-foreground" title="Archive email" onClick={() => onArchive(campaign.id)}>
-              <Archive className="w-3 h-3" /> Archive
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 ml-auto text-muted-foreground hover:text-foreground" title={t("Archive email")} onClick={() => onArchive(campaign.id)}>
+              <Archive className="w-3 h-3" /> {t("Archive")}
             </Button>
           )}
         </div>
@@ -239,16 +242,15 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
       <AlertDialog open={confirmSend} onOpenChange={setConfirmSend}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Send email now?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Send email now?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will send <strong>"{campaign.name}"</strong> to all opted-in recipients in the
-              selected segment. Suppressed emails are automatically excluded. This cannot be undone.
+              {t("This will send")} <strong>"{campaign.name}"</strong> {t("to all opted-in recipients in the selected segment. Suppressed emails are automatically excluded. This cannot be undone.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={() => { setConfirmSend(false); onSend(campaign.id); }}>
-              Send
+              {t("Send")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -271,6 +273,7 @@ function campaignDate(c) {
 const CAL_STATUSES = ["draft", "scheduled", "sending", "sent", "cancelled"];
 
 function EmailCalendar({ campaigns, onEdit, onStats }) {
+  const { t } = usePreferences();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
 
   const dated = campaigns
@@ -300,13 +303,13 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
       {/* Month navigation + legend */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center border border-input rounded-md overflow-hidden h-8">
-          <button type="button" onClick={() => setCursor(c => addMonths(c, -1))} title="Previous month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+          <button type="button" onClick={() => setCursor(c => addMonths(c, -1))} title={t("Previous month")} className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
-          <button type="button" onClick={() => setCursor(startOfMonth(new Date()))} title="Jump to current month" className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors border-x border-input">
-            Today
+          <button type="button" onClick={() => setCursor(startOfMonth(new Date()))} title={t("Jump to current month")} className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors border-x border-input">
+            {t("Today")}
           </button>
-          <button type="button" onClick={() => setCursor(c => addMonths(c, 1))} title="Next month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+          <button type="button" onClick={() => setCursor(c => addMonths(c, 1))} title={t("Next month")} className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -314,20 +317,20 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ml-auto">
           {CAL_STATUSES.map(s => (
             <span key={s} className="flex items-center gap-1.5 capitalize">
-              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: STATUS_ACCENT[s] }} /> {s}
+              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: STATUS_ACCENT[s] }} /> {t(s)}
             </span>
           ))}
         </div>
       </div>
       <p className="text-[11px] text-muted-foreground/70 -mt-2">
-        {monthCount} email{monthCount !== 1 ? "s" : ""} this month · click an email to open it
+        {monthCount} {monthCount !== 1 ? t("emails this month · click an email to open it") : t("email this month · click an email to open it")}
       </p>
 
       {/* Calendar grid */}
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="grid grid-cols-7 border-b border-border bg-secondary/20">
           {WEEKDAYS.map(d => (
-            <div key={d} className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-center">{d}</div>
+            <div key={d} className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-center">{t(d)}</div>
           ))}
         </div>
         <div className="grid grid-cols-7">
@@ -350,7 +353,7 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
                       key={c.id}
                       type="button"
                       onClick={() => openCampaign(c)}
-                      title={`${c.name}${c.subject ? `\n${c.subject}` : ""}\nStatus: ${c.status}`}
+                      title={`${c.name}${c.subject ? `\n${c.subject}` : ""}\n${t("Status")}: ${t(c.status)}`}
                       className="flex items-center gap-1 rounded px-1 py-0.5 text-[10px] bg-secondary border border-border hover:border-foreground/40 transition-colors min-w-0"
                     >
                       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: STATUS_ACCENT[c.status] || "#94a3b8" }} />
@@ -358,7 +361,7 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
                     </button>
                   ))}
                   {items.length > 3 && (
-                    <span className="text-[10px] text-muted-foreground pl-1">+{items.length - 3} more</span>
+                    <span className="text-[10px] text-muted-foreground pl-1">+{items.length - 3} {t("more")}</span>
                   )}
                 </div>
               </div>
@@ -372,6 +375,7 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
 
 // ── Emails tab ─────────────────────────────────────────────────────────────────
 function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -395,13 +399,13 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.edm.deleteCampaign(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success("Email deleted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success(t("Email deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const archiveMutation = useMutation({
     mutationFn: (id) => appClient.edm.archiveCampaign(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success("Email archived"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-campaigns"] }); toast.success(t("Email archived")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -409,7 +413,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
     mutationFn: (id) => appClient.edm.sendCampaign(id),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["edm-campaigns"] });
-      toast.success(`Sending to ${data.total_recipients?.toLocaleString()} recipients…`);
+      toast.success(t("Sending to") + ` ${data.total_recipients?.toLocaleString()} ` + t("recipients…"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -432,15 +436,15 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   });
 
   const GROUPS = [
-    { key: "sending",  label: "Sending",  filter: c => c.status === "sending" },
-    { key: "draft",    label: "Drafts",   filter: c => ["draft","scheduled"].includes(c.status) },
-    { key: "sent",     label: "Sent",     filter: c => c.status === "sent" },
-    { key: "archived", label: "Archived", filter: c => ["archived", "cancelled"].includes(c.status) },
+    { key: "sending",  label: t("Sending"),  filter: c => c.status === "sending" },
+    { key: "draft",    label: t("Drafts"),   filter: c => ["draft","scheduled"].includes(c.status) },
+    { key: "sent",     label: t("Sent"),     filter: c => c.status === "sent" },
+    { key: "archived", label: t("Archived"), filter: c => ["archived", "cancelled"].includes(c.status) },
   ].filter(g => filtered.some(g.filter));
 
   // Apply the chosen sort, then group (or show one flat list when grouping is off).
   const sorted = sortRecords(filtered, sortBy, sortDir);
-  const displayGroups = groupByStatus ? GROUPS : [{ key: "all", label: "All", filter: () => true }];
+  const displayGroups = groupByStatus ? GROUPS : [{ key: "all", label: t("All"), filter: () => true }];
 
 
   return (
@@ -453,70 +457,70 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search name, subject, from email..."
+              placeholder={t("Search name, subject, from email...")}
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div ref={filterRef} className="relative">
             <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-              <Filter className="w-3.5 h-3.5" /> Filters
+              <Filter className="w-3.5 h-3.5" /> {t("Filters")}
               {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
             </Button>
             {showFilters && (
               <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-80 md:w-[480px]">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                   {hasActiveFilters && (
-                    <button onClick={() => setFilters({ status: [], segment_name: [], from_name: [], from_email: [] })} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                    <button onClick={() => setFilters({ status: [], segment_name: [], from_name: [], from_email: [] })} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                    <p className="text-[10px] text-muted-foreground mb-1">{t("Status")}</p>
                     <MultiSelect value={filters.status} onChange={v => setFilter("status", v)}
-                      options={["draft","scheduled","sending","sent","cancelled","archived"]} placeholder="All" />
+                      options={["draft","scheduled","sending","sent","cancelled","archived"]} placeholder={t("All")} />
                   </div>
                   {uniqueSegments.length > 0 && (
                     <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">Segment</p>
-                      <MultiSelect value={filters.segment_name} onChange={v => setFilter("segment_name", v)} options={uniqueSegments} placeholder="All" />
+                      <p className="text-[10px] text-muted-foreground mb-1">{t("Segment")}</p>
+                      <MultiSelect value={filters.segment_name} onChange={v => setFilter("segment_name", v)} options={uniqueSegments} placeholder={t("All")} />
                     </div>
                   )}
                   {uniqueFromNames.length > 0 && (
                     <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">From Name</p>
-                      <MultiSelect value={filters.from_name} onChange={v => setFilter("from_name", v)} options={uniqueFromNames} placeholder="All" />
+                      <p className="text-[10px] text-muted-foreground mb-1">{t("From Name")}</p>
+                      <MultiSelect value={filters.from_name} onChange={v => setFilter("from_name", v)} options={uniqueFromNames} placeholder={t("All")} />
                     </div>
                   )}
                   {uniqueFromEmails.length > 0 && (
                     <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">From Email</p>
-                      <MultiSelect value={filters.from_email} onChange={v => setFilter("from_email", v)} options={uniqueFromEmails} placeholder="All" />
+                      <p className="text-[10px] text-muted-foreground mb-1">{t("From Email")}</p>
+                      <MultiSelect value={filters.from_email} onChange={v => setFilter("from_email", v)} options={uniqueFromEmails} placeholder={t("All")} />
                     </div>
                   )}
                 </div>
 
                 {/* Sort */}
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Sort by")}</p>
                   <div className="flex items-center gap-2">
                     <select value={sortBy} onChange={e => setSortBy(e.target.value)}
                       className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                      <option value="date">Date</option>
-                      <option value="name">Name</option>
-                      <option value="status">Status</option>
+                      <option value="date">{t("Date")}</option>
+                      <option value="name">{t("Name")}</option>
+                      <option value="status">{t("Status")}</option>
                     </select>
                     <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
                       className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
-                      {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                      {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                     </button>
                   </div>
                 </div>
                 {view === "grid" && (
                   <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Group by")}</p>
                     <label className="flex items-center justify-between cursor-pointer">
-                      <span className="text-xs text-muted-foreground">Status</span>
+                      <span className="text-xs text-muted-foreground">{t("Status")}</span>
                       <input type="checkbox" checked={groupByStatus} onChange={e => setGroupByStatus(e.target.checked)}
                         className="rounded border-border cursor-pointer" />
                     </label>
@@ -533,14 +537,14 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
               onClick={() => setView("grid")}
               className={`h-9 px-2.5 flex items-center gap-1.5 text-xs transition-colors ${view === "grid" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
             >
-              <LayoutGrid className="w-3.5 h-3.5" /> Grid
+              <LayoutGrid className="w-3.5 h-3.5" /> {t("Grid")}
             </button>
             <button
               type="button"
               onClick={() => setView("calendar")}
               className={`h-9 px-2.5 flex items-center gap-1.5 text-xs border-l border-input transition-colors ${view === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
             >
-              <Calendar className="w-3.5 h-3.5" /> Calendar
+              <Calendar className="w-3.5 h-3.5" /> {t("Calendar")}
             </button>
           </div>
         </div>
@@ -548,7 +552,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
           <div className="flex flex-wrap gap-1.5 mt-2">
             {Object.entries(filters).flatMap(([k, vals]) => vals.map(v => (
               <span key={`${k}:${v}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                {k.replace(/_/g, " ")}: <strong>{v}</strong>
+                {t(k.replace(/_/g, " "))}: <strong>{v}</strong>
                 <button onClick={() => setFilter(k, filters[k].filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">
                   <XCircle className="w-3 h-3" />
                 </button>
@@ -567,14 +571,14 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
       {!isLoading && filtered.length === 0 && (
         <div className="text-center py-20 text-sm text-muted-foreground">
           <Mail className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-foreground mb-1">No emails yet</p>
-          <p className="text-xs mb-4">Create your first email, or start from a template.</p>
+          <p className="font-medium text-foreground mb-1">{t("No emails yet")}</p>
+          <p className="text-xs mb-4">{t("Create your first email, or start from a template.")}</p>
           <div className="flex items-center justify-center gap-2">
             <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Email
+              <Plus className="w-3.5 h-3.5" /> {t("New Email")}
             </Button>
             <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={onBrowseTemplates}>
-              <Layout className="w-3.5 h-3.5" /> Browse Templates
+              <Layout className="w-3.5 h-3.5" /> {t("Browse Templates")}
             </Button>
           </div>
         </div>
@@ -612,6 +616,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
 
 // ── Templates tab ─────────────────────────────────────────────────────────────
 function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
+  const { t } = usePreferences();
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
@@ -634,20 +639,20 @@ function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
           <p className={`text-[10px] uppercase tracking-wide capitalize ${
             template.status === "published" ? "text-foreground font-medium" : "text-muted-foreground/60"
           }`}>
-            {template.status || "draft"}
+            {t(template.status || "draft")}
           </p>
         </div>
         <div className="border-t border-border bg-secondary/20">
           {/* Secondary actions */}
           <div className="px-3 pt-2 pb-1 flex items-center gap-1">
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setPreviewOpen(true)}>
-              <Eye className="w-3 h-3" /> Preview
+              <Eye className="w-3 h-3" /> {t("Preview")}
             </Button>
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onDuplicate(template.id)}>
-              <Copy className="w-3 h-3" /> Clone
+              <Copy className="w-3 h-3" /> {t("Clone")}
             </Button>
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(template)}>
-              <Pencil className="w-3 h-3" /> Edit
+              <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(template.id)}>
               <Trash2 className="w-3 h-3" />
@@ -656,7 +661,7 @@ function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
           {/* Primary action */}
           <div className="px-3 pb-2.5">
             <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={() => onUse(template)}>
-              <Plus className="w-3 h-3" /> Use Template
+              <Plus className="w-3 h-3" /> {t("Use Template")}
             </Button>
           </div>
         </div>
@@ -674,6 +679,7 @@ function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
 }
 
 function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const fileInputRef = useRef(null);
   const [search, setSearch] = useState("");
@@ -694,13 +700,13 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.edm.deleteTemplate(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success("Template deleted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success(t("Template deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const duplicateMutation = useMutation({
     mutationFn: (id) => appClient.edm.duplicateTemplate(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success("Template duplicated"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["edm-templates"] }); toast.success(t("Template duplicated")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -725,8 +731,8 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
   const hasActiveFilters = statusFilter.length > 0;
 
   const GROUPS = [
-    { key: "published", label: "Published", filter: t => t.status === "published" },
-    { key: "draft",     label: "Drafts",    filter: t => (t.status || "draft") !== "published" },
+    { key: "published", label: t("Published"), filter: tpl => tpl.status === "published" },
+    { key: "draft",     label: t("Drafts"),    filter: tpl => (tpl.status || "draft") !== "published" },
   ].filter(g => visible.some(g.filter));
 
   return (
@@ -739,37 +745,37 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search templates..."
+              placeholder={t("Search templates...")}
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div ref={filterRef} className="relative">
             <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-              <Filter className="w-3.5 h-3.5" /> Filters
+              <Filter className="w-3.5 h-3.5" /> {t("Filters")}
               {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
             </Button>
             {showFilters && (
               <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-56">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                   {hasActiveFilters && (
-                    <button onClick={() => setStatusFilter([])} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                    <button onClick={() => setStatusFilter([])} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
                   )}
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                  <p className="text-[10px] text-muted-foreground mb-1">{t("Status")}</p>
                   <MultiSelect value={statusFilter} onChange={setStatusFilter}
-                    options={["draft","published"]} placeholder="All" />
+                    options={["draft","published"]} placeholder={t("All")} />
                 </div>
               </div>
             )}
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="w-3.5 h-3.5" /> Import HTML
+            <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
           </Button>
           <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
           <span className="text-xs text-muted-foreground ml-auto">
-            {visible.length !== templates.length ? `${visible.length} of ${templates.length}` : `${templates.length}`} templates
+            {visible.length !== templates.length ? `${visible.length} ${t("of")} ${templates.length}` : `${templates.length}`} {t("templates")}
           </span>
         </div>
 
@@ -777,7 +783,7 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
           <div className="flex flex-wrap gap-1.5">
             {statusFilter.map(v => (
               <span key={v} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                Status: <strong>{v}</strong>
+                {t("Status")}: <strong>{v}</strong>
                 <button onClick={() => setStatusFilter(statusFilter.filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">×</button>
               </span>
             ))}
@@ -794,14 +800,14 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
       {!isLoading && templates.length === 0 && (
         <div className="text-center py-20 text-sm text-muted-foreground">
           <Layout className="w-10 h-10 mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-foreground mb-1">No templates yet</p>
-          <p className="text-xs mb-4">Create reusable email templates to quickly start new emails.</p>
+          <p className="font-medium text-foreground mb-1">{t("No templates yet")}</p>
+          <p className="text-xs mb-4">{t("Create reusable email templates to quickly start new emails.")}</p>
           <div className="flex items-center justify-center gap-2">
             <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Template
+              <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
             <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => fileInputRef.current?.click()}>
-              <Upload className="w-3.5 h-3.5" /> Import HTML
+              <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
             </Button>
           </div>
         </div>
@@ -810,7 +816,7 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
       {!isLoading && templates.length > 0 && visible.length === 0 && (
         <div className="text-center py-12 text-sm text-muted-foreground">
           <Layout className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          <p>No templates match your search.</p>
+          <p>{t("No templates match your search.")}</p>
         </div>
       )}
 
@@ -858,6 +864,7 @@ const EDM_ANALYTICS_COLS = [
 ];
 
 function AnalyticsTab() {
+  const { t } = usePreferences();
   const [search, setSearch]   = useState("");
   const [filters, setFilters] = useState({});
   const [colOrder, setColOrder]   = useState(() => EDM_ANALYTICS_COLS.map(c => c.key));
@@ -937,7 +944,13 @@ function AnalyticsTab() {
     return sortDir === "asc" ? cmp : - cmp;
   });
 
-  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => EDM_ANALYTICS_COLS.find(c => c.key === k)).filter(Boolean);
+  // Column definitions with translated labels/descriptions for on-screen display.
+  const localizedCols = EDM_ANALYTICS_COLS.map(c => ({
+    ...c,
+    label: t(c.label),
+    ...(c.description ? { description: t(c.description) } : {}),
+  }));
+  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => localizedCols.find(c => c.key === k)).filter(Boolean);
 
   // Selection helpers
   const allIds       = sortedFiltered.map(c => c.id);
@@ -975,7 +988,7 @@ function AnalyticsTab() {
         <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
           {/* Period date pickers */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Period</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Period")}</p>
             <div className="flex items-center gap-1.5">
               <input
                 type="date"
@@ -995,20 +1008,20 @@ function AnalyticsTab() {
 
           {/* Compare toggle */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Compare</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
             <button
               onClick={() => { if (!compare) syncCmp(dateFrom, dateTo); setCompare(v => !v); }}
               className={`h-8 px-3 text-xs border rounded-md transition-colors ${
                 compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
               }`}
             >
-              {compare ? "On" : "Off"}
+              {compare ? t("On") : t("Off")}
             </button>
           </div>
 
           {/* Quick ranges */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Quick")}</p>
             <div className="flex gap-1">
               {[7, 30, 90].map(d => {
                 const today = new Date();
@@ -1036,7 +1049,7 @@ function AnalyticsTab() {
           {/* Comparison period */}
           {compare && (
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
               <div className="flex items-center gap-1.5">
                 <input type="date" value={cmpFrom} onChange={e => setCmpFrom(e.target.value)}
                   className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
@@ -1055,14 +1068,14 @@ function AnalyticsTab() {
                 onClick={() => { setDateFrom(""); setDateTo(""); }}
                 className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
               >
-                Clear
+                {t("Clear")}
               </button>
             </div>
           )}
 
           {(dateFrom || dateTo) && (
             <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">
-              {sent.length} campaign{sent.length !== 1 ? "s" : ""} in range
+              {sent.length} {sent.length !== 1 ? t("campaigns in range") : t("campaign in range")}
             </p>
           )}
         </div>
@@ -1070,10 +1083,10 @@ function AnalyticsTab() {
         {/* ── KPI tiles ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Emails Sent",       value: sent.length,                sub: "campaigns",        curr: sent.length, prev: prevSent.length, prevDisplay: prevSent.length },
-            { label: "Total Recipients",  value: totalSent.toLocaleString(), sub: "across all sends", curr: totalSent,   prev: pTotalSent,      prevDisplay: pTotalSent.toLocaleString() },
-            { label: "Avg Open Rate",     value: `${avgOpenRate}%`,          sub: `${totalOpens.toLocaleString()} opens`,  curr: avgOpenRate,  prev: pAvgOpen,  prevDisplay: `${pAvgOpen}%` },
-            { label: "Avg Click Rate",    value: `${avgClickRate}%`,         sub: `${totalClicks.toLocaleString()} clicks`, curr: avgClickRate, prev: pAvgClick, prevDisplay: `${pAvgClick}%` },
+            { label: t("Emails Sent"),       value: sent.length,                sub: t("campaigns"),        curr: sent.length, prev: prevSent.length, prevDisplay: prevSent.length },
+            { label: t("Total Recipients"),  value: totalSent.toLocaleString(), sub: t("across all sends"), curr: totalSent,   prev: pTotalSent,      prevDisplay: pTotalSent.toLocaleString() },
+            { label: t("Avg Open Rate"),     value: `${avgOpenRate}%`,          sub: `${totalOpens.toLocaleString()} ${t("opens")}`,  curr: avgOpenRate,  prev: pAvgOpen,  prevDisplay: `${pAvgOpen}%` },
+            { label: t("Avg Click Rate"),    value: `${avgClickRate}%`,         sub: `${totalClicks.toLocaleString()} ${t("clicks")}`, curr: avgClickRate, prev: pAvgClick, prevDisplay: `${pAvgClick}%` },
           ].map(tile => (
             <div key={tile.label} className="border border-border rounded-lg p-4 space-y-1">
               <p className="text-xs text-muted-foreground">{tile.label}</p>
@@ -1082,7 +1095,7 @@ function AnalyticsTab() {
               {compare && (
                 <div className="flex items-center gap-1.5 pt-0.5">
                   <Delta curr={tile.curr} prev={tile.prev} />
-                  <span className="text-[10px] text-muted-foreground">vs {tile.prevDisplay}</span>
+                  <span className="text-[10px] text-muted-foreground">{t("vs")} {tile.prevDisplay}</span>
                 </div>
               )}
             </div>
@@ -1092,40 +1105,40 @@ function AnalyticsTab() {
         {sent.length === 0 ? (
           <div className="text-center py-16 text-sm text-muted-foreground">
             <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-            <p className="font-medium text-foreground mb-1">No data yet</p>
-            <p className="text-xs">Send your first email to start seeing analytics.</p>
+            <p className="font-medium text-foreground mb-1">{t("No data yet")}</p>
+            <p className="text-xs">{t("Send your first email to start seeing analytics.")}</p>
           </div>
         ) : (
           <div className="space-y-8">
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sent Emails - Performance</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{t("Sent Emails - Performance")}</p>
               <TableToolbar
                 search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
-                columns={EDM_ANALYTICS_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
+                columns={localizedCols} colOrder={colOrder} hiddenCols={hiddenCols}
                 onToggleCol={toggleCol} onMoveCol={moveCol}
                 filters={filters} onFilter={setFilter}
                 resultCount={sortedFiltered.length} totalCount={sent.length}
-                placeholder="Search campaign name or subject..."
+                placeholder={t("Search campaign name or subject...")}
               />
 
               {/* Selection toolbar */}
               {selected.size > 0 && (
                 <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
-                  <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+                  <span className="font-medium text-sm flex-shrink-0">{selected.size} {t("selected")}</span>
                   <div className="flex items-center gap-1 ml-2">
                     <Button
                       size="sm" variant="secondary"
                       className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                       onClick={() => exportCsv(true)}
                     >
-                      Export CSV
+                      {t("Export CSV")}
                     </Button>
                   </div>
                   <button
                     onClick={() => setSelected(new Set())}
                     className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
                   >
-                    Clear
+                    {t("Clear")}
                   </button>
                 </div>
               )}
@@ -1225,7 +1238,7 @@ function AnalyticsTab() {
             {(() => {
               const segments = {};
               sortedFiltered.forEach(c => {
-                const seg = c.segment_name || "All Customers";
+                const seg = c.segment_name || t("All Customers");
                 if (!segments[seg]) segments[seg] = { opens: [], clicks: [], count: 0 };
                 segments[seg].opens.push(parseFloat(c.open_rate)||0);
                 segments[seg].clicks.push(parseFloat(c.click_rate)||0);
@@ -1240,15 +1253,15 @@ function AnalyticsTab() {
               if (segEntries.length < 2) return null;
               return (
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Segment Comparison</p>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{t("Segment Comparison")}</p>
                   <div className="border border-border rounded-lg overflow-hidden">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-border bg-secondary/20">
-                          <th className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground">Segment</th>
-                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Campaigns</th>
-                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Avg Open Rate</th>
-                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">Avg Click Rate</th>
+                          <th className="text-left px-4 py-2 text-xs font-semibold text-muted-foreground">{t("Segment")}</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">{t("Campaigns")}</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">{t("Avg Open Rate")}</th>
+                          <th className="text-right px-4 py-2 text-xs font-semibold text-muted-foreground">{t("Avg Click Rate")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1282,6 +1295,7 @@ const SUPP_COLS = [
 ];
 
 function SuppressionTab({ onRegisterOpen }) {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [search, setSearch]     = useState("");
   const [filters, setFilters]   = useState({});
@@ -1326,12 +1340,15 @@ function SuppressionTab({ onRegisterOpen }) {
     queryFn: () => appClient.edm.listSuppression(),
   });
 
+  // Column definitions with translated labels for on-screen display.
+  const localizedSuppCols = SUPP_COLS.map(c => ({ ...c, label: t(c.label) }));
+
   const addMutation = useMutation({
     mutationFn: ({ email, reason }) => appClient.edm.addSuppression(email, reason),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["edm-suppression"] });
       resetAdd();
-      toast.success("Added to suppression list");
+      toast.success(t("Added to suppression list"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1355,7 +1372,7 @@ function SuppressionTab({ onRegisterOpen }) {
       qc.invalidateQueries({ queryKey: ["edm-suppression"] });
       setSelected(new Set());
       setConfirmRemove(false);
-      toast.success(`${emails.length} email${emails.length !== 1 ? "s" : ""} removed from suppression list`);
+      toast.success(`${emails.length} ` + (emails.length !== 1 ? t("emails removed from suppression list") : t("email removed from suppression list")));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1369,7 +1386,7 @@ function SuppressionTab({ onRegisterOpen }) {
     return true;
   });
 
-  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => SUPP_COLS.find(c => c.key === k)).filter(Boolean);
+  const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => localizedSuppCols.find(c => c.key === k)).filter(Boolean);
 
   const sortedFiltered = [...filtered].sort((a, b) => {
     if (!sortKey) return 0;
@@ -1439,7 +1456,7 @@ function SuppressionTab({ onRegisterOpen }) {
       setImportFileName(file.name);
       setImportRows(parseEmailFile(text));
     } catch {
-      toast.error("Could not read that file");
+      toast.error(t("Could not read that file"));
     }
   };
 
@@ -1458,17 +1475,17 @@ function SuppressionTab({ onRegisterOpen }) {
     <div className="px-8 py-6">
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
-        columns={SUPP_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
+        columns={localizedSuppCols} colOrder={colOrder} hiddenCols={hiddenCols}
         onToggleCol={toggleCol} onMoveCol={moveCol}
         filters={filters} onFilter={setFilter}
         resultCount={filtered.length} totalCount={suppressed.length}
-        placeholder="Search suppressed emails..."
+        placeholder={t("Search suppressed emails...")}
       />
 
       {/* Selection toolbar */}
       {selected.size > 0 && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
-          <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+          <span className="font-medium text-sm flex-shrink-0">{selected.size} {t("selected")}</span>
           <div className="flex items-center gap-1 ml-2">
             <Button
               size="sm" variant="secondary"
@@ -1476,21 +1493,21 @@ function SuppressionTab({ onRegisterOpen }) {
               onClick={() => setConfirmRemove(true)}
               disabled={bulkRemoveMutation.isPending}
             >
-              Delete
+              {t("Delete")}
             </Button>
             <Button
               size="sm" variant="secondary"
               className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
               onClick={() => exportCsv(true)}
             >
-              Export CSV
+              {t("Export CSV")}
             </Button>
           </div>
           <button
             onClick={() => setSelected(new Set())}
             className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
           >
-            Clear
+            {t("Clear")}
           </button>
         </div>
       )}
@@ -1499,13 +1516,13 @@ function SuppressionTab({ onRegisterOpen }) {
       <Dialog open={addOpen} onOpenChange={(v) => { if (!v) resetAdd(); else setAddOpen(true); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add to Suppression List</DialogTitle>
+            <DialogTitle>{t("Add to Suppression List")}</DialogTitle>
           </DialogHeader>
 
           {/* Mode toggle */}
           {!importResults && (
             <div className="flex gap-0.5 p-0.5 bg-secondary/40 rounded-lg">
-              {[["single", "Single email"], ["import", "Import file"]].map(([k, label]) => (
+              {[["single", t("Single email")], ["import", t("Import file")]].map(([k, label]) => (
                 <button
                   key={k}
                   onClick={() => setAddMode(k)}
@@ -1522,7 +1539,7 @@ function SuppressionTab({ onRegisterOpen }) {
           {addMode === "single" ? (
             <div className="space-y-4 py-2">
               <div className="space-y-1.5">
-                <Label className="text-xs">Email address <span className="text-destructive">*</span></Label>
+                <Label className="text-xs">{t("Email address")} <span className="text-destructive">*</span></Label>
                 <Input
                   value={addEmail}
                   onChange={e => setAddEmail(e.target.value)}
@@ -1533,23 +1550,23 @@ function SuppressionTab({ onRegisterOpen }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Reason</Label>
+                <Label className="text-xs">{t("Reason")}</Label>
                 <select
                   value={addReason}
                   onChange={e => setAddReason(e.target.value)}
                   className="w-full h-9 px-3 text-sm bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="manual">Manual</option>
-                  <option value="bounced">Bounced</option>
-                  <option value="complained">Complained</option>
-                  <option value="unsubscribed">Unsubscribed</option>
-                  <option value="__custom__">Other (custom)...</option>
+                  <option value="manual">{t("Manual")}</option>
+                  <option value="bounced">{t("Bounced")}</option>
+                  <option value="complained">{t("Complained")}</option>
+                  <option value="unsubscribed">{t("Unsubscribed")}</option>
+                  <option value="__custom__">{t("Other (custom)...")}</option>
                 </select>
                 {addReason === "__custom__" && (
                   <Input
                     value={customReason}
                     onChange={e => setCustomReason(e.target.value)}
-                    placeholder="Enter custom reason..."
+                    placeholder={t("Enter custom reason...")}
                     className="mt-2 h-9 text-sm"
                   />
                 )}
@@ -1561,18 +1578,18 @@ function SuppressionTab({ onRegisterOpen }) {
                 <>
                   {/* Step 1 - Download the template */}
                   <div className="rounded-md border border-border bg-secondary/20 p-4 space-y-2">
-                    <p className="text-xs font-semibold flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> Step 1 - Download the template</p>
+                    <p className="text-xs font-semibold flex items-center gap-1.5"><FileText className="w-3.5 h-3.5" /> {t("Step 1 - Download the template")}</p>
                     <p className="text-[11px] text-muted-foreground">
-                      Fill in the emails to suppress using the CSV template. <strong>email</strong> is required; <strong>reason</strong> is optional. Duplicate and already-suppressed emails are skipped automatically.
+                      {t("Fill in the emails to suppress using the CSV template.")} <strong>email</strong> {t("is required;")} <strong>reason</strong> {t("is optional. Duplicate and already-suppressed emails are skipped automatically.")}
                     </p>
                     <Button variant="outline" size="sm" className="gap-1.5" onClick={downloadTemplate}>
-                      <FileDown className="w-3.5 h-3.5" /> Download Template CSV
+                      <FileDown className="w-3.5 h-3.5" /> {t("Download Template CSV")}
                     </Button>
                   </div>
 
                   {/* Step 2 - Upload your filled CSV */}
                   <div className="space-y-2">
-                    <p className="text-xs font-semibold flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> Step 2 - Upload your filled CSV</p>
+                    <p className="text-xs font-semibold flex items-center gap-1.5"><Upload className="w-3.5 h-3.5" /> {t("Step 2 - Upload your filled CSV")}</p>
                     <div
                       className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-foreground/40 transition-colors"
                       onClick={() => importInputRef.current?.click()}
@@ -1592,7 +1609,7 @@ function SuppressionTab({ onRegisterOpen }) {
                       ) : (
                         <div className="text-muted-foreground text-xs">
                           <Upload className="w-5 h-5 mx-auto mb-1 opacity-40" />
-                          Click to select CSV or drag and drop
+                          {t("Click to select CSV or drag and drop")}
                         </div>
                       )}
                     </div>
@@ -1603,16 +1620,16 @@ function SuppressionTab({ onRegisterOpen }) {
                     <div className="rounded-md border border-border bg-secondary/20 p-3 space-y-1 text-[11px]">
                       <div className="flex items-center gap-1.5 text-foreground">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                        <span className="font-medium">{importRows.valid.length}</span> new email{importRows.valid.length !== 1 ? "s" : ""} ready to import
+                        <span className="font-medium">{importRows.valid.length}</span> {importRows.valid.length !== 1 ? t("new emails ready to import") : t("new email ready to import")}
                       </div>
                       {importRows.duplicates.length > 0 && (
                         <div className="flex items-center gap-1.5 text-muted-foreground">
-                          <Info className="w-3.5 h-3.5" /> {importRows.duplicates.length} duplicate{importRows.duplicates.length !== 1 ? "s" : ""} skipped (already on list or repeated)
+                          <Info className="w-3.5 h-3.5" /> {importRows.duplicates.length} {importRows.duplicates.length !== 1 ? t("duplicates skipped (already on list or repeated)") : t("duplicate skipped (already on list or repeated)")}
                         </div>
                       )}
                       {importRows.invalid.length > 0 && (
                         <div className="flex items-center gap-1.5 text-destructive">
-                          <XCircle className="w-3.5 h-3.5" /> {importRows.invalid.length} invalid email{importRows.invalid.length !== 1 ? "s" : ""} skipped
+                          <XCircle className="w-3.5 h-3.5" /> {importRows.invalid.length} {importRows.invalid.length !== 1 ? t("invalid emails skipped") : t("invalid email skipped")}
                         </div>
                       )}
                     </div>
@@ -1624,8 +1641,8 @@ function SuppressionTab({ onRegisterOpen }) {
                     onClick={() => importRows?.valid.length && importMutation.mutate(importRows.valid)}
                   >
                     {importMutation.isPending
-                      ? "Importing…"
-                      : <><Upload className="w-3.5 h-3.5" /> Import{importRows?.valid.length ? ` ${importRows.valid.length}` : ""} Email{importRows?.valid.length !== 1 ? "s" : ""}</>}
+                      ? t("Importing…")
+                      : <><Upload className="w-3.5 h-3.5" /> {t("Import")}{importRows?.valid.length ? ` ${importRows.valid.length}` : ""} {importRows?.valid.length !== 1 ? t("Emails") : t("Email")}</>}
                   </Button>
                 </>
               ) : (
@@ -1633,23 +1650,23 @@ function SuppressionTab({ onRegisterOpen }) {
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-5 h-5 text-foreground" />
-                    <span className="font-medium text-sm">Import complete</span>
+                    <span className="font-medium text-sm">{t("Import complete")}</span>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
                       <p className="text-2xl font-bold">{importResults.added}</p>
-                      <p className="text-[11px] text-muted-foreground">Imported</p>
+                      <p className="text-[11px] text-muted-foreground">{t("Imported")}</p>
                     </div>
                     <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
                       <p className="text-2xl font-bold">{importResults.duplicates}</p>
-                      <p className="text-[11px] text-muted-foreground">Duplicates</p>
+                      <p className="text-[11px] text-muted-foreground">{t("Duplicates")}</p>
                     </div>
                     <div className="rounded-md border border-border bg-secondary/30 p-3 text-center">
                       <p className="text-2xl font-bold">{importResults.invalid}</p>
-                      <p className="text-[11px] text-muted-foreground">Invalid</p>
+                      <p className="text-[11px] text-muted-foreground">{t("Invalid")}</p>
                     </div>
                   </div>
-                  <Button className="w-full" onClick={resetAdd}>Done</Button>
+                  <Button className="w-full" onClick={resetAdd}>{t("Done")}</Button>
                 </div>
               )}
             </div>
@@ -1657,13 +1674,13 @@ function SuppressionTab({ onRegisterOpen }) {
 
           {addMode === "single" && (
             <DialogFooter>
-              <Button variant="outline" size="sm" onClick={resetAdd}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={resetAdd}>{t("Cancel")}</Button>
               <Button
                 size="sm"
                 onClick={() => addEmail && effectiveReason && addMutation.mutate({ email: addEmail.trim(), reason: effectiveReason })}
                 disabled={!addEmail.trim() || !effectiveReason || addMutation.isPending}
               >
-                {addMutation.isPending ? "Adding..." : "Add to List"}
+                {addMutation.isPending ? t("Adding...") : t("Add to List")}
               </Button>
             </DialogFooter>
           )}
@@ -1674,19 +1691,19 @@ function SuppressionTab({ onRegisterOpen }) {
       <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {selected.size} email{selected.size !== 1 ? "s" : ""} from suppression list?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Remove")} {selected.size} {selected.size !== 1 ? t("emails from suppression list?") : t("email from suppression list?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              These emails will be eligible to receive future campaigns again. This cannot be undone.
+              {t("These emails will be eligible to receive future campaigns again. This cannot be undone.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => bulkRemoveMutation.mutate([...selected])}
               disabled={bulkRemoveMutation.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {bulkRemoveMutation.isPending ? "Removing…" : "Remove"}
+              {bulkRemoveMutation.isPending ? t("Removing…") : t("Remove")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1697,7 +1714,7 @@ function SuppressionTab({ onRegisterOpen }) {
       {!isLoading && filtered.length === 0 && (
         <div className="py-12 text-center text-sm text-muted-foreground border border-border rounded-lg">
           <ShieldOff className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          No suppressed emails
+          {t("No suppressed emails")}
         </div>
       )}
 
@@ -1769,6 +1786,7 @@ function SuppressionTab({ onRegisterOpen }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function EDM() {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [tab, setTab] = useState("emails");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -1782,7 +1800,7 @@ export default function EDM() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["edm-campaigns"] });
       setEditorOpen(false);
-      toast.success("Email saved as draft");
+      toast.success(t("Email saved as draft"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1793,7 +1811,7 @@ export default function EDM() {
       qc.invalidateQueries({ queryKey: ["edm-campaigns"] });
       setEditTarget(null);
       setEditorOpen(false);
-      toast.success("Email updated");
+      toast.success(t("Email updated"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1809,7 +1827,7 @@ export default function EDM() {
       qc.invalidateQueries({ queryKey: ["edm-templates"] });
       setTemplateEditorOpen(false);
       setTemplateEditTarget(null);
-      toast.success("Template saved");
+      toast.success(t("Template saved"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1820,7 +1838,7 @@ export default function EDM() {
       qc.invalidateQueries({ queryKey: ["edm-templates"] });
       setTemplateEditorOpen(false);
       setTemplateEditTarget(null);
-      toast.success("Template updated");
+      toast.success(t("Template updated"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1868,41 +1886,41 @@ export default function EDM() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Email</h1>
-            <p className="text-sm text-muted-foreground mt-1">Build, send, and track marketing emails.</p>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Email")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{t("Build, send, and track marketing emails.")}</p>
           </div>
           {tab === "emails" && canUseFeatures && (
             <Button size="sm" className="gap-1.5 h-9" onClick={openCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Email
+              <Plus className="w-3.5 h-3.5" /> {t("New Email")}
             </Button>
           )}
           {tab === "templates" && (
             <Button size="sm" className="gap-1.5 h-9" onClick={openTemplateCreate}>
-              <Plus className="w-3.5 h-3.5" /> New Template
+              <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
           )}
           {tab === "suppression" && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => suppressionOpenerRef.current?.()}>
-              <Plus className="w-3.5 h-3.5" /> Add Email
+              <Plus className="w-3.5 h-3.5" /> {t("Add Email")}
             </Button>
           )}
         </div>
 
         <div className="flex border-b border-border gap-6">
-          {TABS.map(t => {
-            const Icon = t.icon;
+          {TABS.map(tabItem => {
+            const Icon = tabItem.icon;
             return (
               <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
+                key={tabItem.key}
+                onClick={() => setTab(tabItem.key)}
                 className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
-                  tab === t.key
+                  tab === tabItem.key
                     ? "border-foreground text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {t.label}
+                {t(tabItem.label)}
               </button>
             );
           })}

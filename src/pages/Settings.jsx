@@ -13,7 +13,7 @@ import {
   User, Lock, Bell, Building2, Users, ClipboardList,
   Trash2, Plus, Shield, Eye, EyeOff, Zap,
   CreditCard, MessageCircle, CheckCircle2,
-  ExternalLink, ChevronRight, ChevronDown, Mail, Globe, Briefcase,
+  ExternalLink, ChevronRight, ChevronDown, Mail,
   Upload, RefreshCw, Link2, Image as ImageIcon, Search,
   LogIn, LogOut, UserPlus, PenLine, UserMinus, KeyRound,
 } from "lucide-react";
@@ -87,6 +87,7 @@ function normalizeImageUrl(url) {
 }
 
 function ImageUploadField({ value, onChange, shape = "circle" }) {
+  const { t } = usePreferences();
   const [uploading, setUploading] = useState(false);
   const [showUrl, setShowUrl] = useState(false);
   const [urlInput, setUrlInput] = useState("");
@@ -99,9 +100,9 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
     try {
       const result = await appClient.integrations.Core.UploadFile({ file });
       onChange(result.file_url);
-      toast.success("Photo uploaded");
+      toast.success(t("Photo uploaded"));
     } catch (err) {
-      toast.error(err.message || "Upload failed");
+      toast.error(err.message || t("Upload failed"));
     } finally {
       setUploading(false);
     }
@@ -143,8 +144,8 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
             onClick={() => fileRef.current?.click()}
           >
             {uploading
-              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Uploading…</>
-              : <><Upload className="w-3.5 h-3.5" /> Upload from computer</>}
+              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> {t("Uploading…")}</>
+              : <><Upload className="w-3.5 h-3.5" /> {t("Upload from computer")}</>}
           </Button>
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
           <Button
@@ -155,7 +156,7 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
             onClick={() => setShowUrl(v => !v)}
           >
             <Link2 className="w-3.5 h-3.5" />
-            {showUrl ? "Hide URL input" : "Paste URL (Drive / Dropbox)"}
+            {showUrl ? t("Hide URL input") : t("Paste URL (Drive / Dropbox)")}
           </Button>
         </div>
       </div>
@@ -166,11 +167,11 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
             value={urlInput}
             onChange={e => setUrlInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && applyUrl()}
-            placeholder="https://… or Google Drive / Dropbox share link"
+            placeholder={t("https://… or Google Drive / Dropbox share link")}
             className="h-8 text-xs"
           />
           <Button type="button" size="sm" className="h-8 text-xs flex-shrink-0" onClick={applyUrl}>
-            Apply
+            {t("Apply")}
           </Button>
         </div>
       )}
@@ -181,7 +182,7 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
           className="text-xs text-muted-foreground hover:text-destructive transition-colors"
           onClick={() => onChange("")}
         >
-          Remove photo
+          {t("Remove photo")}
         </button>
       )}
     </div>
@@ -191,8 +192,22 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
 // ── Tab: Profile ──────────────────────────────────────────────────────────────
 
 function ProfileTab({ user, onRefresh }) {
+  const { t } = usePreferences();
   const [form, setForm] = useState({ full_name: user?.full_name || "", avatar_url: user?.avatar_url || "" });
   const [saving, setSaving] = useState(false);
+
+  // Persist the avatar as soon as it's uploaded / changed / removed so it survives
+  // a refresh without needing a separate "Save changes" click. (Full name still
+  // saves via the button below.)
+  const updateAvatar = async (url) => {
+    setForm(f => ({ ...f, avatar_url: url }));
+    try {
+      await appClient.auth.updateProfile({ avatar_url: url });
+      await onRefresh();
+    } catch (err) {
+      toast.error(err.message || t("Could not save photo"));
+    }
+  };
 
   const save = async (e) => {
     e.preventDefault();
@@ -200,7 +215,7 @@ function ProfileTab({ user, onRefresh }) {
     try {
       await appClient.auth.updateProfile(form);
       await onRefresh();
-      toast.success("Profile updated");
+      toast.success(t("Profile updated"));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -210,27 +225,27 @@ function ProfileTab({ user, onRefresh }) {
 
   return (
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-      <Section title="Profile" description="Manage your personal information and avatar.">
+      <Section title={t("Profile")} description={t("Manage your personal information and avatar.")}>
         <form onSubmit={save} className="space-y-4">
-          <Field label="Full name">
+          <Field label={t("Full name")}>
             <Input
               name="full_name"
               value={form.full_name}
               onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))}
             />
           </Field>
-          <Field label="Email" hint="Email cannot be changed here.">
+          <Field label={t("Email")} hint={t("Email cannot be changed here.")}>
             <Input value={user?.email || ""} disabled className="opacity-60 cursor-not-allowed" />
           </Field>
-          <Field label="Profile photo" hint="Upload from your computer or paste a Google Drive / Dropbox link.">
+          <Field label={t("Profile photo")} hint={t("Upload from your computer or paste a Google Drive / Dropbox link.")}>
             <ImageUploadField
               value={form.avatar_url}
-              onChange={url => setForm(f => ({ ...f, avatar_url: url }))}
+              onChange={updateAvatar}
               shape="circle"
             />
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("Saving…") : t("Save changes")}
           </Button>
         </form>
       </Section>
@@ -245,7 +260,7 @@ function ProfileTab({ user, onRefresh }) {
             </div>
           )}
           <div>
-            <p className="font-medium text-sm">{user?.full_name || "No name set"}</p>
+            <p className="font-medium text-sm">{user?.full_name || t("No name set")}</p>
             <p className="text-xs text-muted-foreground">{user?.email}</p>
           </div>
         </div>
@@ -256,7 +271,7 @@ function ProfileTab({ user, onRefresh }) {
           </div>
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 flex-shrink-0" />
-            <span>Member since {user?.created_date ? new Date(user.created_date).toLocaleDateString() : "-"}</span>
+            <span>{t("Member since")} {user?.created_date ? new Date(user.created_date).toLocaleDateString() : "-"}</span>
           </div>
         </div>
       </SideCard>
@@ -267,18 +282,20 @@ function ProfileTab({ user, onRefresh }) {
 // ── Tab: Security ─────────────────────────────────────────────────────────────
 
 function SecurityTab() {
+  const { t } = usePreferences();
   const [form, setForm] = useState({ current_password: "", new_password: "", confirm: "" });
   const [saving, setSaving] = useState(false);
   const [show, setShow] = useState(false);
+  const [showNew, setShowNew] = useState(false);
 
   const save = async (e) => {
     e.preventDefault();
-    if (form.new_password !== form.confirm) { toast.error("New passwords do not match"); return; }
-    if (form.new_password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
+    if (form.new_password !== form.confirm) { toast.error(t("New passwords do not match")); return; }
+    if (form.new_password.length < 8) { toast.error(t("Password must be at least 8 characters")); return; }
     setSaving(true);
     try {
       await appClient.auth.changePassword(form.current_password, form.new_password);
-      toast.success("Password changed");
+      toast.success(t("Password changed"));
       setForm({ current_password: "", new_password: "", confirm: "" });
     } catch (err) {
       toast.error(err.message);
@@ -289,9 +306,9 @@ function SecurityTab() {
 
   return (
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-      <Section title="Security" description="Update your password to keep your account secure.">
+      <Section title={t("Security")} description={t("Update your password to keep your account secure.")}>
         <form onSubmit={save} className="space-y-4">
-          <Field label="Current password">
+          <Field label={t("Current password")}>
             <div className="relative">
               <Input
                 type={show ? "text" : "password"}
@@ -308,38 +325,56 @@ function SecurityTab() {
               </button>
             </div>
           </Field>
-          <Field label="New password" hint="At least 8 characters.">
-            <Input
-              type="password"
-              value={form.new_password}
-              onChange={e => setForm(f => ({ ...f, new_password: e.target.value }))}
-              required
-              minLength={8}
-            />
+          <Field label={t("New password")} hint={t("At least 8 characters.")}>
+            <div className="relative">
+              <Input
+                type={showNew ? "text" : "password"}
+                value={form.new_password}
+                onChange={e => setForm(f => ({ ...f, new_password: e.target.value }))}
+                required
+                minLength={8}
+              />
+              <button
+                type="button"
+                onClick={() => setShowNew(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </Field>
-          <Field label="Confirm new password">
-            <Input
-              type="password"
-              value={form.confirm}
-              onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))}
-              required
-            />
+          <Field label={t("Confirm new password")}>
+            <div className="relative">
+              <Input
+                type={showNew ? "text" : "password"}
+                value={form.confirm}
+                onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowNew(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showNew ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving…" : "Change password"}
+            {saving ? t("Saving…") : t("Change password")}
           </Button>
         </form>
       </Section>
 
       <SideCard>
         <div>
-          <p className="text-sm font-medium mb-2">Password requirements</p>
+          <p className="text-sm font-medium mb-2">{t("Password requirements")}</p>
           <ul className="space-y-1.5 text-xs text-muted-foreground">
             {[
-              "At least 8 characters long",
-              "Mix of uppercase and lowercase letters",
-              "Include numbers or symbols",
-              "Avoid personal information",
+              t("At least 8 characters long"),
+              t("Mix of uppercase and lowercase letters"),
+              t("Include numbers or symbols"),
+              t("Avoid personal information"),
             ].map(req => (
               <li key={req} className="flex items-start gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
@@ -350,7 +385,7 @@ function SecurityTab() {
         </div>
         <div className="pt-3 border-t border-border">
           <p className="text-xs text-muted-foreground">
-            After changing your password, you may be signed out of other active sessions.
+            {t("After changing your password, you may be signed out of other active sessions.")}
           </p>
         </div>
       </SideCard>
@@ -363,6 +398,7 @@ function SecurityTab() {
 const ALL_TIMEZONES = Intl.supportedValuesOf?.("timeZone") ?? ["UTC"];
 
 function TimezoneSelect({ value, onChange }) {
+  const { t } = usePreferences();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const ref = useRef(null);
@@ -399,13 +435,13 @@ function TimezoneSelect({ value, onChange }) {
               ref={inputRef}
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search timezones…"
+              placeholder={t("Search timezones…")}
               className="w-full h-8 px-3 text-sm bg-background border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div className="max-h-48 overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-3">No timezones found</p>
+              <p className="text-xs text-muted-foreground text-center py-3">{t("No timezones found")}</p>
             ) : filtered.map(tz => (
               <button
                 key={tz}
@@ -432,7 +468,7 @@ const LANG_LABELS = {
 };
 
 function PreferencesTab() {
-  const { prefs: contextPrefs, updatePrefs } = usePreferences();
+  const { prefs: contextPrefs, updatePrefs, t } = usePreferences();
   const { currentCompany } = useAuth();
   const [form, setForm] = useState(() => ({ ...DEFAULT_PREFS, ...contextPrefs }));
   const [saving, setSaving] = useState(false);
@@ -448,7 +484,7 @@ function PreferencesTab() {
       // Preferences are per-workspace (user_preferences keyed by user+company).
       await appClient.companies.updatePreferences(currentCompany.id, form);
       updatePrefs(form);
-      toast.success("Preferences saved");
+      toast.success(t("Preferences saved"));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -458,27 +494,27 @@ function PreferencesTab() {
 
   return (
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-      <Section title="Preferences" description="Customize your workspace display and notification settings.">
+      <Section title={t("Preferences")} description={t("Customize your workspace display and notification settings.")}>
         <form onSubmit={save} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Theme">
+            <Field label={t("Theme")}>
               <NativeSelect value={form.theme || "system"} onChange={e => setForm(p => ({ ...p, theme: e.target.value }))}>
-                <option value="system">System default</option>
-                <option value="light">Light</option>
-                <option value="dark">Dark</option>
+                <option value="system">{t("System default")}</option>
+                <option value="light">{t("Light")}</option>
+                <option value="dark">{t("Dark")}</option>
               </NativeSelect>
             </Field>
-            <Field label="Language">
+            <Field label={t("Language")}>
               <NativeSelect value={form.language || "en"} onChange={e => setForm(p => ({ ...p, language: e.target.value }))}>
                 <option value="en">English</option>
                 <option value="zh">Chinese (Traditional) 繁體中文</option>
                 <option value="zh-cn">Chinese (Simplified) 简体中文</option>
               </NativeSelect>
             </Field>
-            <Field label="Timezone">
+            <Field label={t("Timezone")}>
               <TimezoneSelect value={form.timezone || "UTC"} onChange={tz => setForm(p => ({ ...p, timezone: tz }))} />
             </Field>
-            <Field label="Date format">
+            <Field label={t("Date format")}>
               <NativeSelect value={form.date_format || "MMM d, yyyy"} onChange={e => setForm(p => ({ ...p, date_format: e.target.value }))}>
                 <option value="MMM d, yyyy">Jan 15, 2025</option>
                 <option value="dd/MM/yyyy">15/01/2025</option>
@@ -488,11 +524,11 @@ function PreferencesTab() {
             </Field>
           </div>
           <div className="space-y-3">
-            <label className="block text-sm font-medium">Notifications</label>
+            <label className="block text-sm font-medium">{t("Notifications")}</label>
             {[
-              { key: "campaign_completed", label: "Campaign sent",       hint: "When an email campaign finishes sending." },
-              { key: "sync_status",        label: "Data sync status",    hint: "When an integration sync completes or fails." },
-              { key: "new_leads",          label: "New leads captured",  hint: "When your pop-ups collect new contacts." },
+              { key: "campaign_completed", label: t("Campaign sent"),       hint: t("When an email campaign finishes sending.") },
+              { key: "sync_status",        label: t("Data sync status"),    hint: t("When an integration sync completes or fails.") },
+              { key: "new_leads",          label: t("New leads captured"),  hint: t("When your pop-ups collect new contacts.") },
             ].map(({ key, label, hint }) => (
               <label key={key} className="flex items-start gap-2.5 text-sm cursor-pointer select-none">
                 <input
@@ -512,23 +548,23 @@ function PreferencesTab() {
             ))}
           </div>
           <Button type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("Saving…") : t("Save changes")}
           </Button>
         </form>
       </Section>
 
       <SideCard>
         <div>
-          <p className="text-sm font-medium mb-1">About preferences</p>
+          <p className="text-sm font-medium mb-1">{t("About preferences")}</p>
           <p className="text-xs text-muted-foreground">
-            Display preferences apply to your account and affect all workspaces. Notification settings control what emails you receive.
+            {t("Display preferences apply to your account and affect all workspaces. Notification settings control what emails you receive.")}
           </p>
         </div>
         <div className="pt-3 border-t border-border space-y-2 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground text-xs">Current settings</p>
-          <div className="flex justify-between"><span>Theme</span><span className="capitalize">{form.theme || "System"}</span></div>
-          <div className="flex justify-between"><span>Language</span><span>{LANG_LABELS[form.language] || form.language || "English"}</span></div>
-          <div className="flex justify-between"><span>Timezone</span><span className="truncate ml-2 text-right max-w-[120px]">{form.timezone || "UTC"}</span></div>
+          <p className="font-medium text-foreground text-xs">{t("Current settings")}</p>
+          <div className="flex justify-between"><span>{t("Theme")}</span><span className="capitalize">{form.theme || "System"}</span></div>
+          <div className="flex justify-between"><span>{t("Language")}</span><span>{LANG_LABELS[form.language] || form.language || "English"}</span></div>
+          <div className="flex justify-between"><span>{t("Timezone")}</span><span className="truncate ml-2 text-right max-w-[120px]">{form.timezone || "UTC"}</span></div>
         </div>
       </SideCard>
     </div>
@@ -538,6 +574,7 @@ function PreferencesTab() {
 // ── Tab: Company ──────────────────────────────────────────────────────────────
 
 function CompanyTab({ company, onRefresh }) {
+  const { t } = usePreferences();
   // currentCompany (the `company` prop) is a slim record from /me and lacks
   // website/industry/company_size/settings - fetch the full row so the form shows
   // saved values (and doesn't overwrite them with blanks on save).
@@ -590,7 +627,7 @@ function CompanyTab({ company, onRefresh }) {
     try {
       await appClient.companies.update(company.id, form);
       await onRefresh();
-      toast.success("Company updated");
+      toast.success(t("Company updated"));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -604,7 +641,7 @@ function CompanyTab({ company, onRefresh }) {
     try {
       await appClient.companies.update(company.id, { settings: edmForm });
       await onRefresh();
-      toast.success("Email sending defaults saved");
+      toast.success(t("Email sending defaults saved"));
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -616,7 +653,7 @@ function CompanyTab({ company, onRefresh }) {
     setDeleting(true);
     try {
       await appClient.companies.delete(company.id, confirmName.trim());
-      toast.success("Workspace deleted");
+      toast.success(t("Workspace deleted"));
       // Drop the stored selection and hard-reload so the app re-resolves a valid
       // workspace (or the no-workspace state) with all caches cleared.
       localStorage.removeItem("cdp_company_id");
@@ -629,60 +666,60 @@ function CompanyTab({ company, onRefresh }) {
 
   return (
     <div className="space-y-8">
-    <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-      <Section title="Company profile" description="Update your company's name, branding and details.">
+    <div className="space-y-8 max-w-3xl">
+      <Section title={t("Company profile")} description={t("Update your company's name, branding and details.")}>
         <form onSubmit={save} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Company name">
+            <Field label={t("Company name")}>
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
             </Field>
-            <Field label="Website">
+            <Field label={t("Website")}>
               <Input type="url" value={form.website} onChange={e => setForm(f => ({ ...f, website: e.target.value }))} placeholder="https://acme.com" />
             </Field>
-            <Field label="Industry">
+            <Field label={t("Industry")}>
               <NativeSelect value={form.industry} onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}>
-                <option value="">Select industry…</option>
+                <option value="">{t("Select industry…")}</option>
                 {["Technology", "Finance", "Healthcare", "Retail", "Education", "Marketing", "Media", "Real Estate", "Other"].map(i => (
                   <option key={i} value={i}>{i}</option>
                 ))}
               </NativeSelect>
             </Field>
-            <Field label="Company size">
+            <Field label={t("Company size")}>
               <NativeSelect value={form.company_size} onChange={e => setForm(f => ({ ...f, company_size: e.target.value }))}>
-                <option value="">Select size…</option>
+                <option value="">{t("Select size…")}</option>
                 {["1-10", "11-50", "51-200", "201-1000", "1000+"].map(s => (
-                  <option key={s} value={s}>{s} employees</option>
+                  <option key={s} value={s}>{s} {t("employees")}</option>
                 ))}
               </NativeSelect>
             </Field>
           </div>
-          <Field label="Company logo" hint="Upload from your computer or paste a Google Drive / Dropbox link.">
+          <Field label={t("Company logo")} hint={t("Upload from your computer or paste a Google Drive / Dropbox link.")}>
             <ImageUploadField
               value={form.logo_url}
               onChange={url => setForm(f => ({ ...f, logo_url: url }))}
               shape="square"
             />
           </Field>
-          <Field label="Plan" hint="Contact support to change your plan.">
+          <Field label={t("Plan")} hint={t("Contact support to change your plan.")}>
             <Input value={company?.plan || "free"} disabled className="opacity-60 cursor-not-allowed capitalize" />
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("Saving…") : t("Save changes")}
           </Button>
         </form>
       </Section>
 
-      <Section title="Email sending defaults" description="Default sender used for EDM campaigns when no override is set on the campaign itself.">
+      <Section title={t("Email sending defaults")} description={t("Default sender used for EDM campaigns when no override is set on the campaign itself.")}>
         <form onSubmit={saveEdm} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="From name" hint="Displayed as the sender name in recipients' inboxes.">
+            <Field label={t("From name")} hint={t("Displayed as the sender name in recipients' inboxes.")}>
               <Input
                 value={edmForm.edm_from_name}
                 onChange={e => setEdmForm(f => ({ ...f, edm_from_name: e.target.value }))}
                 placeholder="Acme Inc."
               />
             </Field>
-            <Field label="From email" hint="Must be a verified sender address with your ESP.">
+            <Field label={t("From email")} hint={t("Must be a verified sender address with your ESP.")}>
               <Input
                 type="email"
                 value={edmForm.edm_from_email}
@@ -691,7 +728,7 @@ function CompanyTab({ company, onRefresh }) {
               />
             </Field>
           </div>
-          <Field label="Reply-to" hint="Optional. Replies will go to this address instead of the from address.">
+          <Field label={t("Reply-to")} hint={t("Optional. Replies will go to this address instead of the from address.")}>
             <Input
               type="email"
               value={edmForm.edm_reply_to}
@@ -700,57 +737,26 @@ function CompanyTab({ company, onRefresh }) {
             />
           </Field>
           <Button type="submit" size="sm" disabled={savingEdm}>
-            {savingEdm ? "Saving…" : "Save email defaults"}
+            {savingEdm ? t("Saving…") : t("Save email defaults")}
           </Button>
         </form>
       </Section>
 
-      <SideCard>
-        <div className="flex flex-col items-center text-center gap-3 pb-3 border-b border-border">
-          {form.logo_url ? (
-            <img src={form.logo_url} alt="Logo" className="w-16 h-16 rounded-lg object-cover border border-border" />
-          ) : (
-            <div className="w-16 h-16 rounded-lg bg-secondary border border-border flex items-center justify-center">
-              <Building2 className="w-7 h-7 text-muted-foreground" />
-            </div>
-          )}
-          <div>
-            <p className="font-medium text-sm">{form.name || "Company name"}</p>
-            {form.website && <p className="text-xs text-muted-foreground">{form.website}</p>}
-          </div>
-        </div>
-        <div className="space-y-2 text-xs text-muted-foreground">
-          {form.industry && (
-            <div className="flex items-center gap-2"><Briefcase className="w-3.5 h-3.5 flex-shrink-0" /><span>{form.industry}</span></div>
-          )}
-          {form.company_size && (
-            <div className="flex items-center gap-2"><Users className="w-3.5 h-3.5 flex-shrink-0" /><span>{form.company_size} employees</span></div>
-          )}
-          {form.website && (
-            <div className="flex items-center gap-2"><Globe className="w-3.5 h-3.5 flex-shrink-0" /><a href={form.website} target="_blank" rel="noopener noreferrer" className="truncate hover:text-foreground transition-colors">{form.website}</a></div>
-          )}
-          <div className="pt-2 border-t border-border flex items-center justify-between">
-            <span>Plan</span>
-            <span className="capitalize font-medium text-foreground">{company?.plan || "free"}</span>
-          </div>
-        </div>
-      </SideCard>
     </div>
 
       {/* ── Danger zone ──────────────────────────────────────────────── */}
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-5 max-w-3xl">
-        <h2 className="font-heading text-lg font-semibold tracking-tight text-destructive">Danger zone</h2>
+        <h2 className="font-heading text-lg font-semibold tracking-tight text-destructive">{t("Danger zone")}</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Permanently delete this workspace and everything in it — profiles, integrations,
-          analytics, segments, campaigns, attributes and team access. This cannot be undone.
+          {t("Permanently delete this workspace and everything in it — profiles, integrations, analytics, segments, campaigns, attributes and team access. This cannot be undone.")}
         </p>
         {!showDelete ? (
           <Button variant="destructive" size="sm" className="mt-4 gap-1.5" onClick={() => setShowDelete(true)}>
-            <Trash2 className="w-3.5 h-3.5" /> Delete workspace
+            <Trash2 className="w-3.5 h-3.5" /> {t("Delete workspace")}
           </Button>
         ) : (
           <div className="mt-4 space-y-3 max-w-md">
-            <Field label="Type the workspace name to confirm" hint={`Enter “${wsName}” exactly to enable deletion.`}>
+            <Field label={t("Type the workspace name to confirm")} hint={t("Enter “") + wsName + t("” exactly to enable deletion.")}>
               <Input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={wsName} autoFocus />
             </Field>
             <div className="flex items-center gap-2">
@@ -759,11 +765,11 @@ function CompanyTab({ company, onRefresh }) {
                 disabled={deleting || confirmName.trim() !== wsName}
                 onClick={deleteWorkspace}
               >
-                <Trash2 className="w-3.5 h-3.5" /> {deleting ? "Deleting…" : "Permanently delete"}
+                <Trash2 className="w-3.5 h-3.5" /> {deleting ? t("Deleting…") : t("Permanently delete")}
               </Button>
               <Button variant="outline" size="sm" disabled={deleting}
                 onClick={() => { setShowDelete(false); setConfirmName(""); }}>
-                Cancel
+                {t("Cancel")}
               </Button>
             </div>
           </div>
@@ -779,6 +785,7 @@ function CompanyTab({ company, onRefresh }) {
 // current plan allows, with no hardcoded per-plan rules. null = unlimited.
 
 function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRole, setInviteRole, inviting, activeMemberCount = 0 }) {
+  const { t } = usePreferences();
   const { upgradePlan, planConfig, limits } = usePlan();
 
   const teamLimit = limits?.team_members ?? null;        // null = unlimited
@@ -791,22 +798,22 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
     const upgradeGivesMore = !!upgradePlan && (upgradeSeats == null || Number(upgradeSeats) > teamLimit);
     const upgradeLabel = upgradePlan
       ? (upgradePlan.period
-          ? `Upgrade to ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
-          : `Upgrade to ${upgradePlan.name}`)
-      : "Upgrade your plan";
+          ? `${t("Upgrade to")} ${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+          : `${t("Upgrade to")} ${upgradePlan.name}`)
+      : t("Upgrade your plan");
 
     return (
-      <Section title="Invite member">
+      <Section title={t("Invite member")}>
         <div className="flex items-start gap-3 p-4 rounded-lg border border-border bg-secondary/30">
           <Zap className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium">
-              You've reached your plan's limit of {teamLimit} team member{teamLimit === 1 ? "" : "s"}
+              {t("You've reached your plan's limit of")} {teamLimit} {teamLimit === 1 ? t("team member") : t("team members")}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
               {upgradeGivesMore
-                ? `Upgrade to ${upgradePlan.name} to invite more, or contact support to raise the limit on your ${planConfig?.name ?? "current"} plan.`
-                : "Remove a member to free up a seat, or contact support to raise your team-member limit."}
+                ? `${t("Upgrade to")} ${upgradePlan.name} ${t("to invite more, or contact support to raise the limit on your")} ${planConfig?.name ?? t("current")} ${t("plan.")}`
+                : t("Remove a member to free up a seat, or contact support to raise your team-member limit.")}
             </p>
             {upgradeGivesMore && (
               <Link
@@ -825,13 +832,13 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
 
   return (
     <Section
-      title="Invite member"
+      title={t("Invite member")}
       description={teamLimit != null
-        ? `${activeMemberCount} of ${teamLimit} seats used on your ${planConfig?.name ?? "current"} plan.`
-        : "Invite teammates to this workspace by email."}
+        ? `${activeMemberCount} ${t("of")} ${teamLimit} ${t("seats used on your")} ${planConfig?.name ?? t("current")} ${t("plan.")}`
+        : t("Invite teammates to this workspace by email.")}
     >
       <form onSubmit={invite} className="grid grid-cols-[1fr_160px_auto] gap-3 items-end">
-        <Field label="Email">
+        <Field label={t("Email")}>
           <Input
             type="email"
             required
@@ -840,16 +847,16 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
             placeholder="colleague@company.com"
           />
         </Field>
-        <Field label="Role">
+        <Field label={t("Role")}>
           <NativeSelect value={inviteRole} onChange={e => setInviteRole(e.target.value)}>
-            <option value="viewer">Viewer</option>
-            <option value="contributor">Contributor</option>
-            <option value="admin">Admin</option>
+            <option value="viewer">{t("Viewer")}</option>
+            <option value="contributor">{t("Contributor")}</option>
+            <option value="admin">{t("Admin")}</option>
           </NativeSelect>
         </Field>
         <Button type="submit" size="sm" disabled={inviting} className="gap-1.5 mb-px">
           <Plus className="w-3.5 h-3.5" />
-          {inviting ? "Sending…" : "Send invite"}
+          {inviting ? t("Sending…") : t("Send invite")}
         </Button>
       </form>
     </Section>
@@ -859,6 +866,7 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
 // ── Tab: Members ──────────────────────────────────────────────────────────────
 
 function MembersTab({ company, currentUserId }) {
+  const { t } = usePreferences();
   const [members, setMembers] = useState([]);
   const [invitations, setInvitations] = useState([]);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -887,7 +895,7 @@ function MembersTab({ company, currentUserId }) {
       await appClient.companies.invite(company.id, inviteEmail, inviteRole);
       setInviteEmail("");
       await load();
-      toast.success(`Invitation sent to ${inviteEmail}`);
+      toast.success(`${t("Invitation sent to")} ${inviteEmail}`);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -899,16 +907,16 @@ function MembersTab({ company, currentUserId }) {
     try {
       await appClient.companies.updateMember(company.id, memberId, { role });
       await load();
-      toast.success("Role updated");
+      toast.success(t("Role updated"));
     } catch (err) { toast.error(err.message); }
   };
 
   const removeMember = async (memberId, name) => {
-    if (!confirm(`Remove ${name} from this company?`)) return;
+    if (!confirm(`${t("Remove")} ${name} ${t("from this company?")}`)) return;
     try {
       await appClient.companies.removeMember(company.id, memberId);
       await load();
-      toast.success("Member removed");
+      toast.success(t("Member removed"));
     } catch (err) { toast.error(err.message); }
   };
 
@@ -916,11 +924,11 @@ function MembersTab({ company, currentUserId }) {
     try {
       await appClient.companies.cancelInvitation(company.id, invId);
       await load();
-      toast.success(`Invitation to ${email} cancelled`);
+      toast.success(`${t("Invitation to")} ${email} ${t("cancelled")}`);
     } catch (err) { toast.error(err.message); }
   };
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (loading) return <p className="text-sm text-muted-foreground">{t("Loading…")}</p>;
 
   return (
     <div className="space-y-8">
@@ -935,14 +943,14 @@ function MembersTab({ company, currentUserId }) {
         activeMemberCount={members.filter(m => m.status === "active").length}
       />
 
-      <Section title="Team members" description={`${members.length} member${members.length !== 1 ? "s" : ""} in this workspace.`}>
+      <Section title={t("Team members")} description={`${members.length} ${members.length !== 1 ? t("members") : t("member")} ${t("in this workspace.")}`}>
         <div className="border border-border rounded-lg overflow-hidden">
           <div className="grid grid-cols-[40px_1fr_1fr_120px_100px_40px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
             <span />
-            <span>Name</span>
-            <span>Email</span>
-            <span>Role</span>
-            <span>Joined</span>
+            <span>{t("Name")}</span>
+            <span>{t("Email")}</span>
+            <span>{t("Role")}</span>
+            <span>{t("Joined")}</span>
             <span />
           </div>
           <div className="divide-y divide-border">
@@ -960,9 +968,9 @@ function MembersTab({ company, currentUserId }) {
                       onChange={e => updateRole(m.id, e.target.value)}
                       className="text-xs border border-border rounded px-1.5 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring w-full"
                     >
-                      <option value="admin">Admin</option>
-                      <option value="contributor">Contributor</option>
-                      <option value="viewer">Viewer</option>
+                      <option value="admin">{t("Admin")}</option>
+                      <option value="contributor">{t("Contributor")}</option>
+                      <option value="viewer">{t("Viewer")}</option>
                     </select>
                   ) : (
                     <RoleBadge role={m.role} isOwner={m.is_account_owner} />
@@ -986,10 +994,10 @@ function MembersTab({ company, currentUserId }) {
       </Section>
 
       {invitations.length > 0 && (
-        <Section title="Pending invitations">
+        <Section title={t("Pending invitations")}>
           <div className="border border-border rounded-lg overflow-hidden">
             <div className="grid grid-cols-[1fr_120px_160px_80px_40px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
-              <span>Email</span><span>Role</span><span>Expires</span><span>Status</span><span />
+              <span>{t("Email")}</span><span>{t("Role")}</span><span>{t("Expires")}</span><span>{t("Status")}</span><span />
             </div>
             <div className="divide-y divide-border">
               {invitations.map(inv => (
@@ -998,7 +1006,7 @@ function MembersTab({ company, currentUserId }) {
                   <RoleBadge role={inv.role} />
                   <p className="text-xs text-muted-foreground">{new Date(inv.expires_at).toLocaleDateString()}</p>
                   <span className="text-xs px-2 py-0.5 bg-secondary text-foreground border border-border rounded-full font-medium w-fit">
-                    Pending
+                    {t("Pending")}
                   </span>
                   <div className="flex justify-center">
                     <button
@@ -1064,7 +1072,7 @@ function relativeTime(val) {
 }
 
 function AuditLogTab({ company }) {
-  const { formatDateTime } = usePreferences();
+  const { formatDateTime, t } = usePreferences();
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -1103,8 +1111,8 @@ function AuditLogTab({ company }) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-heading text-lg font-semibold tracking-tight">Audit log</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">Activity history for this workspace.</p>
+        <h2 className="font-heading text-lg font-semibold tracking-tight">{t("Audit log")}</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">{t("Activity history for this workspace.")}</p>
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
@@ -1113,7 +1121,7 @@ function AuditLogTab({ company }) {
           <Input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search user or activity…"
+            placeholder={t("Search user or activity…")}
             className="pl-8 h-8 text-sm w-56"
           />
         </div>
@@ -1122,9 +1130,9 @@ function AuditLogTab({ company }) {
           onChange={e => setActionFilter(e.target.value)}
           className="h-8 px-2.5 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
-          <option value="">All actions</option>
+          <option value="">{t("All actions")}</option>
           {uniqueActions.map(a => (
-            <option key={a} value={a}>{ACTION_META[a]?.label ?? a.replace(/_/g, " ")}</option>
+            <option key={a} value={a}>{ACTION_META[a]?.label ? t(ACTION_META[a].label) : a.replace(/_/g, " ")}</option>
           ))}
         </select>
         <select
@@ -1132,34 +1140,34 @@ function AuditLogTab({ company }) {
           onChange={e => setDateFilter(e.target.value)}
           className="h-8 px-2.5 border border-input rounded-md bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring"
         >
-          <option value="all">All time</option>
-          <option value="today">Today</option>
-          <option value="week">Last 7 days</option>
-          <option value="month">Last 30 days</option>
+          <option value="all">{t("All time")}</option>
+          <option value="today">{t("Today")}</option>
+          <option value="week">{t("Last 7 days")}</option>
+          <option value="month">{t("Last 30 days")}</option>
         </select>
-        <span className="text-xs text-muted-foreground ml-auto">{filtered.length} of {logs.length} entries</span>
+        <span className="text-xs text-muted-foreground ml-auto">{filtered.length} {t("of")} {logs.length} {t("entries")}</span>
       </div>
 
       {filtered.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg px-6 py-8 text-center">
           <ClipboardList className="w-6 h-6 text-muted-foreground mx-auto mb-2 opacity-40" />
-          <p className="text-sm text-muted-foreground">{logs.length === 0 ? "No activity yet." : "No entries match your filters."}</p>
+          <p className="text-sm text-muted-foreground">{logs.length === 0 ? t("No activity yet.") : t("No entries match your filters.")}</p>
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden">
           <div className="grid grid-cols-[1fr_2fr_180px] gap-4 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
-            <span>User</span>
-            <span>Activity</span>
-            <span>Date &amp; Time</span>
+            <span>{t("User")}</span>
+            <span>{t("Activity")}</span>
+            <span>{t("Date & Time")}</span>
           </div>
           <div className="divide-y divide-border">
             {filtered.map(l => {
               const desc = formatAuditAction(l.action, l.resource_type);
-              const actor = l.user_email || "System";
+              const actor = l.user_email || t("System");
               return (
                 <div key={l.id} className="grid grid-cols-[1fr_2fr_180px] gap-4 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
                   <p className="text-sm font-medium truncate">{actor}</p>
-                  <p className="text-sm text-muted-foreground">{desc}</p>
+                  <p className="text-sm text-muted-foreground">{t(desc)}</p>
                   <p className="text-xs text-muted-foreground">{formatDateTime(l.occurred_at)}</p>
                 </div>
               );
@@ -1174,6 +1182,7 @@ function AuditLogTab({ company }) {
 // ── Tab: Billing & Usage ──────────────────────────────────────────────────────
 
 function UsageBar({ label, used, limit, unlimited }) {
+  const { t } = usePreferences();
   const pct = (!unlimited && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const danger = pct >= 90;
   const warn   = pct >= 70;
@@ -1182,7 +1191,7 @@ function UsageBar({ label, used, limit, unlimited }) {
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">{label}</span>
         <span className="text-muted-foreground text-xs">
-          {used.toLocaleString()} / {unlimited ? "Unlimited" : limit?.toLocaleString() ?? "-"}
+          {used.toLocaleString()} / {unlimited ? t("Unlimited") : limit?.toLocaleString() ?? "-"}
         </span>
       </div>
       {!unlimited && (
@@ -1196,7 +1205,7 @@ function UsageBar({ label, used, limit, unlimited }) {
         </div>
       )}
       {!unlimited && warn && !danger && (
-        <p className="text-[10px] text-yellow-700 font-medium">Approaching plan limit</p>
+        <p className="text-[10px] text-yellow-700 font-medium">{t("Approaching plan limit")}</p>
       )}
     </div>
   );
@@ -1225,6 +1234,7 @@ function qualitativeFeatures(features) {
 }
 
 function BillingTab({ company }) {
+  const { t } = usePreferences();
   const { planConfig, upgradePlan, isFreePlan, isPaidPlan, isTrialExpired, daysLeft, upgradedAt, plans } = usePlan();
 
   const { data: usage, isLoading: usageLoading } = useQuery({
@@ -1238,26 +1248,26 @@ function BillingTab({ company }) {
 
   const badgeClass = "text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground font-medium border border-border";
   const statusBadge = isTrialExpired
-    ? <span className={badgeClass}>Trial expired</span>
+    ? <span className={badgeClass}>{t("Trial expired")}</span>
     : isFreePlan
-      ? <span className={badgeClass}>{daysLeft}d left in trial</span>
-      : <span className={badgeClass}>Active</span>;
+      ? <span className={badgeClass}>{daysLeft}{t("d left in trial")}</span>
+      : <span className={badgeClass}>{t("Active")}</span>;
 
   // Free upgrades go through sales; surface the paid plan's contact link directly.
   const isContactSales = upgradePlan?.cta_external;
 
   const usageItems = [
-    { key: "team_members", label: "Team members",      limitKey: "team_members" },
-    { key: "campaigns",    label: "Email campaigns",   limitKey: "campaigns"    },
-    { key: "ai_tokens",    label: "AI tokens",         limitKey: "ai_tokens"    },
-    { key: "profiles",     label: "Customer profiles", limitKey: "profiles"     },
+    { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
+    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
+    { key: "ai_tokens",    label: t("AI tokens"),         limitKey: "ai_tokens"    },
+    { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
   ];
 
   return (
     <div className="space-y-8">
 
       {/* Current plan */}
-      <Section title="Current plan" description="Your active plan and trial status.">
+      <Section title={t("Current plan")} description={t("Your active plan and trial status.")}>
         <div className="border border-border rounded-lg p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1275,14 +1285,14 @@ function BillingTab({ company }) {
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
               >
                 <Zap className="w-3 h-3" />
-                {isContactSales ? `Contact sales to upgrade` : `Upgrade to ${upgradePlan.name}`}
+                {isContactSales ? t("Contact sales to upgrade") : `${t("Upgrade to")} ${upgradePlan.name}`}
               </a>
             )}
           </div>
           {planConfig?.description && <p className="text-sm text-muted-foreground">{planConfig.description}</p>}
           {isPaidPlan ? (
             <p className="text-sm font-medium">
-              Upgraded on{" "}
+              {t("Upgraded on")}{" "}
               <span className="text-muted-foreground font-normal">
                 {upgradedAt ? upgradedAt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) : "-"}
               </span>
@@ -1297,7 +1307,7 @@ function BillingTab({ company }) {
       </Section>
 
       {/* Detailed usage */}
-      <Section title="Usage this period" description="Account-wide totals tracked against your plan limits.">
+      <Section title={t("Usage this period")} description={t("Account-wide totals tracked against your plan limits.")}>
         {usageLoading ? (
           <div className="grid grid-cols-2 gap-4">
             {[1,2,3,4].map(i => <div key={i} className="h-14 bg-secondary animate-pulse rounded-lg" />)}
@@ -1323,16 +1333,16 @@ function BillingTab({ company }) {
 
       {/* Usage by workspace */}
       {usage?.workspaces?.length > 0 && (
-        <Section title="Usage by workspace" description="How the account total breaks down across your workspaces.">
+        <Section title={t("Usage by workspace")} description={t("How the account total breaks down across your workspaces.")}>
           <div className="border border-border rounded-lg overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-secondary/40 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="text-left font-medium px-4 py-2.5">Workspace</th>
-                  <th className="text-right font-medium px-4 py-2.5">Members</th>
-                  <th className="text-right font-medium px-4 py-2.5">Profiles</th>
-                  <th className="text-right font-medium px-4 py-2.5">Campaigns</th>
-                  <th className="text-right font-medium px-4 py-2.5">AI tokens</th>
+                  <th className="text-left font-medium px-4 py-2.5">{t("Workspace")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("Members")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("Profiles")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("Campaigns")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("AI tokens")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1340,7 +1350,7 @@ function BillingTab({ company }) {
                   <tr key={w.id} className={`border-t border-border ${w.id === company?.id ? "bg-secondary/20" : ""}`}>
                     <td className="px-4 py-2.5 font-medium">
                       {w.name}
-                      {w.id === company?.id && <span className="ml-1.5 text-[10px] text-muted-foreground">(current)</span>}
+                      {w.id === company?.id && <span className="ml-1.5 text-[10px] text-muted-foreground">{t("(current)")}</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.team_members.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.profiles.toLocaleString()}</td>
@@ -1351,7 +1361,7 @@ function BillingTab({ company }) {
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border font-medium">
-                  <td className="px-4 py-2.5">Account total</td>
+                  <td className="px-4 py-2.5">{t("Account total")}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.team_members ?? usage.team_members ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.profiles ?? usage.profiles ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.campaigns ?? usage.campaigns ?? 0).toLocaleString()}</td>
@@ -1364,7 +1374,7 @@ function BillingTab({ company }) {
       )}
 
       {/* All plans */}
-      <Section title="All plans" description="Compare plans and upgrade at any time.">
+      <Section title={t("All plans")} description={t("Compare plans and upgrade at any time.")}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
           {plans.filter(p => p.is_active).map(p => (
             <div
@@ -1377,7 +1387,7 @@ function BillingTab({ company }) {
                 <div className="flex items-center gap-2 mb-1">
                   <p className="font-semibold">{p.name}</p>
                   {p.id === company?.plan && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">Current</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">{t("Current")}</span>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">{p.description}</p>
@@ -1435,6 +1445,7 @@ const ticketStatusLabel = {
 };
 
 function SupportTab() {
+  const { t } = usePreferences();
   const queryClient = useQueryClient();
   const [form, setForm] = useState({ type: "feedback", subject: "", body: "", priority: "normal" });
   const [submitting, setSubmitting] = useState(false);
@@ -1450,7 +1461,7 @@ function SupportTab() {
     setSubmitting(true);
     try {
       await appClient.support.createTicket(form);
-      toast.success("Ticket submitted - we'll be in touch soon.");
+      toast.success(t("Ticket submitted - we'll be in touch soon."));
       setForm({ type: "feedback", subject: "", body: "", priority: "normal" });
       queryClient.invalidateQueries({ queryKey: ["support-tickets"] });
     } catch (err) {
@@ -1462,49 +1473,49 @@ function SupportTab() {
 
   return (
     <div className="grid grid-cols-[1fr_360px] gap-8 items-start">
-      <Section title="Submit feedback or raise a ticket" description="We read every submission and aim to respond within 1 business day.">
+      <Section title={t("Submit feedback or raise a ticket")} description={t("We read every submission and aim to respond within 1 business day.")}>
         <form onSubmit={submit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Type">
+            <Field label={t("Type")}>
               <NativeSelect value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
-                {TICKET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {TICKET_TYPES.map(opt => <option key={opt.value} value={opt.value}>{t(opt.label)}</option>)}
               </NativeSelect>
             </Field>
-            <Field label="Priority">
+            <Field label={t("Priority")}>
               <NativeSelect value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
-                {TICKET_PRIORITIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                {TICKET_PRIORITIES.map(p => <option key={p.value} value={p.value}>{t(p.label)}</option>)}
               </NativeSelect>
             </Field>
           </div>
-          <Field label="Subject">
+          <Field label={t("Subject")}>
             <Input
               required
               value={form.subject}
               onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}
-              placeholder="Brief summary of your issue or idea"
+              placeholder={t("Brief summary of your issue or idea")}
             />
           </Field>
-          <Field label="Details">
+          <Field label={t("Details")}>
             <Textarea
               required
               value={form.body}
               onChange={e => setForm(f => ({ ...f, body: e.target.value }))}
-              placeholder="Describe your feedback, the steps to reproduce a bug, or what you'd like to see..."
+              placeholder={t("Describe your feedback, the steps to reproduce a bug, or what you'd like to see...")}
               rows={6}
               className="resize-none"
             />
           </Field>
           <Button type="submit" size="sm" disabled={submitting} className="gap-1.5">
             <MessageCircle className="w-3.5 h-3.5" />
-            {submitting ? "Submitting…" : "Submit"}
+            {submitting ? t("Submitting…") : t("Submit")}
           </Button>
         </form>
       </Section>
 
       <div className="space-y-4">
         <div>
-          <h2 className="font-heading text-lg font-semibold tracking-tight">Your submissions</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">Tickets and feedback you've previously raised.</p>
+          <h2 className="font-heading text-lg font-semibold tracking-tight">{t("Your submissions")}</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">{t("Tickets and feedback you've previously raised.")}</p>
         </div>
         {isLoading ? (
           <div className="space-y-2">
@@ -1513,23 +1524,23 @@ function SupportTab() {
         ) : tickets.length === 0 ? (
           <div className="border border-dashed border-border rounded-lg px-6 py-8 text-center">
             <MessageCircle className="w-6 h-6 text-muted-foreground mx-auto mb-2 opacity-40" />
-            <p className="text-sm text-muted-foreground">No submissions yet.</p>
+            <p className="text-sm text-muted-foreground">{t("No submissions yet.")}</p>
           </div>
         ) : (
           <div className="border border-border rounded-lg divide-y divide-border">
-            {tickets.map(t => (
-              <div key={t.id} className="px-4 py-3 flex items-start gap-3">
+            {tickets.map(ticket => (
+              <div key={ticket.id} className="px-4 py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{t.subject}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{t.body}</p>
+                  <p className="text-sm font-medium truncate">{ticket.subject}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{ticket.body}</p>
                   <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                    <span className="capitalize">{TICKET_TYPES.find(x => x.value === t.type)?.label ?? t.type}</span>
+                    <span className="capitalize">{TICKET_TYPES.find(x => x.value === ticket.type)?.label ? t(TICKET_TYPES.find(x => x.value === ticket.type).label) : ticket.type}</span>
                     <span>·</span>
-                    <span>{new Date(t.created_date).toLocaleDateString()}</span>
+                    <span>{new Date(ticket.created_date).toLocaleDateString()}</span>
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground flex-shrink-0 pt-0.5">
-                  {ticketStatusLabel[t.status] ?? t.status}
+                  {ticketStatusLabel[ticket.status] ? t(ticketStatusLabel[ticket.status]) : ticket.status}
                 </span>
               </div>
             ))}
@@ -1570,7 +1581,7 @@ export default function Settings() {
       <div className="px-8 pt-8 pb-6 flex-shrink-0 border-b border-border">
         <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Settings")}</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Manage your account, workspace and preferences.
+          {t("Manage your account, workspace and preferences.")}
         </p>
       </div>
 

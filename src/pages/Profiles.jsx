@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { format, parseISO, isValid, differenceInCalendarDays } from "date-fns";
+import { usePreferences } from "@/lib/PreferencesContext";
 
 const TABS = [
   { key: "customer", label: "Customers", icon: UserCheck },
@@ -49,15 +50,15 @@ function safeDate(val, fmt = "MMM d, yyyy") {
 }
 
 // "today" / "yesterday" / "N days ago" relative to now, for a timestamp value.
-function daysAgoLabel(val) {
+function daysAgoLabel(val, t = (s) => s) {
   if (!val) return null;
   try {
     const d = parseISO(val);
     if (!isValid(d)) return null;
     const n = differenceInCalendarDays(new Date(), d);
-    if (n <= 0) return "today";
-    if (n === 1) return "yesterday";
-    return `${n} days ago`;
+    if (n <= 0) return t("today");
+    if (n === 1) return t("yesterday");
+    return `${n} ${t("days ago")}`;
   } catch { return null; }
 }
 
@@ -86,6 +87,7 @@ function Pill({ children, active }) {
 const AFFINITY_SOURCE_LABEL = { web_content: "content", rule: "rule", manual: "manual" };
 
 function AffinitiesBlock({ entityType, entityId }) {
+  const { t } = usePreferences();
   const { data = [] } = useQuery({
     queryKey: ["profile-affinities", entityType, entityId],
     queryFn: () => appClient.attributes.profileAttributes(entityType, entityId),
@@ -107,7 +109,7 @@ function AffinitiesBlock({ entityType, entityId }) {
   }
   return (
     <div>
-      <SectionTitle>Affinities & Attributes</SectionTitle>
+      <SectionTitle>{t("Affinities & Attributes")}</SectionTitle>
       <div className="flex flex-wrap gap-1">
         {tags.map((a, i) => (
           <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/40 border border-border">
@@ -130,17 +132,18 @@ const ORDER_STATUS_STYLE = {
 
 // Lazily fetches a member's Shopify orders (only mounts when the card is expanded).
 function TransactionsBlock({ memberId, fmtMoney }) {
+  const { t } = usePreferences();
   const { data, isLoading } = useQuery({
     queryKey: ["profile-transactions", memberId],
     queryFn: () => appClient.profiles.transactions(memberId),
     enabled: !!memberId,
   });
   const orders = data?.orders || [];
-  if (isLoading) return <p className="text-[11px] text-muted-foreground">Loading orders…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">{t("Loading orders…")}</p>;
   if (!orders.length) return null;
   return (
     <div>
-      <SectionTitle>Recent Orders ({orders.length})</SectionTitle>
+      <SectionTitle>{t("Recent Orders")} ({orders.length})</SectionTitle>
       <div className="space-y-1.5">
         {orders.slice(0, 10).map(o => {
           const items = Array.isArray(o.items) ? o.items : [];
@@ -161,11 +164,11 @@ function TransactionsBlock({ memberId, fmtMoney }) {
                 <div className="mt-1.5 space-y-0.5">
                   {items.slice(0, 4).map((it, i) => (
                     <div key={i} className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                      <span className="truncate">{it.qty}× {it.name || it.sku || "Item"}</span>
+                      <span className="truncate">{it.qty}× {it.name || it.sku || t("Item")}</span>
                       <span className="flex-shrink-0">{fmtMoney(it.unit_price, o.currency)}</span>
                     </div>
                   ))}
-                  {items.length > 4 && <p className="text-[10px] text-muted-foreground">+{items.length - 4} more item{items.length - 4 !== 1 ? "s" : ""}</p>}
+                  {items.length > 4 && <p className="text-[10px] text-muted-foreground">+{items.length - 4} {items.length - 4 !== 1 ? t("more items") : t("more item")}</p>}
                 </div>
               )}
             </div>
@@ -190,12 +193,13 @@ function InsightRow({ label, value, sub }) {
 
 // Lazily-loaded "Top" web/transaction values + marketing touchpoints for a profile.
 function InsightsBlock({ type, id }) {
+  const { t } = usePreferences();
   const { data, isLoading } = useQuery({
     queryKey: ["profile-insights", type, id],
     queryFn: () => type === "customer" ? appClient.profiles.insights(id) : appClient.profiles.anonymousInsights(id),
     enabled: !!id,
   });
-  if (isLoading) return <p className="text-[11px] text-muted-foreground">Loading insights…</p>;
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">{t("Loading insights…")}</p>;
   if (!data) return null;
   const web = data.web || {};
   const tx = data.transactions || {};
@@ -203,16 +207,16 @@ function InsightsBlock({ type, id }) {
   const clip = (u) => { const d = decodeUrl(u); return d.length > 46 ? d.slice(0, 46) + "…" : d; };
 
   const webItems = [
-    web.top_page && { label: "Top page", value: clip(web.top_page.value), sub: `·${web.top_page.count}` },
-    web.top_outbound_link && { label: "Top outbound link", value: clip(web.top_outbound_link.value), sub: `·${web.top_outbound_link.count}` },
-    web.engagement_events > 0 && { label: "Engagement", value: `${web.engagement_events.toLocaleString()} events` },
-    web.top_content_attribute && { label: `Top ${web.top_content_attribute.name}`, value: web.top_content_attribute.value, sub: web.top_content_attribute.score > 1 ? `·${web.top_content_attribute.score}` : null },
+    web.top_page && { label: t("Top page"), value: clip(web.top_page.value), sub: `·${web.top_page.count}` },
+    web.top_outbound_link && { label: t("Top outbound link"), value: clip(web.top_outbound_link.value), sub: `·${web.top_outbound_link.count}` },
+    web.engagement_events > 0 && { label: t("Engagement"), value: `${web.engagement_events.toLocaleString()} ${t("events")}` },
+    web.top_content_attribute && { label: `${t("Top")} ${web.top_content_attribute.name}`, value: web.top_content_attribute.value, sub: web.top_content_attribute.score > 1 ? `·${web.top_content_attribute.score}` : null },
   ].filter(Boolean);
 
   const txItems = [
-    tx.top_product && { label: "Top product", value: tx.top_product.value, sub: `·${tx.top_product.qty}` },
-    tx.top_category && { label: "Top category", value: tx.top_category.value, sub: `·${tx.top_category.qty}` },
-    tx.top_channel && { label: "Top channel", value: tx.top_channel.value },
+    tx.top_product && { label: t("Top product"), value: tx.top_product.value, sub: `·${tx.top_product.qty}` },
+    tx.top_category && { label: t("Top category"), value: tx.top_category.value, sub: `·${tx.top_category.qty}` },
+    tx.top_channel && { label: t("Top channel"), value: tx.top_channel.value },
   ].filter(Boolean);
 
   const emails = tp.emails || [];
@@ -252,19 +256,19 @@ function InsightsBlock({ type, id }) {
     <>
       {webItems.length > 0 && (
         <div>
-          <SectionTitle>Top Web Activity</SectionTitle>
+          <SectionTitle>{t("Top Web Activity")}</SectionTitle>
           <div className="space-y-1">{webItems.map((it, i) => <InsightRow key={i} {...it} />)}</div>
         </div>
       )}
       {txItems.length > 0 && (
         <div>
-          <SectionTitle>Top Purchases</SectionTitle>
+          <SectionTitle>{t("Top Purchases")}</SectionTitle>
           <div className="space-y-1">{txItems.map((it, i) => <InsightRow key={i} {...it} />)}</div>
         </div>
       )}
       {segments.length > 0 && (
         <div>
-          <SectionTitle>Segments</SectionTitle>
+          <SectionTitle>{t("Segments")}</SectionTitle>
           <div className="flex flex-wrap gap-1">
             {segments.map((s) => (
               <span key={s.id} className="text-[10px] px-2 py-0.5 rounded-full border border-border bg-secondary/40 text-foreground flex items-center gap-1">
@@ -276,18 +280,18 @@ function InsightsBlock({ type, id }) {
       )}
       {hasTouchpoints > 0 && (
         <div>
-          <SectionTitle>Touchpoints</SectionTitle>
+          <SectionTitle>{t("Touchpoints")}</SectionTitle>
           <div className="space-y-2.5">
             {emails.length > 0 && (
               <div>
-                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Mail className="w-3 h-3" /> Email campaigns sent</p>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Mail className="w-3 h-3" /> {t("Email campaigns sent")}</p>
                 <div className="space-y-1">
                   {emails.map((e, i) => (
                     <div key={i} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="truncate">{e.campaign}</span>
                       <span className="flex-shrink-0">
-                        {e.clicked ? <Badge variant="secondary" className="text-[9px] h-4 px-1">clicked</Badge>
-                          : e.opened ? <Badge variant="secondary" className="text-[9px] h-4 px-1">opened</Badge>
+                        {e.clicked ? <Badge variant="secondary" className="text-[9px] h-4 px-1">{t("clicked")}</Badge>
+                          : e.opened ? <Badge variant="secondary" className="text-[9px] h-4 px-1">{t("opened")}</Badge>
                           : <span className="text-[10px] text-muted-foreground">{e.status}</span>}
                       </span>
                     </div>
@@ -297,7 +301,7 @@ function InsightsBlock({ type, id }) {
             )}
             {utm.length > 0 && (
               <div>
-                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><ExternalLink className="w-3 h-3" /> UTM links</p>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><ExternalLink className="w-3 h-3" /> {t("UTM links")}</p>
                 <div className="space-y-1">
                   {utm.map((u, i) => {
                     const href = utmHref(u);
@@ -305,7 +309,7 @@ function InsightsBlock({ type, id }) {
                       <div key={i} className="text-[11px]">
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium truncate">{u.name || u.utm_campaign}</span>
-                          {href && <button onClick={() => { navigator.clipboard.writeText(href); toast.success("UTM link copied"); }} title="Copy UTM link" className="text-muted-foreground hover:text-foreground flex-shrink-0"><Copy className="w-2.5 h-2.5" /></button>}
+                          {href && <button onClick={() => { navigator.clipboard.writeText(href); toast.success(t("UTM link copied")); }} title={t("Copy UTM link")} className="text-muted-foreground hover:text-foreground flex-shrink-0"><Copy className="w-2.5 h-2.5" /></button>}
                         </div>
                         {utmFull(u) && <p className="text-[10px] text-muted-foreground truncate">{utmFull(u)}</p>}
                       </div>
@@ -316,11 +320,11 @@ function InsightsBlock({ type, id }) {
             )}
             {popupsSeen.length > 0 && (
               <div>
-                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Eye className="w-3 h-3" /> Pop-ups seen</p>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><Eye className="w-3 h-3" /> {t("Pop-ups seen")}</p>
                 <div className="flex flex-wrap gap-1">
                   {popupsSeen.map((p, i) => (
                     <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground flex items-center gap-1">
-                      {p.name}{p.clicked && <Badge variant="secondary" className="text-[9px] h-3.5 px-1">clicked</Badge>}
+                      {p.name}{p.clicked && <Badge variant="secondary" className="text-[9px] h-3.5 px-1">{t("clicked")}</Badge>}
                     </span>
                   ))}
                 </div>
@@ -328,7 +332,7 @@ function InsightsBlock({ type, id }) {
             )}
             {popups.length > 0 && (
               <div>
-                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><MessageCircle className="w-3 h-3" /> Pop-up forms submitted</p>
+                <p className="text-[10px] text-muted-foreground mb-1 flex items-center gap-1"><MessageCircle className="w-3 h-3" /> {t("Pop-up forms submitted")}</p>
                 <div className="flex flex-wrap gap-1">
                   {popups.map((p, i) => <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground">{p.name}</span>)}
                 </div>
@@ -342,6 +346,7 @@ function InsightsBlock({ type, id }) {
 }
 
 function CustomerCard({ profile, onDelete }) {
+  const { t } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const hasGa = Number(profile.ga_sessions) > 0;
@@ -375,26 +380,26 @@ function CustomerCard({ profile, onDelete }) {
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-sm font-semibold">{profile.eng_full_name || profile.display_name || "Unknown"}</h3>
+              <h3 className="text-sm font-semibold">{profile.eng_full_name || profile.display_name || t("Unknown")}</h3>
               {profile.member_no && (
                 <span className="text-[10px] text-muted-foreground font-mono">#{profile.member_no}</span>
               )}
               {hasGa && (
                 <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-0.5">
-                  <Activity className="w-2.5 h-2.5" /> Web active
+                  <Activity className="w-2.5 h-2.5" /> {t("Web active")}
                 </Badge>
               )}
               {hasOrders && (
                 <Badge className="text-[10px] h-4 px-1.5 gap-0.5 bg-foreground text-background">
-                  <ShoppingBag className="w-2.5 h-2.5" /> {orderCount} order{orderCount !== 1 ? "s" : ""}
+                  <ShoppingBag className="w-2.5 h-2.5" /> {orderCount} {orderCount !== 1 ? t("orders") : t("order")}
                 </Badge>
               )}
               {profile.is_opt_in_email && (
-                <Badge variant="outline" className="text-[10px] h-4 px-1.5">Email opt-in</Badge>
+                <Badge variant="outline" className="text-[10px] h-4 px-1.5">{t("Email opt-in")}</Badge>
               )}
               {profile.is_imported && (
                 <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-0.5">
-                  <Upload className="w-2.5 h-2.5" /> Imported
+                  <Upload className="w-2.5 h-2.5" /> {t("Imported")}
                 </Badge>
               )}
             </div>
@@ -409,21 +414,21 @@ function CustomerCard({ profile, onDelete }) {
             {profile.is_imported && (
               confirmDelete ? (
                 <>
-                  <span className="text-[11px] text-muted-foreground">Delete?</span>
+                  <span className="text-[11px] text-muted-foreground">{t("Delete?")}</span>
                   <button
                     onClick={() => { onDelete(profile.member_id); setConfirmDelete(false); }}
                     className="text-[11px] text-destructive hover:underline font-medium"
-                  >Yes</button>
+                  >{t("Yes")}</button>
                   <button
                     onClick={() => setConfirmDelete(false)}
                     className="text-[11px] text-muted-foreground hover:text-foreground"
-                  >No</button>
+                  >{t("No")}</button>
                 </>
               ) : (
                 <button
                   onClick={() => setConfirmDelete(true)}
                   className="text-muted-foreground hover:text-destructive transition-colors"
-                  title="Delete imported profile"
+                  title={t("Delete imported profile")}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -440,7 +445,7 @@ function CustomerCard({ profile, onDelete }) {
 
         {/* Quick facts */}
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-[11px] text-muted-foreground">
-          {joinDate && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> Joined {joinDate}</span>}
+          {joinDate && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {t("Joined")} {joinDate}</span>}
           {profile.member_reg_channel && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {profile.member_reg_channel}</span>}
           {profile.education_level && <span className="flex items-center gap-1"><BookOpen className="w-3 h-3" /> {profile.education_level}</span>}
           {profile.age_group && <span>{profile.age_group}</span>}
@@ -450,25 +455,25 @@ function CustomerCard({ profile, onDelete }) {
 
         {/* Activity summary */}
         <div className="grid grid-cols-3 gap-2 mt-3">
-          <StatBox label="Web sessions" value={profile.ga_sessions} />
-          <StatBox label="Seminars" value={profile.seminar_count} />
-          <StatBox label="Attributes" value={profile.attribute_count} />
+          <StatBox label={t("Web sessions")} value={profile.ga_sessions} />
+          <StatBox label={t("Seminars")} value={profile.seminar_count} />
+          <StatBox label={t("Attributes")} value={profile.attribute_count} />
         </div>
 
         {/* Web activity summary strip */}
         {hasGa && (
           <div className="mt-3 text-[11px] text-muted-foreground leading-relaxed border-t border-border pt-3">
-            <span className="font-medium text-foreground">Web activity: </span>
-            {profile.ga_total_events?.toLocaleString()} events across {profile.ga_sessions} session{profile.ga_sessions !== 1 ? "s" : ""}
+            <span className="font-medium text-foreground">{t("Web activity:")} </span>
+            {profile.ga_total_events?.toLocaleString()} {t("events across")} {profile.ga_sessions} {profile.ga_sessions !== 1 ? t("sessions") : t("session")}
             {gaFirstSeen && <>
               {" · "}
-              {gaFirstSeen === gaLastSeen ? `seen ${gaFirstSeen}` : `${gaFirstSeen} → ${gaLastSeen}`}
+              {gaFirstSeen === gaLastSeen ? `${t("seen")} ${gaFirstSeen}` : `${gaFirstSeen} → ${gaLastSeen}`}
             </>}
             {profile.ga_top_source_medium && profile.ga_top_source_medium !== "(not set)" && (
-              <> · via <strong className="text-foreground">{profile.ga_top_source_medium}</strong></>
+              <> · {t("via")} <strong className="text-foreground">{profile.ga_top_source_medium}</strong></>
             )}
             {profile.ga_visitor_ids?.length > 0 && (
-              <span className="ml-1 font-mono text-[10px] opacity-60">· GA ID: {profile.ga_visitor_ids[0]}{profile.ga_visitor_ids.length > 1 ? ` +${profile.ga_visitor_ids.length - 1}` : ""}</span>
+              <span className="ml-1 font-mono text-[10px] opacity-60">· {t("GA ID:")} {profile.ga_visitor_ids[0]}{profile.ga_visitor_ids.length > 1 ? ` +${profile.ga_visitor_ids.length - 1}` : ""}</span>
             )}
           </div>
         )}
@@ -476,10 +481,10 @@ function CustomerCard({ profile, onDelete }) {
         {/* Purchase summary strip */}
         {hasOrders && (
           <div className="mt-3 text-[11px] text-muted-foreground leading-relaxed border-t border-border pt-3 flex flex-wrap items-center gap-x-1">
-            <span className="font-medium text-foreground inline-flex items-center gap-1"><ShoppingBag className="w-3 h-3" /> Purchases:</span>
+            <span className="font-medium text-foreground inline-flex items-center gap-1"><ShoppingBag className="w-3 h-3" /> {t("Purchases:")}</span>
             <span>
-              {orderCount} order{orderCount !== 1 ? "s" : ""} · <strong className="text-foreground">{money(totalSpend)}</strong> total
-              {lastOrder && <> · last order {lastOrder}{profile.last_order_date && <span className="opacity-70"> ({daysAgoLabel(profile.last_order_date)})</span>}</>}
+              {orderCount} {orderCount !== 1 ? t("orders") : t("order")} · <strong className="text-foreground">{money(totalSpend)}</strong> {t("total")}
+              {lastOrder && <> · {t("last order")} {lastOrder}{profile.last_order_date && <span className="opacity-70"> ({daysAgoLabel(profile.last_order_date, t)})</span>}</>}
             </span>
           </div>
         )}
@@ -491,28 +496,28 @@ function CustomerCard({ profile, onDelete }) {
 
           {/* Contact & profile */}
           <div>
-            <SectionTitle>Contact & Profile</SectionTitle>
+            <SectionTitle>{t("Contact & Profile")}</SectionTitle>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
               {profile.primary_phone && <span className="flex items-center gap-1 text-muted-foreground"><Phone className="w-3 h-3" /> {profile.primary_phone}</span>}
               {profile.secondary_email && <span className="flex items-center gap-1 text-muted-foreground"><Mail className="w-3 h-3" /> {profile.secondary_email}</span>}
-              {profile.preferred_language && <span>Language: <strong className="text-foreground">{profile.preferred_language}</strong></span>}
-              {profile.preferred_channel && <span>Pref. channel: <strong className="text-foreground">{profile.preferred_channel}</strong></span>}
-              {profile.income_level && <span>Income: <strong className="text-foreground">{profile.income_level}</strong></span>}
-              {profile.employment_status && <span>Employment: <strong className="text-foreground">{profile.employment_status}</strong></span>}
-              {profile.marital_status && <span>Marital: <strong className="text-foreground">{profile.marital_status}</strong></span>}
-              {profile.title && <span>Title: <strong className="text-foreground">{profile.title}</strong></span>}
+              {profile.preferred_language && <span>{t("Language:")} <strong className="text-foreground">{profile.preferred_language}</strong></span>}
+              {profile.preferred_channel && <span>{t("Pref. channel:")} <strong className="text-foreground">{profile.preferred_channel}</strong></span>}
+              {profile.income_level && <span>{t("Income:")} <strong className="text-foreground">{profile.income_level}</strong></span>}
+              {profile.employment_status && <span>{t("Employment:")} <strong className="text-foreground">{profile.employment_status}</strong></span>}
+              {profile.marital_status && <span>{t("Marital:")} <strong className="text-foreground">{profile.marital_status}</strong></span>}
+              {profile.title && <span>{t("Title:")} <strong className="text-foreground">{profile.title}</strong></span>}
             </div>
           </div>
 
           {/* Consent flags */}
           <div>
-            <SectionTitle>Communication Consent</SectionTitle>
+            <SectionTitle>{t("Communication Consent")}</SectionTitle>
             <div className="flex flex-wrap gap-1.5">
-              <Pill active={profile.is_opt_in_email}>Email</Pill>
-              <Pill active={profile.is_opt_in_call === "true" || profile.is_opt_in_call === true}>Call</Pill>
-              <Pill active={profile.is_opt_in_sms === "true" || profile.is_opt_in_sms === true}>SMS</Pill>
-              <Pill active={profile.is_opt_in_dm === "true" || profile.is_opt_in_dm === true}>DM</Pill>
-              <Pill active={profile.is_subscriber_only}>Subscriber</Pill>
+              <Pill active={profile.is_opt_in_email}>{t("Email")}</Pill>
+              <Pill active={profile.is_opt_in_call === "true" || profile.is_opt_in_call === true}>{t("Call")}</Pill>
+              <Pill active={profile.is_opt_in_sms === "true" || profile.is_opt_in_sms === true}>{t("SMS")}</Pill>
+              <Pill active={profile.is_opt_in_dm === "true" || profile.is_opt_in_dm === true}>{t("DM")}</Pill>
+              <Pill active={profile.is_subscriber_only}>{t("Subscriber")}</Pill>
             </div>
           </div>
 
@@ -522,7 +527,7 @@ function CustomerCard({ profile, onDelete }) {
           {/* Membership attributes (intended year, year group, etc.) */}
           {hasAttributes && (
             <div>
-              <SectionTitle>Study Intentions</SectionTitle>
+              <SectionTitle>{t("Study Intentions")}</SectionTitle>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(attrs).map(([k, v]) => (
                   <div key={k} className="bg-secondary/40 rounded px-2 py-1 text-[10px]">
@@ -537,20 +542,20 @@ function CustomerCard({ profile, onDelete }) {
           {/* Purchases (Shopify) */}
           {hasOrders && (
             <div>
-              <SectionTitle>Purchases</SectionTitle>
+              <SectionTitle>{t("Purchases")}</SectionTitle>
               <div className="grid grid-cols-3 gap-1.5 mb-2">
-                <StatBox label="Orders" value={orderCount} />
+                <StatBox label={t("Orders")} value={orderCount} />
                 <div className="rounded-md px-3 py-2 text-center bg-secondary/50">
                   <p className="text-sm font-semibold">{money(totalSpend)}</p>
-                  <p className="text-[10px] text-muted-foreground">Total spend</p>
+                  <p className="text-[10px] text-muted-foreground">{t("Total spend")}</p>
                 </div>
                 <div className="rounded-md px-3 py-2 text-center bg-secondary/50">
                   <p className="text-sm font-semibold">{money(avgOrder)}</p>
-                  <p className="text-[10px] text-muted-foreground">Avg order</p>
+                  <p className="text-[10px] text-muted-foreground">{t("Avg order")}</p>
                 </div>
               </div>
               <div className="text-[11px] space-y-0.5 text-muted-foreground">
-                {firstOrder && <p>First order: <strong className="text-foreground">{firstOrder}</strong>{lastOrder && firstOrder !== lastOrder && <> · Last order: <strong className="text-foreground">{lastOrder}</strong></>}</p>}
+                {firstOrder && <p>{t("First order:")} <strong className="text-foreground">{firstOrder}</strong>{lastOrder && firstOrder !== lastOrder && <> · {t("Last order:")} <strong className="text-foreground">{lastOrder}</strong></>}</p>}
               </div>
             </div>
           )}
@@ -564,26 +569,26 @@ function CustomerCard({ profile, onDelete }) {
           {/* GA web activity */}
           {hasGa && (
             <div>
-              <SectionTitle>Web Activity (GA4)</SectionTitle>
+              <SectionTitle>{t("Web Activity (GA4)")}</SectionTitle>
               <div className="grid grid-cols-4 gap-1.5 mb-2">
-                <StatBox label="Events" value={profile.ga_total_events} />
-                <StatBox label="Page views" value={profile.ga_page_views} />
-                <StatBox label="Form starts" value={profile.ga_form_starts} />
-                <StatBox label="Form completes" value={profile.ga_form_completes} />
+                <StatBox label={t("Events")} value={profile.ga_total_events} />
+                <StatBox label={t("Page views")} value={profile.ga_page_views} />
+                <StatBox label={t("Form starts")} value={profile.ga_form_starts} />
+                <StatBox label={t("Form completes")} value={profile.ga_form_completes} />
               </div>
               <div className="grid grid-cols-3 gap-1.5 mb-2">
-                <StatBox label="Scrolls" value={profile.ga_scroll_events} />
-                <StatBox label="WhatsApp" value={profile.ga_whatsapp_clicks} />
-                <StatBox label="Downloads" value={profile.ga_file_downloads} />
+                <StatBox label={t("Scrolls")} value={profile.ga_scroll_events} />
+                <StatBox label={t("WhatsApp")} value={profile.ga_whatsapp_clicks} />
+                <StatBox label={t("Downloads")} value={profile.ga_file_downloads} />
               </div>
               <div className="text-[11px] space-y-0.5 text-muted-foreground">
-                {gaFirstSeen && <p>First seen: <strong className="text-foreground">{gaFirstSeen}</strong>{gaLastSeen && gaFirstSeen !== gaLastSeen && <> · Last seen: <strong className="text-foreground">{gaLastSeen}</strong></>}</p>}
-                {profile.ga_top_source_medium && <p>Top source: <strong className="text-foreground">{profile.ga_top_source_medium}</strong></p>}
-                {profile.ga_top_campaign && profile.ga_top_campaign !== "(not set)" && <p>Top campaign: <strong className="text-foreground">{profile.ga_top_campaign}</strong></p>}
+                {gaFirstSeen && <p>{t("First seen:")} <strong className="text-foreground">{gaFirstSeen}</strong>{gaLastSeen && gaFirstSeen !== gaLastSeen && <> · {t("Last seen:")} <strong className="text-foreground">{gaLastSeen}</strong></>}</p>}
+                {profile.ga_top_source_medium && <p>{t("Top source:")} <strong className="text-foreground">{profile.ga_top_source_medium}</strong></p>}
+                {profile.ga_top_campaign && profile.ga_top_campaign !== "(not set)" && <p>{t("Top campaign:")} <strong className="text-foreground">{profile.ga_top_campaign}</strong></p>}
               </div>
               {profile.ga_pages_visited?.length > 0 && (
                 <div className="mt-2">
-                  <SectionTitle>Pages visited</SectionTitle>
+                  <SectionTitle>{t("Pages visited")}</SectionTitle>
                   <div className="space-y-0.5">
                     {profile.ga_pages_visited.slice(0, 6).map(p => (
                       <div key={p} className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -600,7 +605,7 @@ function CustomerCard({ profile, onDelete }) {
           {/* Seminars */}
           {hasSeminars && (
             <div>
-              <SectionTitle>Seminar Registrations ({profile.seminar_count})</SectionTitle>
+              <SectionTitle>{t("Seminar Registrations")} ({profile.seminar_count})</SectionTitle>
               <div className="space-y-1">
                 {seminars.slice(0, 5).map((s, i) => (
                   <div key={i} className="flex items-start gap-2 text-[11px]">
@@ -612,7 +617,7 @@ function CustomerCard({ profile, onDelete }) {
                   </div>
                 ))}
                 {seminars.length > 5 && (
-                  <p className="text-[10px] text-muted-foreground">+{seminars.length - 5} more</p>
+                  <p className="text-[10px] text-muted-foreground">+{seminars.length - 5} {t("more")}</p>
                 )}
               </div>
             </div>
@@ -620,7 +625,7 @@ function CustomerCard({ profile, onDelete }) {
 
           {profile.tags && (
             <div>
-              <SectionTitle>Tags</SectionTitle>
+              <SectionTitle>{t("Tags")}</SectionTitle>
               <div className="flex flex-wrap gap-1">
                 {profile.tags.split(",").map(t => (
                   <Badge key={t} variant="secondary" className="text-[10px]">{t.trim()}</Badge>
@@ -635,6 +640,7 @@ function CustomerCard({ profile, onDelete }) {
 }
 
 function AnonymousCard({ profile }) {
+  const { t } = usePreferences();
   const [expanded, setExpanded] = useState(false);
   const hasFormComplete = Number(profile.form_completes) > 0;
   const hasWhatsapp = Number(profile.whatsapp_clicks) > 0;
@@ -654,16 +660,16 @@ function AnonymousCard({ profile }) {
               <h3 className="text-sm font-semibold font-mono">{shortId}</h3>
               {hasFormComplete && (
                 <Badge className="text-[10px] h-4 px-1.5 gap-0.5 bg-foreground text-background">
-                  <Star className="w-2.5 h-2.5" /> High intent
+                  <Star className="w-2.5 h-2.5" /> {t("High intent")}
                 </Badge>
               )}
               {hasWhatsapp && (
                 <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-0.5">
-                  <MessageCircle className="w-2.5 h-2.5" /> WhatsApp
+                  <MessageCircle className="w-2.5 h-2.5" /> {t("WhatsApp")}
                 </Badge>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5 truncate">{profile.top_source_medium || "Unknown source"}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{profile.top_source_medium || t("Unknown source")}</p>
           </div>
           <button
             onClick={() => setExpanded(e => !e)}
@@ -675,17 +681,17 @@ function AnonymousCard({ profile }) {
 
         {/* Metrics grid */}
         <div className="grid grid-cols-4 gap-1.5 mt-3">
-          <StatBox label="Events" value={profile.total_events} />
-          <StatBox label="Page views" value={profile.page_views} />
-          <StatBox label="Sessions" value={profile.sessions} />
-          <StatBox label="Forms" value={profile.form_completes} />
+          <StatBox label={t("Events")} value={profile.total_events} />
+          <StatBox label={t("Page views")} value={profile.page_views} />
+          <StatBox label={t("Sessions")} value={profile.sessions} />
+          <StatBox label={t("Forms")} value={profile.form_completes} />
         </div>
 
         {/* Timeline */}
         {(firstSeen || lastSeen) && (
           <div className="flex gap-4 mt-2 text-[11px] text-muted-foreground">
-            {firstSeen && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> First: <strong className="text-foreground ml-0.5">{firstSeen}</strong></span>}
-            {lastSeen && firstSeen !== lastSeen && <span>Last: <strong className="text-foreground">{lastSeen}</strong></span>}
+            {firstSeen && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {t("First:")} <strong className="text-foreground ml-0.5">{firstSeen}</strong></span>}
+            {lastSeen && firstSeen !== lastSeen && <span>{t("Last:")} <strong className="text-foreground">{lastSeen}</strong></span>}
           </div>
         )}
       </div>
@@ -698,24 +704,24 @@ function AnonymousCard({ profile }) {
 
           {/* Extended metrics */}
           <div>
-            <SectionTitle>All Behaviour Signals</SectionTitle>
+            <SectionTitle>{t("All Behaviour Signals")}</SectionTitle>
             <div className="grid grid-cols-4 gap-1.5">
-              <StatBox label="Form starts" value={profile.form_starts} />
-              <StatBox label="Scrolls" value={profile.scroll_events} />
-              <StatBox label="WhatsApp" value={profile.whatsapp_clicks} />
-              <StatBox label="Downloads" value={profile.file_downloads} />
-              <StatBox label="Clicks" value={profile.click_events} />
-              <StatBox label="Engagement" value={profile.user_engagement} />
-              <StatBox label="First visits" value={profile.first_visits} />
+              <StatBox label={t("Form starts")} value={profile.form_starts} />
+              <StatBox label={t("Scrolls")} value={profile.scroll_events} />
+              <StatBox label={t("WhatsApp")} value={profile.whatsapp_clicks} />
+              <StatBox label={t("Downloads")} value={profile.file_downloads} />
+              <StatBox label={t("Clicks")} value={profile.click_events} />
+              <StatBox label={t("Engagement")} value={profile.user_engagement} />
+              <StatBox label={t("First visits")} value={profile.first_visits} />
             </div>
           </div>
 
           {/* Campaign exposure */}
           {(profile.campaigns?.length > 0 || profile.source_mediums?.length > 0) && (
             <div>
-              <SectionTitle>Campaign Exposure</SectionTitle>
+              <SectionTitle>{t("Campaign Exposure")}</SectionTitle>
               {profile.top_campaign && profile.top_campaign !== "(not set)" && (
-                <p className="text-[11px] mb-1">Top campaign: <strong className="text-foreground">{profile.top_campaign}</strong></p>
+                <p className="text-[11px] mb-1">{t("Top campaign:")} <strong className="text-foreground">{profile.top_campaign}</strong></p>
               )}
               {profile.source_mediums?.length > 0 && (
                 <div className="flex flex-wrap gap-1">
@@ -732,7 +738,7 @@ function AnonymousCard({ profile }) {
           {/* Events triggered */}
           {profile.events?.length > 0 && (
             <div>
-              <SectionTitle>Events triggered</SectionTitle>
+              <SectionTitle>{t("Events triggered")}</SectionTitle>
               <div className="flex flex-wrap gap-1">
                 {profile.events.map(e => (
                   <span key={e} className="text-[10px] px-2 py-0.5 rounded-full border border-border text-muted-foreground flex items-center gap-1">
@@ -746,7 +752,7 @@ function AnonymousCard({ profile }) {
           {/* Pages visited */}
           {profile.pages_visited?.length > 0 && (
             <div>
-              <SectionTitle>Pages visited ({profile.pages_visited.length})</SectionTitle>
+              <SectionTitle>{t("Pages visited")} ({profile.pages_visited.length})</SectionTitle>
               <div className="space-y-0.5">
                 {profile.pages_visited.slice(0, 8).map(p => (
                   <div key={p} className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -755,7 +761,7 @@ function AnonymousCard({ profile }) {
                   </div>
                 ))}
                 {profile.pages_visited.length > 8 && (
-                  <p className="text-[10px] text-muted-foreground">+{profile.pages_visited.length - 8} more</p>
+                  <p className="text-[10px] text-muted-foreground">+{profile.pages_visited.length - 8} {t("more")}</p>
                 )}
               </div>
             </div>
@@ -765,7 +771,7 @@ function AnonymousCard({ profile }) {
           <AffinitiesBlock entityType="anonymous" entityId={profile.visitor_id} />
 
           <div className="text-[10px] text-muted-foreground font-mono break-all pt-1">
-            Visitor ID: {profile.visitor_id}
+            {t("Visitor ID:")} {profile.visitor_id}
           </div>
         </div>
       )}
@@ -774,6 +780,7 @@ function AnonymousCard({ profile }) {
 }
 
 function ActiveFilters({ filters, labels, onRemove, inline }) {
+  const { t } = usePreferences();
   const chip = (key, value, display) => (
     <span key={`${key}:${value}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
       {labels[key] || key}: <strong>{display}</strong>
@@ -785,7 +792,7 @@ function ActiveFilters({ filters, labels, onRemove, inline }) {
   const chips = [];
   for (const [key, value] of Object.entries(filters)) {
     if (Array.isArray(value)) value.forEach(v => chips.push(chip(key, v, v)));
-    else if (value) chips.push(chip(key, value, value === "true" ? "Yes" : value));
+    else if (value) chips.push(chip(key, value, value === "true" ? t("Yes") : value));
   }
   if (!chips.length) return null;
   if (inline) return <>{chips}</>;
@@ -859,6 +866,7 @@ function criteriaToChips(crit) {
 }
 
 export default function Profiles() {
+  const { t } = usePreferences();
   const [activeTab, setActiveTab] = useState("customer");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -897,18 +905,18 @@ export default function Profiles() {
       setSaveSegmentOpen(false);
       setSegmentName("");
       setSegmentDesc("");
-      toast.success("Segment saved");
+      toast.success(t("Segment saved"));
     },
-    onError: (err) => toast.error(err.message || "Failed to save segment"),
+    onError: (err) => toast.error(err.message || t("Failed to save segment")),
   });
 
   const deleteProfileMutation = useMutation({
     mutationFn: (memberId) => appClient.profiles.deleteProfile(memberId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["profiles-customers"] });
-      toast.success("Profile deleted");
+      toast.success(t("Profile deleted"));
     },
-    onError: (err) => toast.error(err.message || "Failed to delete profile"),
+    onError: (err) => toast.error(err.message || t("Failed to delete profile")),
   });
 
   const handleSaveSegment = () => {
@@ -996,13 +1004,13 @@ export default function Profiles() {
   const groupKey = isCustomer ? custGroup : anonGroup;
   const groupOf = (p) => {
     if (isCustomer) {
-      if (groupKey === "channel")   return p.member_reg_channel || "Unknown channel";
+      if (groupKey === "channel")   return p.member_reg_channel || t("Unknown channel");
       if (groupKey === "source")    return p.member_source || "ga";
-      if (groupKey === "age_group") return p.age_group || "Unknown age";
-      if (groupKey === "purchases") return Number(p.order_count) > 0 ? "Has purchases" : "No purchases";
+      if (groupKey === "age_group") return p.age_group || t("Unknown age");
+      if (groupKey === "purchases") return Number(p.order_count) > 0 ? t("Has purchases") : t("No purchases");
     } else {
-      if (groupKey === "source_medium") return p.top_source_medium || "Unknown source";
-      if (groupKey === "intent")        return Number(p.form_completes) > 0 ? "Completed a form" : "No form";
+      if (groupKey === "source_medium") return p.top_source_medium || t("Unknown source");
+      if (groupKey === "intent")        return Number(p.form_completes) > 0 ? t("Completed a form") : t("No form");
     }
     return null;
   };
@@ -1010,7 +1018,7 @@ export default function Profiles() {
     if (groupKey === "none") return null;
     const map = new Map();
     for (const p of profiles) {
-      const k = groupOf(p) ?? "Other";
+      const k = groupOf(p) ?? t("Other");
       if (!map.has(k)) map.set(k, []);
       map.get(k).push(p);
     }
@@ -1036,7 +1044,7 @@ export default function Profiles() {
   // applies to the current tab. Picking a value narrows the list to profiles tagged with it.
   const attrFilterSection = scopedAttrs.length > 0 && (
     <div className="p-4">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Applied attributes</p>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("Applied attributes")}</p>
       <div className="grid grid-cols-3 gap-3">
         {scopedAttrs.map(a => (
           <div key={a.id}>
@@ -1045,7 +1053,7 @@ export default function Profiles() {
               value={attrFilters[a.id] || []}
               onChange={v => setAttrFilter(a.id, v)}
               options={a.values.map(v => ({ value: v.id, label: `${v.value}${v.profile_count > 0 ? ` (${v.profile_count})` : ""}` }))}
-              placeholder="All"
+              placeholder={t("All")}
             />
           </div>
         ))}
@@ -1059,16 +1067,16 @@ export default function Profiles() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Profiles</h1>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Profiles")}</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Known customers and anonymous visitors built from your data.
+              {t("Known customers and anonymous visitors built from your data.")}
             </p>
           </div>
           {activeTab === "customer" && (
             <div className="flex items-center gap-2">
               <Button size="sm" className="h-9 gap-1.5"
                 onClick={() => setImportOpen(true)}>
-                <Upload className="w-3.5 h-3.5" /> Import Profiles
+                <Upload className="w-3.5 h-3.5" /> {t("Import Profiles")}
               </Button>
             </div>
           )}
@@ -1086,7 +1094,7 @@ export default function Profiles() {
                   activeTab === tab.key ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" /> {tab.label}
+                <Icon className="w-3.5 h-3.5" /> {t(tab.label)}
                 {count > 0 && <span className="text-[10px] text-muted-foreground">{count.toLocaleString()}</span>}
               </button>
             );
@@ -1106,7 +1114,7 @@ export default function Profiles() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder={isCustomer ? "Search name, email, member ID or no…" : "Search visitor ID…"}
+                placeholder={isCustomer ? t("Search name, email, member ID or no…") : t("Search visitor ID…")}
                 className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
@@ -1115,13 +1123,13 @@ export default function Profiles() {
                 variant="outline" size="sm" className="h-9 gap-1.5"
                 onClick={() => setShowFilters(f => !f)}
               >
-                <Filter className="w-3.5 h-3.5" /> Filters
+                <Filter className="w-3.5 h-3.5" /> {t("Filters")}
                 {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
               </Button>
               {showFilters && (
                 <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg overflow-hidden w-[540px] max-h-[480px] overflow-y-auto">
                   <div className="flex items-center justify-between px-4 pt-4 pb-2">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                     {hasActiveFilters && (
                       <button
                         onClick={() => {
@@ -1130,133 +1138,133 @@ export default function Profiles() {
                           setAttrFilters({});
                         }}
                         className="text-[11px] text-muted-foreground hover:text-foreground"
-                      >Clear all</button>
+                      >{t("Clear all")}</button>
                     )}
                   </div>
                   {isCustomer ? (
                     <div className="divide-y divide-border">
                       <div className="p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Demographics</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("Demographics")}</p>
                         <div className="grid grid-cols-3 gap-3">
                           {[
-                            { key: "reg_channel",       label: "Channel",     opts: custFilterOpts?.reg_channels },
-                            { key: "age_group",          label: "Age group",   opts: custFilterOpts?.age_groups },
-                            { key: "gender",             label: "Gender",      opts: custFilterOpts?.genders },
-                            { key: "nationality",        label: "Nationality", opts: custFilterOpts?.nationalities },
-                            { key: "education_level",    label: "Education",   opts: custFilterOpts?.education_levels },
-                            { key: "employment_status",  label: "Employment",  opts: custFilterOpts?.employment_statuses },
-                            { key: "income_level",       label: "Income",      opts: custFilterOpts?.income_levels },
-                            { key: "member_type",        label: "Member type", opts: custFilterOpts?.member_types },
-                            { key: "preferred_language", label: "Language",    opts: custFilterOpts?.languages },
+                            { key: "reg_channel",       label: t("Channel"),     opts: custFilterOpts?.reg_channels },
+                            { key: "age_group",          label: t("Age group"),   opts: custFilterOpts?.age_groups },
+                            { key: "gender",             label: t("Gender"),      opts: custFilterOpts?.genders },
+                            { key: "nationality",        label: t("Nationality"), opts: custFilterOpts?.nationalities },
+                            { key: "education_level",    label: t("Education"),   opts: custFilterOpts?.education_levels },
+                            { key: "employment_status",  label: t("Employment"),  opts: custFilterOpts?.employment_statuses },
+                            { key: "income_level",       label: t("Income"),      opts: custFilterOpts?.income_levels },
+                            { key: "member_type",        label: t("Member type"), opts: custFilterOpts?.member_types },
+                            { key: "preferred_language", label: t("Language"),    opts: custFilterOpts?.languages },
                           ].map(f => (
                             <div key={f.key}>
                               <p className="text-[10px] text-muted-foreground mb-1">{f.label}</p>
-                              <MultiSelect value={custFilters[f.key]} onChange={v => setCustFilter(f.key, v)} options={f.opts || []} placeholder="All" />
+                              <MultiSelect value={custFilters[f.key]} onChange={v => setCustFilter(f.key, v)} options={f.opts || []} placeholder={t("All")} />
                             </div>
                           ))}
                         </div>
                       </div>
                       <div className="p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Communication</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("Communication")}</p>
                         <div className="grid grid-cols-3 gap-3">
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Email opt-in</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Email opt-in")}</p>
                             <select value={custFilters.opt_in_email} onChange={e => setCustFilter("opt_in_email", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Opted in</option>
-                              <option value="false">Not opted in</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Opted in")}</option>
+                              <option value="false">{t("Not opted in")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">SMS opt-in</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("SMS opt-in")}</p>
                             <select value={custFilters.opt_in_sms} onChange={e => setCustFilter("opt_in_sms", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Opted in</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Opted in")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Subscriber only</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Subscriber only")}</p>
                             <select value={custFilters.is_subscriber} onChange={e => setCustFilter("is_subscriber", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Subscriber only</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Subscriber only")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Preferred channel</p>
-                            <MultiSelect value={custFilters.preferred_channel} onChange={v => setCustFilter("preferred_channel", v)} options={custFilterOpts?.preferred_channels || []} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Preferred channel")}</p>
+                            <MultiSelect value={custFilters.preferred_channel} onChange={v => setCustFilter("preferred_channel", v)} options={custFilterOpts?.preferred_channels || []} placeholder={t("All")} />
                           </div>
                         </div>
                       </div>
                       <div className="p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Activity</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("Activity")}</p>
                         <div className="grid grid-cols-3 gap-3">
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Web activity</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Web activity")}</p>
                             <select value={custFilters.has_ga} onChange={e => setCustFilter("has_ga", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Has web data</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Has web data")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Min. GA sessions</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Min. GA sessions")}</p>
                             <input type="number" min="0" inputMode="numeric" value={custFilters.min_ga_sessions} onChange={e => setCustFilter("min_ga_sessions", e.target.value)}
-                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                              placeholder={t("Any")} className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Seminars</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Seminars")}</p>
                             <select value={custFilters.has_seminars} onChange={e => setCustFilter("has_seminars", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Attended seminar</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Attended seminar")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Attributes</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Attributes")}</p>
                             <select value={custFilters.has_attributes} onChange={e => setCustFilter("has_attributes", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Has study intentions</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Has study intentions")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Source</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Source")}</p>
                             <select value={custFilters.is_imported} onChange={e => setCustFilter("is_imported", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Imported only</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Imported only")}</option>
                             </select>
                           </div>
                         </div>
                       </div>
                       <div className="p-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Purchases</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{t("Purchases")}</p>
                         <div className="grid grid-cols-3 gap-3">
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Has purchases</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Has purchases")}</p>
                             <select value={custFilters.has_transactions} onChange={e => setCustFilter("has_transactions", e.target.value)}
                               className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                              <option value="">All</option>
-                              <option value="true">Has orders</option>
+                              <option value="">{t("All")}</option>
+                              <option value="true">{t("Has orders")}</option>
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Min. orders</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Min. orders")}</p>
                             <input type="number" min="0" inputMode="numeric" value={custFilters.min_orders} onChange={e => setCustFilter("min_orders", e.target.value)}
-                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                              placeholder={t("Any")} className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Min. spend</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Min. spend")}</p>
                             <input type="number" min="0" inputMode="numeric" value={custFilters.min_spend} onChange={e => setCustFilter("min_spend", e.target.value)}
-                              placeholder="Any" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                              placeholder={t("Any")} className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
                           </div>
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Ordered within (days)</p>
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Ordered within (days)")}</p>
                             <input type="number" min="0" inputMode="numeric" value={custFilters.ordered_within} onChange={e => setCustFilter("ordered_within", e.target.value)}
-                              placeholder="Any time" className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                              placeholder={t("Any time")} className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring" />
                           </div>
                         </div>
                       </div>
@@ -1267,19 +1275,19 @@ export default function Profiles() {
                       <div className="p-4">
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Source</p>
-                          <MultiSelect value={anonFilters.source} onChange={v => setAnonFilter("source", v)} options={anonFilterOpts?.sources || []} placeholder="All" />
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Source")}</p>
+                          <MultiSelect value={anonFilters.source} onChange={v => setAnonFilter("source", v)} options={anonFilterOpts?.sources || []} placeholder={t("All")} />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Medium</p>
-                          <MultiSelect value={anonFilters.medium} onChange={v => setAnonFilter("medium", v)} options={anonFilterOpts?.mediums || []} placeholder="All" />
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Medium")}</p>
+                          <MultiSelect value={anonFilters.medium} onChange={v => setAnonFilter("medium", v)} options={anonFilterOpts?.mediums || []} placeholder={t("All")} />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Intent level</p>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Intent level")}</p>
                           <select value={anonFilters.has_form_complete} onChange={e => setAnonFilter("has_form_complete", e.target.value)}
                             className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                            <option value="">All visitors</option>
-                            <option value="true">Completed a form (high intent)</option>
+                            <option value="">{t("All visitors")}</option>
+                            <option value="true">{t("Completed a form (high intent)")}</option>
                           </select>
                         </div>
                       </div>
@@ -1290,23 +1298,23 @@ export default function Profiles() {
                   {/* Sort + Group (applies to the active tab; mirrors Attributes) */}
                   <div className="p-4 border-t border-border space-y-3">
                     <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Sort by")}</p>
                       <div className="flex items-center gap-2">
                         <select value={isCustomer ? custSort : anonSort} onChange={e => (isCustomer ? setCustSort : setAnonSort)(e.target.value)}
                           className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                          {(isCustomer ? CUST_SORT_OPTS : ANON_SORT_OPTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                          {(isCustomer ? CUST_SORT_OPTS : ANON_SORT_OPTS).map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
                         </select>
                         <button type="button" onClick={() => (isCustomer ? setCustDir : setAnonDir)(d => d === "asc" ? "desc" : "asc")}
                           className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
-                          {(isCustomer ? custDir : anonDir) === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                          {(isCustomer ? custDir : anonDir) === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                         </button>
                       </div>
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Group by")}</p>
                       <select value={isCustomer ? custGroup : anonGroup} onChange={e => (isCustomer ? setCustGroup : setAnonGroup)(e.target.value)}
                         className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                        {(isCustomer ? CUST_GROUP_OPTS : ANON_GROUP_OPTS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        {(isCustomer ? CUST_GROUP_OPTS : ANON_GROUP_OPTS).map(([v, l]) => <option key={v} value={v}>{t(l)}</option>)}
                       </select>
                     </div>
                   </div>
@@ -1323,7 +1331,7 @@ export default function Profiles() {
                   setSaveSegmentOpen(true);
                 }}
               >
-                <Users className="w-3.5 h-3.5" /> Save as Segment
+                <Users className="w-3.5 h-3.5" /> {t("Save as Segment")}
               </Button>
             )}
           </div>
@@ -1332,20 +1340,20 @@ export default function Profiles() {
             <div className="flex flex-wrap gap-1.5 mt-2">
               {isCustomer
                 ? <ActiveFilters inline filters={custFilters} labels={{
-                    reg_channel: "Channel", education_level: "Education", age_group: "Age", gender: "Gender",
-                    nationality: "Nationality", preferred_language: "Language", employment_status: "Employment",
-                    income_level: "Income", member_type: "Member type", preferred_channel: "Pref. channel",
-                    has_ga: "Web data", min_ga_sessions: "Min sessions", has_seminars: "Seminars",
-                    has_attributes: "Attributes", opt_in_email: "Email opt-in", opt_in_sms: "SMS opt-in",
-                    is_subscriber: "Subscriber", is_imported: "Source",
-                    has_transactions: "Purchases", min_orders: "Min orders", min_spend: "Min spend",
-                    ordered_within: "Ordered within (days)",
+                    reg_channel: t("Channel"), education_level: t("Education"), age_group: t("Age"), gender: t("Gender"),
+                    nationality: t("Nationality"), preferred_language: t("Language"), employment_status: t("Employment"),
+                    income_level: t("Income"), member_type: t("Member type"), preferred_channel: t("Pref. channel"),
+                    has_ga: t("Web data"), min_ga_sessions: t("Min sessions"), has_seminars: t("Seminars"),
+                    has_attributes: t("Attributes"), opt_in_email: t("Email opt-in"), opt_in_sms: t("SMS opt-in"),
+                    is_subscriber: t("Subscriber"), is_imported: t("Source"),
+                    has_transactions: t("Purchases"), min_orders: t("Min orders"), min_spend: t("Min spend"),
+                    ordered_within: t("Ordered within (days)"),
                   }} onRemove={(k, v) => setCustFilter(k, Array.isArray(custFilters[k]) ? custFilters[k].filter(x => x !== v) : "")} />
-                : <ActiveFilters inline filters={anonFilters} labels={{ source: "Source", medium: "Medium", has_form_complete: "Form completed" }} onRemove={(k, v) => setAnonFilter(k, Array.isArray(anonFilters[k]) ? anonFilters[k].filter(x => x !== v) : "")} />
+                : <ActiveFilters inline filters={anonFilters} labels={{ source: t("Source"), medium: t("Medium"), has_form_complete: t("Form completed") }} onRemove={(k, v) => setAnonFilter(k, Array.isArray(anonFilters[k]) ? anonFilters[k].filter(x => x !== v) : "")} />
               }
               {Object.entries(attrFilters).filter(([, v]) => v).map(([aid, vid]) => (
                 <span key={aid} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                  {attrLabel(aid, vid) || "Attribute"}
+                  {attrLabel(aid, vid) || t("Attribute")}
                   <button onClick={() => setAttrFilter(aid, "")} className="hover:text-foreground text-muted-foreground ml-0.5">
                     <X className="w-3 h-3" />
                   </button>
@@ -1365,9 +1373,9 @@ export default function Profiles() {
         ) : profiles.length === 0 ? (
           <div className="border border-dashed border-border rounded-lg p-12 text-center">
             {isCustomer ? <UserCheck className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" /> : <Ghost className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />}
-            <p className="text-sm font-medium mb-1">No profiles found</p>
+            <p className="text-sm font-medium mb-1">{t("No profiles found")}</p>
             <p className="text-xs text-muted-foreground">
-              {isCustomer ? "Try adjusting your filters." : "No anonymous visitors matched the current filters."}
+              {isCustomer ? t("Try adjusting your filters.") : t("No anonymous visitors matched the current filters.")}
             </p>
           </div>
         ) : groupedProfiles ? (
@@ -1389,15 +1397,15 @@ export default function Profiles() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
             <span className="text-xs text-muted-foreground">
-              Showing {((page - 1) * LIMIT) + 1}–{Math.min(page * LIMIT, total)} of {total.toLocaleString()}
+              {t("Showing")} {((page - 1) * LIMIT) + 1}–{Math.min(page * LIMIT, total)} {t("of")} {total.toLocaleString()}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" className="h-8 gap-1" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
-                <ChevronLeft className="w-3.5 h-3.5" /> Prev
+                <ChevronLeft className="w-3.5 h-3.5" /> {t("Prev")}
               </Button>
-              <span className="text-xs text-muted-foreground">Page {page} of {totalPages}</span>
+              <span className="text-xs text-muted-foreground">{t("Page")} {page} {t("of")} {totalPages}</span>
               <Button variant="outline" size="sm" className="h-8 gap-1" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
-                Next <ChevronRight className="w-3.5 h-3.5" />
+                {t("Next")} <ChevronRight className="w-3.5 h-3.5" />
               </Button>
             </div>
           </div>
@@ -1413,21 +1421,21 @@ export default function Profiles() {
       <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-heading">Save as Segment</DialogTitle>
+            <DialogTitle className="font-heading">{t("Save as Segment")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <div>
-              <Label className="text-xs">Segment Name</Label>
+              <Label className="text-xs">{t("Segment Name")}</Label>
               <Input
                 value={segmentName}
                 onChange={e => setSegmentName(e.target.value)}
-                placeholder={isCustomer ? "e.g. Email Opted-in Web Visitors" : "e.g. High-Intent Anonymous Visitors"}
+                placeholder={isCustomer ? t("e.g. Email Opted-in Web Visitors") : t("e.g. High-Intent Anonymous Visitors")}
                 className="mt-1"
                 autoFocus
               />
             </div>
             <div>
-              <Label className="text-xs">Description</Label>
+              <Label className="text-xs">{t("Description")}</Label>
               <Textarea
                 value={segmentDesc}
                 onChange={e => setSegmentDesc(e.target.value)}
@@ -1435,7 +1443,7 @@ export default function Profiles() {
               />
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Applied criteria</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{t("Applied criteria")}</p>
               <div className="flex flex-wrap gap-1.5">
                 {[...criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)), ...attrChips].map((chip, i) => (
                   <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/60 border border-border text-muted-foreground">{chip}</span>
@@ -1443,7 +1451,7 @@ export default function Profiles() {
               </div>
               {total > 0 && (
                 <p className="text-[11px] text-muted-foreground mt-2">
-                  Estimated size: <strong className="text-foreground">{total.toLocaleString()} profiles</strong> matching current filters
+                  {t("Estimated size:")} <strong className="text-foreground">{total.toLocaleString()} {t("profiles")}</strong> {t("matching current filters")}
                 </p>
               )}
             </div>
@@ -1452,7 +1460,7 @@ export default function Profiles() {
               disabled={!segmentName.trim() || saveSegmentMutation.isPending}
               onClick={handleSaveSegment}
             >
-              {saveSegmentMutation.isPending ? "Saving…" : "Create Segment"}
+              {saveSegmentMutation.isPending ? t("Saving…") : t("Create Segment")}
             </Button>
           </div>
         </DialogContent>

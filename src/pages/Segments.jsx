@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { Link } from "react-router-dom";
+import { usePreferences } from "@/lib/PreferencesContext";
 
 
 const TABS = [
@@ -27,14 +28,9 @@ const TABS = [
 
 const EMPTY = { name: "", description: "", estimated_size: "", status: "draft", segment_type: "customer", daily_refresh: false, time_period: "30" };
 
-const GROUPS = [
-  { key: "active", label: "Active", filter: s => s.status === "active" },
-  { key: "inactive", label: "Draft", filter: s => s.status === "draft" || !s.status },
-  { key: "archived", label: "Archived", filter: s => s.status === "archived" },
-];
-
 // Single-select criteria row (booleans / thresholds with a small fixed option set).
 function CriteriaRow({ label, value, onChange, opts }) {
+  const { t } = usePreferences();
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-muted-foreground w-28 flex-shrink-0">{label}</span>
@@ -43,7 +39,7 @@ function CriteriaRow({ label, value, onChange, opts }) {
         onChange={e => onChange(e.target.value)}
         className="flex-1 h-7 px-2 text-xs bg-background border border-input rounded-md text-foreground"
       >
-        <option value="">Any</option>
+        <option value="">{t("Any")}</option>
         {opts.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
     </div>
@@ -52,6 +48,7 @@ function CriteriaRow({ label, value, onChange, opts }) {
 
 // Free-entry numeric criteria row - the user types any number (threshold / days).
 function NumberCriteriaRow({ label, value, onChange, placeholder = "Any", min = 0 }) {
+  const { t } = usePreferences();
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-muted-foreground w-28 flex-shrink-0">{label}</span>
@@ -61,7 +58,7 @@ function NumberCriteriaRow({ label, value, onChange, placeholder = "Any", min = 
         min={min}
         value={value}
         onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={t(placeholder)}
         className="flex-1 h-7 px-2 text-xs bg-background border border-input rounded-md text-foreground outline-none focus:ring-1 focus:ring-ring"
       />
     </div>
@@ -72,6 +69,7 @@ function NumberCriteriaRow({ label, value, onChange, placeholder = "Any", min = 
 // Stored as the existing min_<field> / max_<field> keys so the resolver and any
 // saved segments keep working - the operator is derived from which bounds are set.
 function RangeCriteriaRow({ label, field, criteria, setCrit, placeholder = "Any" }) {
+  const { t } = usePreferences();
   const minKey = `min_${field}`, maxKey = `max_${field}`;
   const min = criteria[minKey] ?? "";
   const max = criteria[maxKey] ?? "";
@@ -96,16 +94,16 @@ function RangeCriteriaRow({ label, field, criteria, setCrit, placeholder = "Any"
           className="h-7 px-1.5 text-xs bg-background border border-input rounded-md text-foreground flex-shrink-0">
           <option value="gte">≥</option>
           <option value="lte">≤</option>
-          <option value="between">between</option>
+          <option value="between">{t("between")}</option>
         </select>
         {(op === "gte" || op === "between") && (
           <input type="number" inputMode="numeric" min={0} value={min} onChange={e => setMin(e.target.value)}
-            placeholder={op === "between" ? "min" : placeholder} className={numCls} />
+            placeholder={op === "between" ? t("min") : t(placeholder)} className={numCls} />
         )}
         {op === "between" && <span className="text-[11px] text-muted-foreground flex-shrink-0">–</span>}
         {(op === "lte" || op === "between") && (
           <input type="number" inputMode="numeric" min={0} value={max} onChange={e => setMax(e.target.value)}
-            placeholder={op === "between" ? "max" : placeholder} className={numCls} />
+            placeholder={op === "between" ? t("max") : t(placeholder)} className={numCls} />
         )}
       </div>
     </div>
@@ -136,10 +134,11 @@ function CriteriaGroup({ title, activeCount = 0, children }) {
 
 // Searchable multi-select criteria row for value-list fields (match any of the picks).
 function MultiCriteriaRow({ label, value, onChange, opts }) {
+  const { t } = usePreferences();
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-muted-foreground w-28 flex-shrink-0">{label}</span>
-      <MultiSelect className="flex-1 pl-3" value={value} onChange={onChange} options={opts} placeholder="Any" />
+      <MultiSelect className="flex-1 pl-3" value={value} onChange={onChange} options={opts} placeholder={t("Any")} />
     </div>
   );
 }
@@ -219,6 +218,7 @@ function criteriaToChips(criteria) {
 }
 
 function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, submitLabel = "Save", segmentType = "customer" }) {
+  const { t } = usePreferences();
   const isCustomer = segmentType === "customer";
   const emptyCrit = isCustomer ? CUST_CRITERIA_EMPTY : ANON_CRITERIA_EMPTY;
 
@@ -304,15 +304,15 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
   return (
     <div className="space-y-4 mt-2">
       <div>
-        <Label className="text-xs">Segment Name</Label>
+        <Label className="text-xs">{t("Segment Name")}</Label>
         <Input value={form.name} onChange={e => set("name", e.target.value)}
-          placeholder={isCustomer ? "High-Value Seminar Members" : "High-Intent Anonymous Visitors"}
+          placeholder={isCustomer ? t("High-Value Seminar Members") : t("High-Intent Anonymous Visitors")}
           className="mt-1" />
       </div>
       <div>
-        <Label className="text-xs">Description</Label>
+        <Label className="text-xs">{t("Description")}</Label>
         <Textarea value={form.description} onChange={e => set("description", e.target.value)}
-          placeholder="Describe who this segment targets and why..." className="mt-1" rows={2} />
+          placeholder={t("Describe who this segment targets and why...")} className="mt-1" rows={2} />
       </div>
 
       {/* Profile-based criteria builder */}
@@ -324,9 +324,9 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
         >
           <span className="flex items-center gap-2">
             <SlidersHorizontal className="w-3.5 h-3.5 text-muted-foreground" />
-            Profile criteria
+            {t("Profile criteria")}
             {activeCriteria.length > 0 && (
-              <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{activeCriteria.length} active</Badge>
+              <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{activeCriteria.length} {t("active")}</Badge>
             )}
           </span>
           <span className="text-muted-foreground">{showCriteria ? "▲" : "▼"}</span>
@@ -336,68 +336,68 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
           <div className="px-3 pb-3 pt-2 border-t border-border space-y-3">
             {isCustomer ? (
               <>
-                <CriteriaGroup title="Demographics" activeCount={countActive(["reg_channel","age_group","gender","nationality","education_level","employment_status","income_level","member_type","preferred_language"])}>
-                  <MultiCriteriaRow label="Reg. channel"  value={criteria.reg_channel}       onChange={v => setCrit("reg_channel", v)}       opts={custFilters?.reg_channels || []} />
-                  <MultiCriteriaRow label="Age group"     value={criteria.age_group}          onChange={v => setCrit("age_group", v)}          opts={custFilters?.age_groups || []} />
-                  <MultiCriteriaRow label="Gender"        value={criteria.gender}             onChange={v => setCrit("gender", v)}             opts={custFilters?.genders || []} />
-                  <MultiCriteriaRow label="Nationality"   value={criteria.nationality}        onChange={v => setCrit("nationality", v)}        opts={custFilters?.nationalities || []} />
-                  <MultiCriteriaRow label="Education"     value={criteria.education_level}    onChange={v => setCrit("education_level", v)}    opts={custFilters?.education_levels || []} />
-                  <MultiCriteriaRow label="Employment"    value={criteria.employment_status}  onChange={v => setCrit("employment_status", v)}  opts={custFilters?.employment_statuses || []} />
-                  <MultiCriteriaRow label="Income"        value={criteria.income_level}       onChange={v => setCrit("income_level", v)}       opts={custFilters?.income_levels || []} />
-                  <MultiCriteriaRow label="Member type"   value={criteria.member_type}        onChange={v => setCrit("member_type", v)}        opts={custFilters?.member_types || []} />
-                  <MultiCriteriaRow label="Language"      value={criteria.preferred_language} onChange={v => setCrit("preferred_language", v)} opts={custFilters?.languages || []} />
+                <CriteriaGroup title={t("Demographics")} activeCount={countActive(["reg_channel","age_group","gender","nationality","education_level","employment_status","income_level","member_type","preferred_language"])}>
+                  <MultiCriteriaRow label={t("Reg. channel")}  value={criteria.reg_channel}       onChange={v => setCrit("reg_channel", v)}       opts={custFilters?.reg_channels || []} />
+                  <MultiCriteriaRow label={t("Age group")}     value={criteria.age_group}          onChange={v => setCrit("age_group", v)}          opts={custFilters?.age_groups || []} />
+                  <MultiCriteriaRow label={t("Gender")}        value={criteria.gender}             onChange={v => setCrit("gender", v)}             opts={custFilters?.genders || []} />
+                  <MultiCriteriaRow label={t("Nationality")}   value={criteria.nationality}        onChange={v => setCrit("nationality", v)}        opts={custFilters?.nationalities || []} />
+                  <MultiCriteriaRow label={t("Education")}     value={criteria.education_level}    onChange={v => setCrit("education_level", v)}    opts={custFilters?.education_levels || []} />
+                  <MultiCriteriaRow label={t("Employment")}    value={criteria.employment_status}  onChange={v => setCrit("employment_status", v)}  opts={custFilters?.employment_statuses || []} />
+                  <MultiCriteriaRow label={t("Income")}        value={criteria.income_level}       onChange={v => setCrit("income_level", v)}       opts={custFilters?.income_levels || []} />
+                  <MultiCriteriaRow label={t("Member type")}   value={criteria.member_type}        onChange={v => setCrit("member_type", v)}        opts={custFilters?.member_types || []} />
+                  <MultiCriteriaRow label={t("Language")}      value={criteria.preferred_language} onChange={v => setCrit("preferred_language", v)} opts={custFilters?.languages || []} />
                 </CriteriaGroup>
-                <CriteriaGroup title="Communication" activeCount={countActive(["is_opt_in_email","opt_in_sms","is_subscriber","preferred_channel"])}>
-                  <CriteriaRow label="Email opt-in"  value={criteria.is_opt_in_email}   onChange={v => setCrit("is_opt_in_email", v)}   opts={["true"]} />
-                  <CriteriaRow label="SMS opt-in"    value={criteria.opt_in_sms}         onChange={v => setCrit("opt_in_sms", v)}         opts={["true"]} />
-                  <CriteriaRow label="Subscriber"    value={criteria.is_subscriber}      onChange={v => setCrit("is_subscriber", v)}      opts={["true"]} />
-                  <MultiCriteriaRow label="Pref. channel" value={criteria.preferred_channel}  onChange={v => setCrit("preferred_channel", v)}  opts={custFilters?.preferred_channels || []} />
+                <CriteriaGroup title={t("Communication")} activeCount={countActive(["is_opt_in_email","opt_in_sms","is_subscriber","preferred_channel"])}>
+                  <CriteriaRow label={t("Email opt-in")}  value={criteria.is_opt_in_email}   onChange={v => setCrit("is_opt_in_email", v)}   opts={["true"]} />
+                  <CriteriaRow label={t("SMS opt-in")}    value={criteria.opt_in_sms}         onChange={v => setCrit("opt_in_sms", v)}         opts={["true"]} />
+                  <CriteriaRow label={t("Subscriber")}    value={criteria.is_subscriber}      onChange={v => setCrit("is_subscriber", v)}      opts={["true"]} />
+                  <MultiCriteriaRow label={t("Pref. channel")} value={criteria.preferred_channel}  onChange={v => setCrit("preferred_channel", v)}  opts={custFilters?.preferred_channels || []} />
                 </CriteriaGroup>
-                <CriteriaGroup title="Activity" activeCount={countActive(["has_ga_activity","has_seminars","has_attributes"]) + countRange(["ga_sessions"])}>
-                  <CriteriaRow label="Web activity"  value={criteria.has_ga_activity}   onChange={v => setCrit("has_ga_activity", v)}   opts={["true"]} />
-                  <RangeCriteriaRow label="GA sessions" field="ga_sessions" criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
-                  <CriteriaRow label="Seminars"      value={criteria.has_seminars}       onChange={v => setCrit("has_seminars", v)}       opts={["true"]} />
-                  <CriteriaRow label="Attributes"    value={criteria.has_attributes}     onChange={v => setCrit("has_attributes", v)}     opts={["true"]} />
+                <CriteriaGroup title={t("Activity")} activeCount={countActive(["has_ga_activity","has_seminars","has_attributes"]) + countRange(["ga_sessions"])}>
+                  <CriteriaRow label={t("Web activity")}  value={criteria.has_ga_activity}   onChange={v => setCrit("has_ga_activity", v)}   opts={["true"]} />
+                  <RangeCriteriaRow label={t("GA sessions")} field="ga_sessions" criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
+                  <CriteriaRow label={t("Seminars")}      value={criteria.has_seminars}       onChange={v => setCrit("has_seminars", v)}       opts={["true"]} />
+                  <CriteriaRow label={t("Attributes")}    value={criteria.has_attributes}     onChange={v => setCrit("has_attributes", v)}     opts={["true"]} />
                 </CriteriaGroup>
-                <CriteriaGroup title="Web Activity" activeCount={countActive(["source","medium","campaign","visited_within","has_form_complete"]) + countRange(["page_views","sessions","engagement"])}>
-                  <MultiCriteriaRow label="Source"          value={criteria.source}        onChange={v => setCrit("source", v)}        opts={custFilters?.sources || []} />
-                  <MultiCriteriaRow label="Medium"          value={criteria.medium}        onChange={v => setCrit("medium", v)}        opts={custFilters?.mediums || []} />
-                  <MultiCriteriaRow label="Campaign"        value={criteria.campaign}      onChange={v => setCrit("campaign", v)}      opts={custFilters?.campaigns || []} />
-                  <RangeCriteriaRow label="Page views" field="page_views" criteria={criteria} setCrit={setCrit} placeholder="e.g. 10" />
-                  <RangeCriteriaRow label="Visits"     field="sessions"   criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
-                  <RangeCriteriaRow label="Engagement" field="engagement" criteria={criteria} setCrit={setCrit} placeholder="e.g. 25" />
-                  <NumberCriteriaRow label="Visited within (days)" value={criteria.visited_within} onChange={v => setCrit("visited_within", v)} placeholder="e.g. 90" />
-                  <CriteriaRow label="Form completed"  value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
+                <CriteriaGroup title={t("Web Activity")} activeCount={countActive(["source","medium","campaign","visited_within","has_form_complete"]) + countRange(["page_views","sessions","engagement"])}>
+                  <MultiCriteriaRow label={t("Source")}          value={criteria.source}        onChange={v => setCrit("source", v)}        opts={custFilters?.sources || []} />
+                  <MultiCriteriaRow label={t("Medium")}          value={criteria.medium}        onChange={v => setCrit("medium", v)}        opts={custFilters?.mediums || []} />
+                  <MultiCriteriaRow label={t("Campaign")}        value={criteria.campaign}      onChange={v => setCrit("campaign", v)}      opts={custFilters?.campaigns || []} />
+                  <RangeCriteriaRow label={t("Page views")} field="page_views" criteria={criteria} setCrit={setCrit} placeholder="e.g. 10" />
+                  <RangeCriteriaRow label={t("Visits")}     field="sessions"   criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
+                  <RangeCriteriaRow label={t("Engagement")} field="engagement" criteria={criteria} setCrit={setCrit} placeholder="e.g. 25" />
+                  <NumberCriteriaRow label={t("Visited within (days)")} value={criteria.visited_within} onChange={v => setCrit("visited_within", v)} placeholder="e.g. 90" />
+                  <CriteriaRow label={t("Form completed")}  value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
                 </CriteriaGroup>
-                <CriteriaGroup title="Purchases" activeCount={countActive(["has_transactions","ordered_within"]) + countRange(["orders","spend"])}>
-                  <CriteriaRow label="Has purchases"  value={criteria.has_transactions} onChange={v => setCrit("has_transactions", v)} opts={["true"]} />
-                  <RangeCriteriaRow label="Orders" field="orders" criteria={criteria} setCrit={setCrit} placeholder="e.g. 2" />
-                  <RangeCriteriaRow label="Spend"  field="spend"  criteria={criteria} setCrit={setCrit} placeholder="e.g. 1000" />
-                  <NumberCriteriaRow label="Ordered within (days)" value={criteria.ordered_within} onChange={v => setCrit("ordered_within", v)} placeholder="e.g. 90" />
+                <CriteriaGroup title={t("Purchases")} activeCount={countActive(["has_transactions","ordered_within"]) + countRange(["orders","spend"])}>
+                  <CriteriaRow label={t("Has purchases")}  value={criteria.has_transactions} onChange={v => setCrit("has_transactions", v)} opts={["true"]} />
+                  <RangeCriteriaRow label={t("Orders")} field="orders" criteria={criteria} setCrit={setCrit} placeholder="e.g. 2" />
+                  <RangeCriteriaRow label={t("Spend")}  field="spend"  criteria={criteria} setCrit={setCrit} placeholder="e.g. 1000" />
+                  <NumberCriteriaRow label={t("Ordered within (days)")} value={criteria.ordered_within} onChange={v => setCrit("ordered_within", v)} placeholder="e.g. 90" />
                 </CriteriaGroup>
               </>
             ) : (
-              <CriteriaGroup title="Web Activity" activeCount={countActive(["source","medium","campaign","visited_within","has_form_complete"]) + countRange(["page_views","sessions","engagement"])}>
-                <MultiCriteriaRow label="Source"          value={criteria.source}           onChange={v => setCrit("source", v)}           opts={anonFilters?.sources || []} />
-                <MultiCriteriaRow label="Medium"          value={criteria.medium}           onChange={v => setCrit("medium", v)}           opts={anonFilters?.mediums || []} />
-                <MultiCriteriaRow label="Campaign"        value={criteria.campaign}         onChange={v => setCrit("campaign", v)}         opts={anonFilters?.campaigns || []} />
-                <RangeCriteriaRow label="Page views" field="page_views" criteria={criteria} setCrit={setCrit} placeholder="e.g. 10" />
-                <RangeCriteriaRow label="Visits"     field="sessions"   criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
-                <RangeCriteriaRow label="Engagement" field="engagement" criteria={criteria} setCrit={setCrit} placeholder="e.g. 25" />
-                <NumberCriteriaRow label="Visited within (days)" value={criteria.visited_within} onChange={v => setCrit("visited_within", v)} placeholder="e.g. 30" />
-                <CriteriaRow label="Form completed"  value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
+              <CriteriaGroup title={t("Web Activity")} activeCount={countActive(["source","medium","campaign","visited_within","has_form_complete"]) + countRange(["page_views","sessions","engagement"])}>
+                <MultiCriteriaRow label={t("Source")}          value={criteria.source}           onChange={v => setCrit("source", v)}           opts={anonFilters?.sources || []} />
+                <MultiCriteriaRow label={t("Medium")}          value={criteria.medium}           onChange={v => setCrit("medium", v)}           opts={anonFilters?.mediums || []} />
+                <MultiCriteriaRow label={t("Campaign")}        value={criteria.campaign}         onChange={v => setCrit("campaign", v)}         opts={anonFilters?.campaigns || []} />
+                <RangeCriteriaRow label={t("Page views")} field="page_views" criteria={criteria} setCrit={setCrit} placeholder="e.g. 10" />
+                <RangeCriteriaRow label={t("Visits")}     field="sessions"   criteria={criteria} setCrit={setCrit} placeholder="e.g. 3" />
+                <RangeCriteriaRow label={t("Engagement")} field="engagement" criteria={criteria} setCrit={setCrit} placeholder="e.g. 25" />
+                <NumberCriteriaRow label={t("Visited within (days)")} value={criteria.visited_within} onChange={v => setCrit("visited_within", v)} placeholder="e.g. 30" />
+                <CriteriaRow label={t("Form completed")}  value={criteria.has_form_complete} onChange={v => setCrit("has_form_complete", v)} opts={["true"]} />
               </CriteriaGroup>
             )}
             {/* Rule-based attributes unlock detailed, reusable criteria here. */}
             <div className="rounded-md border border-dashed border-border bg-secondary/20 p-2.5">
               <p className="text-[11px] text-muted-foreground">
-                <strong className="text-foreground">Need more detailed targeting?</strong> Build a{" "}
-                <Link to="/attributes" className="underline hover:text-foreground">rule-based attribute</Link>{" "}
-                (combine sessions, purchases, pop-ups, even other segments into one label), then select its values here under <strong>Affinities &amp; Attributes</strong>.
+                <strong className="text-foreground">{t("Need more detailed targeting?")}</strong> {t("Build a")}{" "}
+                <Link to="/attributes" className="underline hover:text-foreground">{t("rule-based attribute")}</Link>{" "}
+                {t("(combine sessions, purchases, pop-ups, even other segments into one label), then select its values here under")} <strong>{t("Affinities & Attributes")}</strong>.
               </p>
             </div>
             {attrOptions.length > 0 && (
-              <CriteriaGroup title="Affinities & Attributes" activeCount={attrValueIds.length}>
+              <CriteriaGroup title={t("Affinities & Attributes")} activeCount={attrValueIds.length}>
                 {attrOptions.map(a => {
                   const aIds = a.values.map(v => v.id);
                   const selected = attrValueIds.filter(id => aIds.includes(id));
@@ -426,33 +426,33 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label className="text-xs">Time Period</Label>
+          <Label className="text-xs">{t("Time Period")}</Label>
           <Select value={form.time_period || "30"} onValueChange={v => set("time_period", v)}>
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="7">Last 7 days</SelectItem>
-              <SelectItem value="14">Last 14 days</SelectItem>
-              <SelectItem value="30">Last 30 days</SelectItem>
-              <SelectItem value="60">Last 60 days</SelectItem>
-              <SelectItem value="90">Last 90 days</SelectItem>
+              <SelectItem value="7">{t("Last 7 days")}</SelectItem>
+              <SelectItem value="14">{t("Last 14 days")}</SelectItem>
+              <SelectItem value="30">{t("Last 30 days")}</SelectItem>
+              <SelectItem value="60">{t("Last 60 days")}</SelectItem>
+              <SelectItem value="90">{t("Last 90 days")}</SelectItem>
               {isCustomer && (
                 <>
-                  <SelectItem value="180">Last 6 months</SelectItem>
-                  <SelectItem value="365">Last 1 year</SelectItem>
-                  <SelectItem value="all">Overall</SelectItem>
+                  <SelectItem value="180">{t("Last 6 months")}</SelectItem>
+                  <SelectItem value="365">{t("Last 1 year")}</SelectItem>
+                  <SelectItem value="all">{t("Overall")}</SelectItem>
                 </>
               )}
             </SelectContent>
           </Select>
         </div>
         <div>
-          <Label className="text-xs">Status</Label>
+          <Label className="text-xs">{t("Status")}</Label>
           <Select value={form.status || "draft"} onValueChange={v => set("status", v)}>
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="archived">Archived</SelectItem>
+              <SelectItem value="draft">{t("Draft")}</SelectItem>
+              <SelectItem value="active">{t("Active")}</SelectItem>
+              <SelectItem value="archived">{t("Archived")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -462,10 +462,10 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <RefreshCw className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-            <p className="text-xs font-medium">Daily Refresh</p>
+            <p className="text-xs font-medium">{t("Daily Refresh")}</p>
           </div>
           <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-            Re-evaluate this segment's members every night at 2 AM. pop ups using this segment will automatically receive the updated targeting list.
+            {t("Re-evaluate this segment's members every night at 2 AM. pop ups using this segment will automatically receive the updated targeting list.")}
           </p>
         </div>
         <Switch
@@ -476,7 +476,7 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
       </div>
 
       <Button onClick={handleSubmit} disabled={!form.name || isPending} className="w-full">
-        {submitLabel}
+        {t(submitLabel)}
       </Button>
     </div>
   );
@@ -484,6 +484,7 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
 
 // Live member count for a segment card (anonymous segments have no stored size).
 function SegmentSize({ segmentId }) {
+  const { t } = usePreferences();
   const { data } = useQuery({
     queryKey: ["segment-size", segmentId],
     queryFn: () => appClient.segments.size(segmentId),
@@ -491,11 +492,12 @@ function SegmentSize({ segmentId }) {
   });
   if (data?.count == null) return null;
   return (
-    <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {data.count.toLocaleString()} users</span>
+    <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {data.count.toLocaleString()} {t("users")}</span>
   );
 }
 
 export default function Segments() {
+  const { t } = usePreferences();
   const [activeTab, setActiveTab] = useState("customer");
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -546,23 +548,27 @@ export default function Segments() {
     return sortDir === "asc" ? cmp : -cmp;
   });
   const GROUP_DIMS = {
-    status: GROUPS,
-    refresh: [
-      { key: "on",  label: "Daily refresh on", filter: s => !!s.daily_refresh },
-      { key: "off", label: "Manual",           filter: s => !s.daily_refresh },
+    status: [
+      { key: "active",   label: t("Active"),   filter: s => s.status === "active" },
+      { key: "inactive", label: t("Draft"),    filter: s => s.status === "draft" || !s.status },
+      { key: "archived", label: t("Archived"), filter: s => s.status === "archived" },
     ],
-    none: [{ key: "all", label: "All", filter: () => true }],
+    refresh: [
+      { key: "on",  label: t("Daily refresh on"), filter: s => !!s.daily_refresh },
+      { key: "off", label: t("Manual"),           filter: s => !s.daily_refresh },
+    ],
+    none: [{ key: "all", label: t("All"), filter: () => true }],
   };
-  const gridGroups = (GROUP_DIMS[groupBy] || GROUPS).filter(g => sortedSegments.some(g.filter));
-  const SEG_SORT_OPTS  = [["created", "Created"], ["name", "Name"], ["size", "Estimated size"], ["updated", "Last updated"]];
-  const SEG_GROUP_OPTS = [["status", "Status"], ["refresh", "Daily refresh"], ["none", "None"]];
+  const gridGroups = (GROUP_DIMS[groupBy] || GROUP_DIMS.status).filter(g => sortedSegments.some(g.filter));
+  const SEG_SORT_OPTS  = [["created", t("Created")], ["name", t("Name")], ["size", t("Estimated size")], ["updated", t("Last updated")]];
+  const SEG_GROUP_OPTS = [["status", t("Status")], ["refresh", t("Daily refresh")], ["none", t("None")]];
 
   const createMutation = useMutation({
     mutationFn: (data) => appClient.entities.Segment.create({ ...data, segment_type: activeTab }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["segments"] });
       setCreateOpen(false);
-      toast.success("Segment created");
+      toast.success(t("Segment created"));
     },
   });
 
@@ -571,7 +577,7 @@ export default function Segments() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["segments"] });
       setEditTarget(null);
-      toast.success("Segment updated");
+      toast.success(t("Segment updated"));
     },
   });
 
@@ -585,7 +591,7 @@ export default function Segments() {
       (s.segment_type || "customer") === activeTab &&
       s.name.toLowerCase() === data.name.trim().toLowerCase()
     );
-    if (nameTaken) { toast.error("A segment with this name already exists."); return; }
+    if (nameTaken) { toast.error(t("A segment with this name already exists.")); return; }
     createMutation.mutate(data);
   };
 
@@ -595,7 +601,7 @@ export default function Segments() {
       (s.segment_type || "customer") === (editTarget.segment_type || activeTab) &&
       s.name.toLowerCase() === data.name.trim().toLowerCase()
     );
-    if (nameTaken) { toast.error("A segment with this name already exists."); return; }
+    if (nameTaken) { toast.error(t("A segment with this name already exists.")); return; }
     updateMutation.mutate({ id: editTarget.id, data });
   };
 
@@ -610,11 +616,11 @@ export default function Segments() {
 
   const handleExport = async (seg) => {
     try {
-      toast.info("Resolving segment profiles…");
+      toast.info(t("Resolving segment profiles…"));
       await appClient.segments.exportCsv(seg.id, seg.name);
-      toast.success("Segment exported to CSV");
+      toast.success(t("Segment exported to CSV"));
     } catch (e) {
-      toast.error(e.message || "Export failed");
+      toast.error(e.message || t("Export failed"));
     }
   };
 
@@ -623,12 +629,12 @@ export default function Segments() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Segments</h1>
-            <p className="text-sm text-muted-foreground mt-1">Create audience segments for targeted campaigns.</p>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Segments")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{t("Create audience segments for targeted campaigns.")}</p>
           </div>
           {activeTab !== "analytics" && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}>
-              <Plus className="w-3.5 h-3.5" /> New Segment
+              <Plus className="w-3.5 h-3.5" /> {t("New Segment")}
             </Button>
           )}
         </div>
@@ -649,7 +655,7 @@ export default function Segments() {
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                {t(tab.label)}
                 {count > 0 && <span className="text-[10px] text-muted-foreground">{count}</span>}
               </button>
             );
@@ -668,41 +674,41 @@ export default function Segments() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search segments..."
+                placeholder={t("Search segments...")}
                 className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
             <div ref={filterRef} className="relative">
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-                <Filter className="w-3.5 h-3.5" /> Filters
+                <Filter className="w-3.5 h-3.5" /> {t("Filters")}
                 {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
               </Button>
               {showFilters && (
                 <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-72">
                   <div className="flex items-center justify-between mb-3">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                     {hasActiveFilters && (
-                      <button onClick={() => setFilters({ status: [], is_used: "" })} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                      <button onClick={() => setFilters({ status: [], is_used: "" })} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                      <p className="text-[10px] text-muted-foreground mb-1">{t("Status")}</p>
                       <MultiSelect value={filters.status} onChange={v => setFilter("status", v)}
-                        options={["draft","active","archived"]} placeholder="All" />
+                        options={["draft","active","archived"]} placeholder={t("All")} />
                     </div>
                     <div>
-                      <p className="text-[10px] text-muted-foreground mb-1">Usage</p>
+                      <p className="text-[10px] text-muted-foreground mb-1">{t("Usage")}</p>
                       <select value={filters.is_used} onChange={e => setFilter("is_used", e.target.value)}
                         className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                        <option value="">All</option>
-                        <option value="yes">In use (locked)</option>
-                        <option value="no">Not in use</option>
+                        <option value="">{t("All")}</option>
+                        <option value="yes">{t("In use (locked)")}</option>
+                        <option value="no">{t("Not in use")}</option>
                       </select>
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Sort by")}</p>
                     <div className="flex items-center gap-2">
                       <select value={sortBy} onChange={e => setSortBy(e.target.value)}
                         className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
@@ -710,12 +716,12 @@ export default function Segments() {
                       </select>
                       <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
                         className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
-                        {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                        {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                       </button>
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Group by")}</p>
                     <select value={groupBy} onChange={e => setGroupBy(e.target.value)}
                       className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
                       {SEG_GROUP_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -729,7 +735,7 @@ export default function Segments() {
             <div className="flex flex-wrap gap-1.5 mt-2">
               {filters.status.map(v => (
                 <span key={v} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                  Status: <strong>{v}</strong>
+                  {t("Status")}: <strong>{v}</strong>
                   <button onClick={() => setFilter("status", filters.status.filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">
                     <X className="w-3 h-3" />
                   </button>
@@ -737,7 +743,7 @@ export default function Segments() {
               ))}
               {filters.is_used && (
                 <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                  Usage: <strong>{filters.is_used === "yes" ? "In use" : "Not in use"}</strong>
+                  {t("Usage")}: <strong>{filters.is_used === "yes" ? t("In use") : t("Not in use")}</strong>
                   <button onClick={() => setFilter("is_used", "")} className="hover:text-foreground text-muted-foreground ml-0.5">
                     <X className="w-3 h-3" />
                   </button>
@@ -751,9 +757,9 @@ export default function Segments() {
       ) : segments.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg p-12 text-center">
           <Users className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm font-medium mb-1">No {activeTab === "customer" ? "Customer" : "Anonymous"} segments yet</p>
-          <p className="text-xs text-muted-foreground mb-4">{TABS.find(t => t.key === activeTab)?.description}</p>
-          <Link to="/"><Button variant="outline" size="sm" className="gap-1.5">Ask AI to create a segment</Button></Link>
+          <p className="text-sm font-medium mb-1">{t("No")} {activeTab === "customer" ? t("Customer") : t("Anonymous")} {t("segments yet")}</p>
+          <p className="text-xs text-muted-foreground mb-4">{t(TABS.find(tab => tab.key === activeTab)?.description)}</p>
+          <Link to="/"><Button variant="outline" size="sm" className="gap-1.5">{t("Ask AI to create a segment")}</Button></Link>
         </div>
       ) : (
         <div className="space-y-8">
@@ -771,13 +777,13 @@ export default function Segments() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <h3 className="text-sm font-semibold">{seg.name}</h3>
                             {(!seg.status || seg.status === "draft") ? (
-                              <Badge className="text-[10px] bg-yellow-500/10 text-yellow-700 border border-yellow-500/40">draft</Badge>
+                              <Badge className="text-[10px] bg-yellow-500/10 text-yellow-700 border border-yellow-500/40">{t("draft")}</Badge>
                             ) : (
                               <Badge variant="secondary" className="text-[10px]">{seg.status}</Badge>
                             )}
                             {seg.is_used && (
                               <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground border border-border rounded px-1.5 py-0.5">
-                                <Lock className="w-2.5 h-2.5" /> locked
+                                <Lock className="w-2.5 h-2.5" /> {t("locked")}
                               </span>
                             )}
                           </div>
@@ -792,23 +798,23 @@ export default function Segments() {
                           <DropdownMenuContent align="end">
                             {!seg.is_used && seg.status !== "archived" && (
                               <DropdownMenuItem onClick={() => setEditTarget(seg)}>
-                                <Pencil className="w-3.5 h-3.5 mr-2" /> Edit
+                                <Pencil className="w-3.5 h-3.5 mr-2" /> {t("Edit")}
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuItem onClick={() => handleClone(seg)}>
-                              <Copy className="w-3.5 h-3.5 mr-2" /> Clone
+                              <Copy className="w-3.5 h-3.5 mr-2" /> {t("Clone")}
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleExport(seg)}>
-                              <Download className="w-3.5 h-3.5 mr-2" /> Export CSV
+                              <Download className="w-3.5 h-3.5 mr-2" /> {t("Export CSV")}
                             </DropdownMenuItem>
                             {seg.status !== "archived" && (
                               <DropdownMenuItem onClick={() => handleArchive(seg)}>
-                                <Archive className="w-3.5 h-3.5 mr-2" /> Archive
+                                <Archive className="w-3.5 h-3.5 mr-2" /> {t("Archive")}
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => deleteMutation.mutate(seg.id)} className="text-destructive">
-                              <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete
+                              <Trash2 className="w-3.5 h-3.5 mr-2" /> {t("Delete")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -817,22 +823,22 @@ export default function Segments() {
                         {(seg.segment_type || "customer") === "anonymous_profile" ? (
                           <SegmentSize segmentId={seg.id} />
                         ) : seg.estimated_size && (
-                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {seg.estimated_size.toLocaleString()} users</span>
+                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {seg.estimated_size.toLocaleString()} {t("users")}</span>
                         )}
                         {seg.daily_refresh && (
                           <span className="flex items-center gap-1 text-foreground/70">
                             <RefreshCw className="w-3 h-3" />
                             {seg.last_refreshed
-                              ? `Refreshed ${formatDistanceToNow(new Date(seg.last_refreshed), { addSuffix: true })}`
-                              : "Daily refresh on"}
+                              ? `${t("Refreshed")} ${formatDistanceToNow(new Date(seg.last_refreshed), { addSuffix: true })}`
+                              : t("Daily refresh on")}
                           </span>
                         )}
                         {seg.tags?.length > 0 && seg.tags.map(tag => (
                           <Badge key={tag} variant="secondary" className="text-[10px] h-5">{tag}</Badge>
                         ))}
-                        <span>Created {format(new Date(seg.created_date), "MMM d, yyyy")}</span>
+                        <span>{t("Created")} {format(new Date(seg.created_date), "MMM d, yyyy")}</span>
                         {seg.updated_date && seg.updated_date !== seg.created_date && (
-                          <span>Updated {format(new Date(seg.updated_date), "MMM d, yyyy")}</span>
+                          <span>{t("Updated")} {format(new Date(seg.updated_date), "MMM d, yyyy")}</span>
                         )}
                       </div>
                     </div>
@@ -851,7 +857,7 @@ export default function Segments() {
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
-          <DialogHeader><DialogTitle className="font-heading">Create {activeTab === "customer" ? "Customer" : "Anonymous"} Segment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">{t("Create")} {activeTab === "customer" ? t("Customer") : t("Anonymous")} {t("Segment")}</DialogTitle></DialogHeader>
           <div className="overflow-y-auto flex-1 pr-1">
             <SegmentForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel="Create Segment" segmentType={activeTab} />
           </div>
@@ -861,7 +867,7 @@ export default function Segments() {
       {/* Edit Dialog */}
       <Dialog open={!!editTarget} onOpenChange={v => !v && setEditTarget(null)}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
-          <DialogHeader><DialogTitle className="font-heading">Edit Segment</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">{t("Edit Segment")}</DialogTitle></DialogHeader>
           {editTarget && (
             <div className="overflow-y-auto flex-1 pr-1">
               <SegmentForm

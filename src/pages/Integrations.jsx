@@ -23,6 +23,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { usePreferences } from "@/lib/PreferencesContext";
 
 const GA_EDITOR_EMAILS = [
   import.meta.env.VITE_GA_EDITOR_EMAIL_1 || "capsuite.ga@gmail.com",
@@ -321,6 +322,7 @@ const AUDIT_ICON = {
 
 // ── Instruction step renderer ──────────────────────────────────────────────────
 function InstructionStep({ step, index }) {
+  const { t } = usePreferences();
   const [copied, setCopied] = useState(null);
   const copyText = (text, i) => {
     navigator.clipboard.writeText(text);
@@ -333,12 +335,12 @@ function InstructionStep({ step, index }) {
         <span className="flex items-center justify-center w-5 h-5 rounded-full bg-foreground text-background text-[10px] font-bold flex-shrink-0">
           {index + 1}
         </span>
-        <p className="text-xs font-semibold">{step.title}</p>
+        <p className="text-xs font-semibold">{t(step.title)}</p>
       </div>
       <div className="ml-7 space-y-1.5">
         {step.steps.map((s, si) => {
           if (typeof s === "string")
-            return <p key={si} className="text-xs text-muted-foreground leading-relaxed">{s}</p>;
+            return <p key={si} className="text-xs text-muted-foreground leading-relaxed">{t(s)}</p>;
           if (s.type === "emails")
             return (
               <div key={si} className="space-y-1.5 mt-1.5">
@@ -359,7 +361,7 @@ function InstructionStep({ step, index }) {
                   <thead>
                     <tr className="bg-secondary/60">
                       {s.headers.map((h, hi) => (
-                        <th key={hi} className="px-2.5 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                        <th key={hi} className="px-2.5 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap">{t(h)}</th>
                       ))}
                     </tr>
                   </thead>
@@ -382,6 +384,7 @@ function InstructionStep({ step, index }) {
 
 // ── WordPress Plugin Install panel ────────────────────────────────────────────
 function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
+  const { t } = usePreferences();
   const [copied, setCopied] = useState(false);
 
   const { data: activityData } = useQuery({
@@ -403,24 +406,24 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
 
   // Activity status indicator
   let activityDot = "bg-muted-foreground/40";
-  let activityLabel = "No activity captured yet";
-  let activitySub = "Install the plugin and visit a page on your site to verify it's working.";
+  let activityLabel = t("No activity captured yet");
+  let activitySub = t("Install the plugin and visit a page on your site to verify it's working.");
 
   if (hasActivity && lastActivity?.CreatedAt) {
     const ms = Date.now() - new Date(lastActivity.CreatedAt).getTime();
     const hours = ms / 36e5;
     if (hours < 1) {
       activityDot = "bg-green-500";
-      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
-      activitySub = "Plugin is active and sending data.";
+      activityLabel = t("Last activity") + " " + formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true });
+      activitySub = t("Plugin is active and sending data.");
     } else if (hours < 24) {
       activityDot = "bg-yellow-400";
-      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
-      activitySub = "Plugin is installed. No recent activity in the last hour.";
+      activityLabel = t("Last activity") + " " + formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true });
+      activitySub = t("Plugin is installed. No recent activity in the last hour.");
     } else {
       activityDot = "bg-muted-foreground/40";
-      activityLabel = `Last activity ${formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true })}`;
-      activitySub = "No recent activity - check if the plugin is still active on your WordPress site.";
+      activityLabel = t("Last activity") + " " + formatDistanceToNow(new Date(lastActivity.CreatedAt), { addSuffix: true });
+      activitySub = t("No recent activity - check if the plugin is still active on your WordPress site.");
     }
   }
 
@@ -428,11 +431,11 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
     <div className="space-y-4 pt-1">
       {/* Company ID */}
       <div className="space-y-1.5">
-        <p className="text-xs font-medium">Your Company ID</p>
-        <p className="text-[11px] text-muted-foreground">Paste this into the plugin settings in your WordPress admin.</p>
+        <p className="text-xs font-medium">{t("Your Company ID")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("Paste this into the plugin settings in your WordPress admin.")}</p>
         <div className="flex items-center gap-2 bg-secondary rounded-md px-2.5 py-2">
           <span className="text-[11px] font-mono flex-1 truncate text-foreground">
-            {companyId || "Loading…"}
+            {companyId || t("Loading…")}
           </span>
           <button
             onClick={copyCompanyId}
@@ -455,13 +458,13 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
 
       {/* Download */}
       <div className="rounded-lg border border-border p-3 bg-secondary/20 space-y-2">
-        <p className="text-xs text-muted-foreground">Download the plugin and install it on your WordPress site following the steps in the <strong>How to Connect</strong> tab.</p>
+        <p className="text-xs text-muted-foreground">{t("Download the plugin and install it on your WordPress site following the steps in the")} <strong>{t("How to Connect")}</strong> {t("tab.")}</p>
         <a
           href={appClient.dataIntegrations.downloadWordPressPlugin()}
           download="capsuite-cdp-popup.zip"
         >
           <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs">
-            <Download className="w-3 h-3" /> Download Plugin (.zip)
+            <Download className="w-3 h-3" /> {t("Download Plugin (.zip)")}
           </Button>
         </a>
       </div>
@@ -469,11 +472,11 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
       {!isConnected ? (
         <Button size="sm" className="w-full h-8 text-xs" onClick={() => onConnect({})} disabled={isLoading}>
           {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-          Mark as Installed
+          {t("Mark as Installed")}
         </Button>
       ) : (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CheckCircle2 className="w-3.5 h-3.5" /> Plugin marked as installed
+          <CheckCircle2 className="w-3.5 h-3.5" /> {t("Plugin marked as installed")}
         </div>
       )}
     </div>
@@ -482,6 +485,7 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
 
 // ── Connection form ────────────────────────────────────────────────────────────
 function ConnectionForm({ integration, record, onConnect, isLoading }) {
+  const { t } = usePreferences();
   const [form, setForm] = useState(() =>
     Object.fromEntries((integration.fields || []).map((f) => [
       f.key,
@@ -510,26 +514,26 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
       <form onSubmit={(e) => { e.preventDefault(); onConnect(form); }} className="space-y-4 pt-1">
         {integration.fields.map((field) => (
           <div key={field.key} className="space-y-1">
-            <Label className="text-xs">{field.label}</Label>
+            <Label className="text-xs">{t(field.label)}</Label>
             <Input
               value={form[field.key]}
               onChange={(e) => setForm((p) => ({ ...p, [field.key]: e.target.value }))}
-              placeholder={field.placeholder}
+              placeholder={t(field.placeholder)}
               disabled={isLoading}
               className="h-9 text-sm"
             />
-            {field.hint && <p className="text-[11px] text-muted-foreground">{field.hint}</p>}
+            {field.hint && <p className="text-[11px] text-muted-foreground">{t(field.hint)}</p>}
           </div>
         ))}
         {record?.is_connection_error && (
           <div className="flex items-start gap-1.5 rounded-md border border-border bg-secondary/20 px-3 py-2">
             <AlertCircle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-muted-foreground">{record.connection_error || "Connection failed."}</p>
+            <p className="text-xs text-muted-foreground">{record.connection_error || t("Connection failed.")}</p>
           </div>
         )}
         <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5" disabled={isLoading || !form[integration.fields[0]?.key]}>
           {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
-          Install CDP App
+          {t("Install CDP App")}
         </Button>
       </form>
     );
@@ -539,13 +543,13 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
     <form onSubmit={(e) => { e.preventDefault(); onConnect(form); }} className="space-y-4 pt-1">
       {integration.fields.map((field) => (
         <div key={field.key} className="space-y-1">
-          <Label className="text-xs">{field.label}</Label>
+          <Label className="text-xs">{t(field.label)}</Label>
           <div className="relative">
             <Input
               type={field.type === "password" && !showPasswords[field.key] ? "password" : "text"}
               value={form[field.key]}
               onChange={(e) => setForm((p) => ({ ...p, [field.key]: e.target.value }))}
-              placeholder={isConnected ? "••••••••••••" : field.placeholder}
+              placeholder={isConnected ? "••••••••••••" : t(field.placeholder)}
               disabled={isConnected || isLoading}
               className={cn("h-9 text-sm", field.type === "password" && "pr-9")}
             />
@@ -560,20 +564,20 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
               </button>
             )}
           </div>
-          {field.hint && <p className="text-[11px] text-muted-foreground">{field.hint}</p>}
+          {field.hint && <p className="text-[11px] text-muted-foreground">{t(field.hint)}</p>}
         </div>
       ))}
 
       {record?.is_connection_error && (
         <div className="flex items-start gap-1.5 rounded-md border border-border bg-secondary/20 px-3 py-2">
           <AlertCircle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-muted-foreground">{record.connection_error || "Check your credentials and try again."}</p>
+          <p className="text-xs text-muted-foreground">{record.connection_error || t("Check your credentials and try again.")}</p>
         </div>
       )}
 
       {isConnected ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CheckCircle2 className="w-3.5 h-3.5" /> Connected- disconnect to update credentials.
+          <CheckCircle2 className="w-3.5 h-3.5" /> {t("Connected- disconnect to update credentials.")}
         </div>
       ) : (
         <Button
@@ -581,7 +585,7 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
           disabled={isLoading || integration.fields.some((f) => !form[f.key]?.trim())}
         >
           {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
-          {record?.is_connection_error ? "Retry Connection" : "Connect"}
+          {record?.is_connection_error ? t("Retry Connection") : t("Connect")}
         </Button>
       )}
     </form>
@@ -590,6 +594,7 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
 
 // ── Sync job list ──────────────────────────────────────────────────────────────
 function SyncJobList({ type }) {
+  const { t } = usePreferences();
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ["sync-jobs", type],
     queryFn: () => appClient.dataIntegrations.syncJobs(type),
@@ -597,7 +602,7 @@ function SyncJobList({ type }) {
   });
 
   if (isLoading) return <div className="py-8 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>;
-  if (!jobs.length) return <p className="text-xs text-muted-foreground py-4">No sync jobs yet.</p>;
+  if (!jobs.length) return <p className="text-xs text-muted-foreground py-4">{t("No sync jobs yet.")}</p>;
 
   return (
     <div className="space-y-2">
@@ -622,7 +627,7 @@ function SyncJobList({ type }) {
                   : "-"}
               </span>
               {job.records_synced != null && (
-                <span className="text-[11px] text-muted-foreground">{job.records_synced.toLocaleString()} records</span>
+                <span className="text-[11px] text-muted-foreground">{job.records_synced.toLocaleString()} {t("records")}</span>
               )}
             </div>
             {job.error_message && (
@@ -637,6 +642,7 @@ function SyncJobList({ type }) {
 
 // ── Audit log list ─────────────────────────────────────────────────────────────
 function AuditLogList({ type }) {
+  const { t } = usePreferences();
   const { data: events = [], isLoading } = useQuery({
     queryKey: ["audit-log", type],
     queryFn: () => appClient.dataIntegrations.auditLog(type),
@@ -644,7 +650,7 @@ function AuditLogList({ type }) {
   });
 
   if (isLoading) return <div className="py-8 flex justify-center"><Loader2 className="w-4 h-4 animate-spin text-muted-foreground" /></div>;
-  if (!events.length) return <p className="text-xs text-muted-foreground py-4">No activity yet.</p>;
+  if (!events.length) return <p className="text-xs text-muted-foreground py-4">{t("No activity yet.")}</p>;
 
   return (
     <div className="space-y-1.5">
@@ -673,6 +679,7 @@ function AuditLogList({ type }) {
 
 // ── Integration card ───────────────────────────────────────────────────────────
 function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDisconnect, isRetesting }) {
+  const { t } = usePreferences();
   const status = integration.comingSoon ? "disconnected" : getStatus(record);
   const isConnected = ["connected", "synced", "syncing", "sync_failed"].includes(status);
 
@@ -706,14 +713,14 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <p className="font-semibold text-sm leading-snug">{integration.name}</p>
-              <span className="text-[10px] text-muted-foreground">{integration.category}</span>
+              <span className="text-[10px] text-muted-foreground">{t(integration.category)}</span>
               {integration.comingSoon && (
                 <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">
-                  Coming Soon
+                  {t("Coming Soon")}
                 </span>
               )}
             </div>
-            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{integration.description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{t(integration.description)}</p>
           </div>
         </div>
 
@@ -724,11 +731,11 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
               ? <Loader2 className="w-1.5 h-1.5 animate-spin flex-shrink-0" />
               : <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", STATUS_DOT[status])} />
             }
-            {STATUS_LABEL[status]}
+            {t(STATUS_LABEL[status])}
           </Badge>
           {configLines.map(({ label, value }) => value && (
             <div key={label} className="flex items-baseline gap-1.5 min-w-0">
-              <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wide flex-shrink-0">{label}</span>
+              <span className="text-[10px] text-muted-foreground/60 font-medium uppercase tracking-wide flex-shrink-0">{t(label)}</span>
               <span className="text-[11px] text-muted-foreground font-mono truncate">{value}</span>
             </div>
           ))}
@@ -738,18 +745,18 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
         {isConnected && (
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
             {record?.last_connected_date && (
-              <span>Connected {format(new Date(record.last_connected_date), "MMM d, yyyy")}</span>
+              <span>{t("Connected")} {format(new Date(record.last_connected_date), "MMM d, yyyy")}</span>
             )}
             {record?.last_tested_date && (
               <span className="flex items-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-                Tested {formatDistanceToNow(new Date(record.last_tested_date), { addSuffix: true })}
+                {t("Tested")} {formatDistanceToNow(new Date(record.last_tested_date), { addSuffix: true })}
               </span>
             )}
             {record?.last_synced_date && (
               <span className="flex items-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-muted-foreground/30" />
-                Synced {format(new Date(record.last_synced_date), "MMM d, yyyy")}
+                {t("Synced")} {format(new Date(record.last_synced_date), "MMM d, yyyy")}
               </span>
             )}
           </div>
@@ -760,17 +767,17 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
       {/* Action bar - single row, no wrapping */}
       <div className="px-3 py-2 border-t border-border bg-secondary/20 flex items-center gap-0.5 min-w-0">
         {integration.comingSoon ? (
-          <span className="text-[11px] text-muted-foreground px-1">Available soon</span>
+          <span className="text-[11px] text-muted-foreground px-1">{t("Available soon")}</span>
         ) : (
           <>
             {!isConnected && status !== "error" && (
               <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSetup}>
-                <ChevronRight className="w-3 h-3" /> Set Up
+                <ChevronRight className="w-3 h-3" /> {t("Set Up")}
               </Button>
             )}
             {status === "error" && (
               <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSetup}>
-                <AlertCircle className="w-3 h-3" /> Fix
+                <AlertCircle className="w-3 h-3" /> {t("Fix")}
               </Button>
             )}
             {(isConnected || status === "error") && (
@@ -781,22 +788,30 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
                 disabled={isRetesting || status === "syncing"}
               >
                 {isRetesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
-                {isRetesting ? "Testing…" : "Re-test"}
+                {isRetesting ? t("Testing…") : t("Re-test")}
               </Button>
             )}
-            {isConnected && integration.syncable && status !== "syncing" && (
+            {integration.syncable && (status === "connected" || status === "sync_failed") && (
               <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSync}>
-                <RefreshCw className="w-3 h-3" /> Sync Data
+                <RefreshCw className="w-3 h-3" /> {t("Sync Data")}
               </Button>
+            )}
+            {integration.syncable && status === "synced" && (
+              <span
+                className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 flex-shrink-0"
+                title={t("This integration now syncs automatically once a day. Manual sync is no longer needed.")}
+              >
+                <RefreshCw className="w-3 h-3" /> {t("Synced daily")}
+              </span>
             )}
             {isConnected && status === "syncing" && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 flex-shrink-0">
-                <Loader2 className="w-3 h-3 animate-spin" /> Syncing…
+                <Loader2 className="w-3 h-3 animate-spin" /> {t("Syncing…")}
               </span>
             )}
             {(isConnected || status === "error") && (
               <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground ml-auto flex-shrink-0" onClick={onDisconnect}>
-                <Unplug className="w-3 h-3" /> Disconnect
+                <Unplug className="w-3 h-3" /> {t("Disconnect")}
               </Button>
             )}
           </>
@@ -808,6 +823,7 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Integrations() {
+  const { t } = usePreferences();
   const [search, setSearch]                 = useState("");
   const [activeIntegration, setActiveIntegration] = useState(null);
   const [sheetTab, setSheetTab]             = useState("instructions");
@@ -844,9 +860,9 @@ export default function Integrations() {
       invalidate();
       if (data?.oauthUrl) { window.location.href = data.oauthUrl; return; }
       if (data?.is_connection_error) {
-        toast.error(`Connection failed: ${data.connection_error || "Unknown error"}`);
+        toast.error(t("Connection failed:") + " " + (data.connection_error || t("Unknown error")));
       } else {
-        toast.success("Integration connected.");
+        toast.success(t("Integration connected."));
         setActiveIntegration(null);
       }
     },
@@ -861,9 +877,9 @@ export default function Integrations() {
     onSuccess: (data) => {
       invalidate();
       if (data?.is_connection_error) {
-        toast.error(`Connection check failed: ${data.connection_error || "Unknown error"}`);
+        toast.error(t("Connection check failed:") + " " + (data.connection_error || t("Unknown error")));
       } else {
-        toast.success("Connection verified successfully.");
+        toast.success(t("Connection verified successfully."));
       }
     },
     onError: (e) => toast.error(e.message),
@@ -875,9 +891,9 @@ export default function Integrations() {
     onSuccess: (data) => {
       invalidate();
       if (data?.alreadyQueued) {
-        toast.info("A sync is already in progress.");
+        toast.info(t("A sync is already in progress."));
       } else {
-        toast.success("Sync queued. Data will refresh shortly.");
+        toast.success(t("Sync queued. Data will refresh shortly."));
       }
     },
     onError: (e) => toast.error(e.message),
@@ -888,7 +904,7 @@ export default function Integrations() {
     mutationFn: (type) => appClient.dataIntegrations.disconnect(type),
     onSuccess: () => {
       invalidate();
-      toast.success("Integration disconnected.");
+      toast.success(t("Integration disconnected."));
       setDisconnectTarget(null);
     },
     onError: (e) => toast.error(e.message),
@@ -945,9 +961,9 @@ export default function Integrations() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Integrations</h1>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Integrations")}</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Connect your data sources to sync customer behaviour, orders, and web analytics.
+              {t("Connect your data sources to sync customer behaviour, orders, and web analytics.")}
             </p>
           </div>
         </div>
@@ -961,7 +977,7 @@ export default function Integrations() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search integrations..."
+              placeholder={t("Search integrations...")}
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
@@ -976,7 +992,7 @@ export default function Integrations() {
         )}
 
         {!isLoading && filtered.length === 0 && (
-          <p className="text-sm text-muted-foreground py-8">No integrations match your search.</p>
+          <p className="text-sm text-muted-foreground py-8">{t("No integrations match your search.")}</p>
         )}
 
         {!isLoading && filtered.length > 0 && (
@@ -985,7 +1001,7 @@ export default function Integrations() {
             {myConnections.length > 0 && (
               <div>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                  My Connections
+                  {t("My Connections")}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {myConnections.map((integration) => (
@@ -1008,7 +1024,7 @@ export default function Integrations() {
             {availableConnections.length > 0 && (
               <div>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                  Available Connections
+                  {t("Available Connections")}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {availableConnections.map((integration) => (
@@ -1031,7 +1047,7 @@ export default function Integrations() {
             {comingSoonConnections.length > 0 && (
               <div>
                 <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                  Coming Soon
+                  {t("Coming Soon")}
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {comingSoonConnections.map((integration) => (
@@ -1065,20 +1081,20 @@ export default function Integrations() {
                   </div>
                   <div>
                     <SheetTitle className="text-sm font-semibold leading-tight">{activeIntegration.name}</SheetTitle>
-                    <SheetDescription className="text-xs mt-0.5">{activeIntegration.description}</SheetDescription>
+                    <SheetDescription className="text-xs mt-0.5">{t(activeIntegration.description)}</SheetDescription>
                   </div>
                 </div>
               </div>
 
               <Tabs value={sheetTab} onValueChange={setSheetTab} className="flex flex-col flex-1 overflow-hidden">
                 <TabsList className="mx-6 mt-4 w-auto self-start flex-shrink-0">
-                  <TabsTrigger value="instructions" className="text-xs">How to Connect</TabsTrigger>
+                  <TabsTrigger value="instructions" className="text-xs">{t("How to Connect")}</TabsTrigger>
                   <TabsTrigger value="connect" className="text-xs">
-                    {activeIntegration.isPlugin ? "Install" : "Connect"}
+                    {activeIntegration.isPlugin ? t("Install") : t("Connect")}
                   </TabsTrigger>
                   {(activeRecord?.is_connected || activeRecord?.is_connection_error) && (
                     <TabsTrigger value="history" className="text-xs gap-1">
-                      <History className="w-3 h-3" /> History
+                      <History className="w-3 h-3" /> {t("History")}
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -1091,7 +1107,7 @@ export default function Integrations() {
                     variant="outline" size="sm" className="w-full h-8 text-xs gap-1.5 mt-2"
                     onClick={() => setSheetTab("connect")}
                   >
-                    Continue to {activeIntegration.isPlugin ? "Install" : "Connect"}
+                    {t("Continue to")} {activeIntegration.isPlugin ? t("Install") : t("Connect")}
                     <ChevronRight className="w-3 h-3" />
                   </Button>
                 </TabsContent>
@@ -1110,28 +1126,39 @@ export default function Integrations() {
                     {activeIntegration.syncable && (
                       <>
                         <div className="flex items-center justify-between mb-3">
-                          <p className="text-xs font-medium">Sync Jobs</p>
-                          <Button
-                            variant="outline" size="sm" className="h-7 text-xs gap-1.5"
-                            onClick={() => syncMutation.mutate(activeIntegration.id)}
-                            disabled={syncMutation.isPending || getStatus(activeRecord) === "syncing"}
-                          >
-                            {syncMutation.isPending
-                              ? <Loader2 className="w-3 h-3 animate-spin" />
-                              : <RefreshCw className="w-3 h-3" />
-                            }
-                            Sync Data
-                          </Button>
+                          <p className="text-xs font-medium">{t("Sync Jobs")}</p>
+                          {getStatus(activeRecord) === "synced" ? (
+                            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <RefreshCw className="w-3 h-3" /> {t("Synced daily")}
+                            </span>
+                          ) : (
+                            <Button
+                              variant="outline" size="sm" className="h-7 text-xs gap-1.5"
+                              onClick={() => syncMutation.mutate(activeIntegration.id)}
+                              disabled={syncMutation.isPending || getStatus(activeRecord) === "syncing"}
+                            >
+                              {syncMutation.isPending
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <RefreshCw className="w-3 h-3" />
+                              }
+                              {t("Sync Data")}
+                            </Button>
+                          )}
                         </div>
+                        {getStatus(activeRecord) === "synced" && (
+                          <p className="text-[11px] text-muted-foreground mb-3 -mt-1">
+                            {t("This integration syncs automatically once a day — no need to sync manually anymore.")}
+                          </p>
+                        )}
                         <SyncJobList type={activeIntegration.id} />
                         <div className="mt-6 mb-3">
-                          <p className="text-xs font-medium">Activity Log</p>
+                          <p className="text-xs font-medium">{t("Activity Log")}</p>
                         </div>
                       </>
                     )}
                     {!activeIntegration.syncable && (
                       <div className="mb-3">
-                        <p className="text-xs font-medium">Activity Log</p>
+                        <p className="text-xs font-medium">{t("Activity Log")}</p>
                       </div>
                     )}
                     <AuditLogList type={activeIntegration.id} />
@@ -1147,16 +1174,16 @@ export default function Integrations() {
       <AlertDialog open={!!disconnectTarget} onOpenChange={(open) => !open && setDisconnectTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Disconnect {disconnectIntegration?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Disconnect")} {disconnectIntegration?.name}?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 {disconnectIntegration?.disconnectWarning && (
                   <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 space-y-1">
-                    <p className="text-xs font-medium">Please be aware:</p>
+                    <p className="text-xs font-medium">{t("Please be aware:")}</p>
                     <ul className="text-xs text-muted-foreground space-y-0.5 list-disc list-inside">
-                      <li>{disconnectIntegration.disconnectWarning}</li>
-                      <li>Real-time data flow will stop immediately.</li>
-                      <li>This action cannot be undone.</li>
+                      <li>{t(disconnectIntegration.disconnectWarning)}</li>
+                      <li>{t("Real-time data flow will stop immediately.")}</li>
+                      <li>{t("This action cannot be undone.")}</li>
                     </ul>
                   </div>
                 )}
@@ -1164,14 +1191,14 @@ export default function Integrations() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => disconnectMutation.mutate(disconnectTarget)}
               className="bg-foreground text-background hover:bg-foreground/90"
               disabled={disconnectMutation.isPending}
             >
               {disconnectMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-              Disconnect
+              {t("Disconnect")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

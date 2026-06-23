@@ -355,8 +355,12 @@ export const appClient = {
     async importProfiles(file) {
       const fd = new FormData();
       fd.append("file", file);
+      // The import endpoint is company-scoped and requires x-company-id. We use a
+      // raw fetch here (not request()) for FormData, so set the header explicitly.
+      const headers = {};
+      if (_currentCompanyId) headers["x-company-id"] = _currentCompanyId;
       const res = await fetch(`${API_BASE}/profiles/import`, {
-        method: "POST", body: fd, credentials: "include",
+        method: "POST", body: fd, credentials: "include", headers,
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));

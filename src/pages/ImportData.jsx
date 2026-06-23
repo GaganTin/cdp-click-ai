@@ -12,6 +12,7 @@ import ProfileImportDialog from "@/components/import/ProfileImportDialog";
 import UTMImportDialog from "@/components/import/UTMImportDialog";
 import SuppressionImportDialog from "@/components/import/SuppressionImportDialog";
 import AttributeImportDialog, { exportAttributes } from "@/components/attributes/AttributeImportDialog";
+import { usePreferences } from "@/lib/PreferencesContext";
 
 // Central hub for every CSV/data import AND export in the app. Each source keeps
 // its own import/export entry point on its native page; this page just gathers
@@ -163,6 +164,7 @@ function rowsToCsv(rows, preferred = []) {
 
 // ── Card ────────────────────────────────────────────────────────────────────────
 function DataCard({ card, action }) {
+  const { t } = usePreferences();
   return (
     <div className="bg-background border border-border rounded-xl overflow-hidden transition-all hover:shadow-md hover:border-border/80 flex flex-col">
       <div className="p-4 flex flex-col gap-3 flex-1">
@@ -171,8 +173,8 @@ function DataCard({ card, action }) {
             <card.icon className="w-4 h-4 text-foreground" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm leading-snug">{card.title}</p>
-            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{card.desc}</p>
+            <p className="font-semibold text-sm leading-snug">{t(card.title)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{t(card.desc)}</p>
           </div>
         </div>
       </div>
@@ -182,9 +184,10 @@ function DataCard({ card, action }) {
 }
 
 function Section({ section, children }) {
+  const { t } = usePreferences();
   return (
     <div>
-      <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">{section.label}</h2>
+      <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">{t(section.label)}</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{children}</div>
     </div>
   );
@@ -199,6 +202,7 @@ export default function ImportData() {
   const [exportingKey, setExportingKey] = useState(null);
   const [segExportingId, setSegExportingId] = useState(null);
   const queryClient = useQueryClient();
+  const { t } = usePreferences();
 
   const { data: attributes = [] } = useQuery({
     queryKey: ["attributes"],
@@ -222,40 +226,40 @@ export default function ImportData() {
     try {
       if (card.kind === "export-attribute") {
         const subset = attributes.filter((a) => a.source === card.source);
-        if (!subset.length) { toast.error(`No ${card.title.toLowerCase()} to export.`); }
-        else { await exportAttributes(card.source, subset); toast.success(`Exported ${subset.length} ${card.title.toLowerCase()}`); }
+        if (!subset.length) { toast.error(`${t("No")} ${t(card.title).toLowerCase()} ${t("to export.")}`); }
+        else { await exportAttributes(card.source, subset); toast.success(`${t("Exported")} ${subset.length} ${t(card.title).toLowerCase()}`); }
       } else if (card.kind === "export-utm") {
-        if (!campaigns.length) { toast.error("No UTM links to export."); }
-        else { downloadCsv("utm-links.csv", rowsToCsv(campaigns, UTM_EXPORT_COLS)); toast.success(`Exported ${campaigns.length} UTM link${campaigns.length === 1 ? "" : "s"}`); }
+        if (!campaigns.length) { toast.error(t("No UTM links to export.")); }
+        else { downloadCsv("utm-links.csv", rowsToCsv(campaigns, UTM_EXPORT_COLS)); toast.success(`${t("Exported")} ${campaigns.length} ${campaigns.length === 1 ? t("UTM link") : t("UTM links")}`); }
       } else if (card.kind === "export-suppression") {
         const res = await appClient.edm.listSuppression();
         const list = Array.isArray(res) ? res : (res?.data || []);
-        if (!list.length) { toast.error("Suppression list is empty."); }
-        else { downloadCsv("email-suppression.csv", rowsToCsv(list, ["email", "reason", "added_at"])); toast.success(`Exported ${list.length} suppressed email${list.length === 1 ? "" : "s"}`); }
+        if (!list.length) { toast.error(t("Suppression list is empty.")); }
+        else { downloadCsv("email-suppression.csv", rowsToCsv(list, ["email", "reason", "added_at"])); toast.success(`${t("Exported")} ${list.length} ${list.length === 1 ? t("suppressed email") : t("suppressed emails")}`); }
       } else if (card.kind === "export-collected") {
         const res = await appClient.popup.exportEmailCollected();
         const list = res?.data || (Array.isArray(res) ? res : []);
-        if (!list.length) { toast.error("No collected emails to export."); }
-        else { downloadCsv("emails-collected.csv", rowsToCsv(list, ["email", "first_name", "last_name", "phone", "popup_name", "source_url", "status", "created_at"])); toast.success(`Exported ${list.length} collected email${list.length === 1 ? "" : "s"}`); }
+        if (!list.length) { toast.error(t("No collected emails to export.")); }
+        else { downloadCsv("emails-collected.csv", rowsToCsv(list, ["email", "first_name", "last_name", "phone", "popup_name", "source_url", "status", "created_at"])); toast.success(`${t("Exported")} ${list.length} ${list.length === 1 ? t("collected email") : t("collected emails")}`); }
       } else if (card.kind === "export-profiles") {
         const customer = card.profileType === "customer";
-        toast.info(`Fetching ${customer ? "customer" : "anonymous"} profiles…`);
+        toast.info(`${t("Fetching")} ${customer ? t("customer") : t("anonymous")} ${t("profiles…")}`);
         const rows = await fetchAllProfiles(card.profileType);
-        if (!rows.length) { toast.error(`No ${customer ? "customer" : "anonymous"} profiles to export.`); }
+        if (!rows.length) { toast.error(`${t("No")} ${customer ? t("customer") : t("anonymous")} ${t("profiles to export.")}`); }
         else {
           const preferred = customer
             ? ["member_id", "primary_email", "primary_phone", "eng_full_name", "display_name", "member_type", "member_join_date", "member_reg_channel", "gender", "age_group", "nationality"]
             : ["visitor_id", "first_seen", "last_seen", "sessions", "page_views", "events", "source", "medium", "country"];
           downloadCsv(`${customer ? "customer" : "anonymous"}-profiles.csv`, rowsToCsv(rows, preferred));
-          toast.success(`Exported ${rows.length.toLocaleString()} ${customer ? "customer" : "anonymous"} profile${rows.length === 1 ? "" : "s"}`);
+          toast.success(`${t("Exported")} ${rows.length.toLocaleString()} ${customer ? t("customer") : t("anonymous")} ${rows.length === 1 ? t("profile") : t("profiles")}`);
         }
       } else if (card.kind === "export-analytics") {
         const { rows, filename } = await loadAnalytics(card.dataset);
-        if (!rows.length) { toast.error("Nothing to export - this analytics table is empty."); }
-        else { downloadCsv(filename, rowsToCsv(rows, ANALYTICS_COLS[card.dataset] || [])); toast.success(`Exported ${rows.length.toLocaleString()} row${rows.length === 1 ? "" : "s"}`); }
+        if (!rows.length) { toast.error(t("Nothing to export - this analytics table is empty.")); }
+        else { downloadCsv(filename, rowsToCsv(rows, ANALYTICS_COLS[card.dataset] || [])); toast.success(`${t("Exported")} ${rows.length.toLocaleString()} ${rows.length === 1 ? t("row") : t("rows")}`); }
       }
     } catch (e) {
-      toast.error(e.message || "Export failed.");
+      toast.error(e.message || t("Export failed."));
     }
     setExportingKey(null);
   };
@@ -268,8 +272,9 @@ export default function ImportData() {
     let rows = [], page = 1, total = Infinity;
     while (rows.length < total) {
       const res = await fn({ page, limit: PAGE });
-      total = res?.total ?? rows.length + (res?.data?.length || 0);
-      const batch = res?.data || [];
+      // The profiles endpoints return { profiles, total, page, limit } - not { data }.
+      const batch = res?.profiles || [];
+      total = res?.total ?? rows.length + batch.length;
       if (!batch.length) break;
       rows = rows.concat(batch);
       page++;
@@ -307,11 +312,11 @@ export default function ImportData() {
   const exportSegment = async (seg) => {
     setSegExportingId(seg.id);
     try {
-      toast.info("Resolving segment profiles…");
+      toast.info(t("Resolving segment profiles…"));
       await appClient.segments.exportCsv(seg.id, seg.name);
-      toast.success(`Exported "${seg.name}"`);
+      toast.success(`${t("Exported")} "${seg.name}"`);
     } catch (e) {
-      toast.error(e.message || "Export failed");
+      toast.error(e.message || t("Export failed"));
     }
     setSegExportingId(null);
   };
@@ -331,23 +336,23 @@ export default function ImportData() {
       {/* Header */}
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="mb-5">
-          <h1 className="font-heading text-3xl font-semibold tracking-tight">Import / Export Data</h1>
+          <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Import / Export Data")}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Move data in and out of Click CDP from one place. Every import and export here is also available on its own page.
+            {t("Move data in and out of Click CDP from one place. Every import and export here is also available on its own page.")}
           </p>
         </div>
 
         {/* Tabs */}
         <div className="flex border-b border-border gap-6">
-          {TABS.map((t) => (
+          {TABS.map((tabItem) => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
-                tab === t.key ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                tab === tabItem.key ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <t.icon className="w-3.5 h-3.5" /> {t.label}
+              <tabItem.icon className="w-3.5 h-3.5" /> {t(tabItem.label)}
             </button>
           ))}
         </div>
@@ -366,7 +371,7 @@ export default function ImportData() {
                       className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground"
                       onClick={() => setActive(card)}
                     >
-                      <Upload className="w-3 h-3" /> Import
+                      <Upload className="w-3 h-3" /> {t("Import")}
                     </Button>
                   } />
                 ))}
@@ -388,7 +393,7 @@ export default function ImportData() {
                       {exportingKey === card.key
                         ? <Loader2 className="w-3 h-3 animate-spin" />
                         : <Download className="w-3 h-3" />}
-                      {card.kind === "segments" ? "Choose & Export" : "Export CSV"}
+                      {card.kind === "segments" ? t("Choose & Export") : t("Export CSV")}
                     </Button>
                   } />
                 ))}
@@ -415,16 +420,18 @@ export default function ImportData() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-heading">
-              Export {segExportType === "anonymous_profile" ? "an Anonymous" : "a Customer"} Segment
+              {segExportType === "anonymous_profile" ? t("Export an Anonymous Segment") : t("Export a Customer Segment")}
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground">
-            Download a segment's matching {segExportType === "anonymous_profile" ? "visitors" : "profiles"} as a CSV. Resolving a large segment may take a moment.
+            {segExportType === "anonymous_profile"
+              ? t("Download a segment's matching visitors as a CSV. Resolving a large segment may take a moment.")
+              : t("Download a segment's matching profiles as a CSV. Resolving a large segment may take a moment.")}
           </p>
           <div className="max-h-80 overflow-auto -mx-1 px-1 space-y-1.5 mt-1">
             {segExportSegments.length === 0 ? (
               <p className="text-sm text-muted-foreground py-6 text-center">
-                No {segExportType === "anonymous_profile" ? "anonymous" : "customer"} segments yet.
+                {segExportType === "anonymous_profile" ? t("No anonymous segments yet.") : t("No customer segments yet.")}
               </p>
             ) : (
               segExportSegments.map((seg) => (
@@ -441,7 +448,7 @@ export default function ImportData() {
                     {segExportingId === seg.id
                       ? <Loader2 className="w-3 h-3 animate-spin" />
                       : <Download className="w-3 h-3" />}
-                    Export
+                    {t("Export")}
                   </Button>
                 </div>
               ))

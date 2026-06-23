@@ -468,8 +468,8 @@ export function createCompanyRouter(pool) {
       );
 
       const { rows: [inv] } = await pool.query(
-        `INSERT INTO app.company_invitations (company_id, invited_by, email, role)
-         VALUES ($1, $2, $3, $4) RETURNING *`,
+        `INSERT INTO app.company_invitations (account_id, company_id, invited_by, email, role)
+         VALUES ((SELECT account_id FROM app.companies WHERE id = $1), $1, $2, $3, $4) RETURNING *`,
         [id, req.user.id, email.toLowerCase(), role]
       );
 

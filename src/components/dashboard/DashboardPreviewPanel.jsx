@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { parseChartConfig } from "@/lib/utils";
 import MiniChart from "./MiniChart";
 
 const TABS_KEY = "dashboard_tabs_v1";
@@ -192,8 +193,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {activeCharts.map(chart => {
-              let config = {};
-              try { config = JSON.parse(chart.chart_config); } catch {}
+              const config = parseChartConfig(chart.chart_config);
               const size = chartSizes[chart.id] || "medium";
               const sizeH = SIZE_OPTIONS.find(s => s.value === size)?.h || "h-52";
               const otherTabs = tabs.filter(t => t.id !== activeTab);

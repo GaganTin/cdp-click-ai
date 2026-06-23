@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { usePreferences } from "@/lib/PreferencesContext";
 import PinnedChartCard from "../components/dashboard/PinnedChartCard";
 
 const TABS_STORAGE_KEY = "dashboard_tabs_v1";
@@ -25,6 +26,7 @@ const SIZE_CLASSES = {
 };
 
 export default function Dashboard() {
+  const { t } = usePreferences();
   const queryClient = useQueryClient();
 
   const [tabs, setTabs] = useState(() => {
@@ -127,14 +129,14 @@ export default function Dashboard() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Dashboard</h1>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Dashboard")}</h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Pin charts from the AI Analyst to build your dashboard.
+              {t("Pin charts from the AI Analyst to build your dashboard.")}
             </p>
           </div>
           <Link to="/">
             <Button size="sm" className="gap-1.5 h-9">
-              <MessageSquare className="w-3.5 h-3.5" /> AI Analyst
+              <MessageSquare className="w-3.5 h-3.5" /> {t("AI Analyst")}
             </Button>
           </Link>
         </div>
@@ -166,7 +168,7 @@ export default function Dashboard() {
                   {activeTab === tab.id && (
                     <span
                       className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
-                      title="Rename tab"
+                      title={t("Rename tab")}
                       onClick={e => { e.stopPropagation(); startEdit(tab); }}
                     >
                       <Pencil className="w-2.5 h-2.5" />
@@ -188,7 +190,7 @@ export default function Dashboard() {
             onClick={addTab}
             className="flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors"
           >
-            <Plus className="w-3.5 h-3.5" /> New tab
+            <Plus className="w-3.5 h-3.5" /> {t("New tab")}
           </button>
         </div>
       </div>
@@ -198,7 +200,7 @@ export default function Dashboard() {
         {/* Tab management - assign charts to tab */}
         {!isAllTab && pinnedCharts.length > 0 && (
           <div className="mb-4 p-3 bg-secondary/40 rounded-lg">
-            <p className="text-xs font-medium mb-2 text-muted-foreground">Add charts to this tab:</p>
+            <p className="text-xs font-medium mb-2 text-muted-foreground">{t("Add charts to this tab:")}</p>
             <div className="flex flex-wrap gap-2">
               {pinnedCharts.map(c => {
                 const assigned = (tabAssignments[activeTab] || []).includes(c.id);
@@ -229,17 +231,17 @@ export default function Dashboard() {
             <GripVertical className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />
             {pinnedCharts.length === 0 ? (
               <>
-                <p className="text-sm font-medium mb-1">No pinned charts yet</p>
-                <p className="text-xs text-muted-foreground mb-4">Ask the AI Analyst to generate charts, then pin them here.</p>
+                <p className="text-sm font-medium mb-1">{t("No pinned charts yet")}</p>
+                <p className="text-xs text-muted-foreground mb-4">{t("Ask the AI Analyst to generate charts, then pin them here.")}</p>
                 <Link to="/"
                   className="inline-flex items-center gap-2 text-xs font-medium px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-opacity">
-                  <MessageSquare className="w-3.5 h-3.5" /> Open AI Analyst
+                  <MessageSquare className="w-3.5 h-3.5" /> {t("Open AI Analyst")}
                 </Link>
               </>
             ) : (
               <>
-                <p className="text-sm font-medium mb-1">No charts in this tab</p>
-                <p className="text-xs text-muted-foreground">Use the selector above to add charts to this tab.</p>
+                <p className="text-sm font-medium mb-1">{t("No charts in this tab")}</p>
+                <p className="text-xs text-muted-foreground">{t("Use the selector above to add charts to this tab.")}</p>
               </>
             )}
           </div>
@@ -264,22 +266,22 @@ export default function Dashboard() {
 
         {/* Quick Actions */}
         <div className="mt-10 mb-6">
-          <h2 className="font-heading text-xl font-semibold tracking-tight mb-4">Quick Actions</h2>
+          <h2 className="font-heading text-xl font-semibold tracking-tight mb-4">{t("Quick Actions")}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Link to="/" className="group border border-border rounded-lg p-5 hover:border-foreground/20 transition-colors">
               <MessageSquare className="w-5 h-5 mb-3 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <p className="text-sm font-medium">Ask the Analyst</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Query data, generate insights</p>
+              <p className="text-sm font-medium">{t("Ask the Analyst")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("Query data, generate insights")}</p>
             </Link>
             <Link to="/campaigns" className="group border border-border rounded-lg p-5 hover:border-foreground/20 transition-colors">
               <Target className="w-5 h-5 mb-3 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <p className="text-sm font-medium">Create UTM Link</p>
-              <p className="text-xs text-muted-foreground mt-0.5">UTM links, targeting</p>
+              <p className="text-sm font-medium">{t("Create UTM Link")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("UTM links, targeting")}</p>
             </Link>
             <Link to="/segments" className="group border border-border rounded-lg p-5 hover:border-foreground/20 transition-colors">
               <Users className="w-5 h-5 mb-3 text-muted-foreground group-hover:text-foreground transition-colors" />
-              <p className="text-sm font-medium">Build Segment</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Audience segmentation</p>
+              <p className="text-sm font-medium">{t("Build Segment")}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{t("Audience segmentation")}</p>
             </Link>
           </div>
         </div>

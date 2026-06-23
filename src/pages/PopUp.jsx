@@ -40,6 +40,7 @@ import {
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
+import { usePreferences } from "@/lib/PreferencesContext";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -190,6 +191,7 @@ const DEFAULT_FORM = {
 };
 
 function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, initialContent = "", initialTemplateId = "" }) {
+  const { t } = usePreferences();
   const uid = useId();
   const isEdit = !!initial;
 
@@ -240,7 +242,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
   // template, or flag it as a one-off "custom" design not created from a template.
   useEffect(() => {
     if (selectedTemplateId || !form.content.trim()) return;
-    const match = allTemplates.find(t => (t.content || "") === form.content);
+    const match = allTemplates.find(tpl => (tpl.content || "") === form.content);
     setSelectedTemplateId(match ? match.id : "__custom__");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customTemplates]);
@@ -248,14 +250,14 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
   const handleSelectTemplate = (id) => {
     if (id === "__custom__") return;
     setSelectedTemplateId(id);
-    const t = allTemplates.find(x => x.id === id);
-    if (t) set("content", t.content || "");
+    const tpl = allTemplates.find(x => x.id === id);
+    if (tpl) set("content", tpl.content || "");
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!form.name.trim())    { toast.error("Name is required"); return; }
-    if (!form.content.trim()) { toast.error("Please select a template"); return; }
+    if (!form.name.trim())    { toast.error(t("Name is required")); return; }
+    if (!form.content.trim()) { toast.error(t("Please select a template")); return; }
 
     onSave({
       name: form.name.trim(),
@@ -281,36 +283,36 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Pop Up" : "New Pop Up"}</DialogTitle>
+          <DialogTitle>{isEdit ? t("Edit Pop Up") : t("New Pop Up")}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6 pt-2">
 
           {/* ── Basic Info ── */}
           <section className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic Info</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("Basic Info")}</h3>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-name`} className="text-xs">Name <span className="text-destructive">*</span></Label>
+                <Label htmlFor={`${uid}-name`} className="text-xs">{t("Name")} <span className="text-destructive">*</span></Label>
                 <Input
                   id={`${uid}-name`}
                   value={form.name}
                   onChange={e => set("name", e.target.value)}
-                  placeholder="Summer Sale Banner"
+                  placeholder={t("Summer Sale Banner")}
                   className="h-9 text-sm"
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-type`} className="text-xs">Type</Label>
+                <Label htmlFor={`${uid}-type`} className="text-xs">{t("Type")}</Label>
                 <Select value={form.interaction_type} onValueChange={v => set("interaction_type", v)}>
                   <SelectTrigger id={`${uid}-type`} className="h-9 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {INTERACTION_TYPES.map(t => (
-                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                    {INTERACTION_TYPES.map(it => (
+                      <SelectItem key={it.value} value={it.value}>{t(it.label)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -319,11 +321,11 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-start`} className="text-xs">Start Date</Label>
+                <Label htmlFor={`${uid}-start`} className="text-xs">{t("Start Date")}</Label>
                 <Input id={`${uid}-start`} type="datetime-local" value={form.start_time} onChange={e => set("start_time", e.target.value)} className="h-9 text-sm" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-end`} className="text-xs">End Date</Label>
+                <Label htmlFor={`${uid}-end`} className="text-xs">{t("End Date")}</Label>
                 <Input id={`${uid}-end`} type="datetime-local" value={form.end_time} onChange={e => set("end_time", e.target.value)} className="h-9 text-sm" />
               </div>
             </div>
@@ -332,29 +334,29 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-1.5">
                   <Switch id={`${uid}-active`} checked={form.is_active} onCheckedChange={v => set("is_active", v)} />
-                  <Label htmlFor={`${uid}-active`} className="text-sm cursor-pointer">Active</Label>
+                  <Label htmlFor={`${uid}-active`} className="text-sm cursor-pointer">{t("Active")}</Label>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button type="button" aria-label="What does Active do?" className="text-muted-foreground hover:text-foreground transition-colors">
+                      <button type="button" aria-label={t("What does Active do?")} className="text-muted-foreground hover:text-foreground transition-colors">
                         <Info className="w-3.5 h-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-[260px] leading-relaxed">
-                      When on, this pop-up is live and served to visitors by the WordPress plugin. When off, it stays a draft and is never shown.
+                      {t("When on, this pop-up is live and served to visitors by the WordPress plugin. When off, it stays a draft and is never shown.")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Switch id={`${uid}-default`} checked={form.is_default} onCheckedChange={v => set("is_default", v)} />
-                  <Label htmlFor={`${uid}-default`} className="text-sm cursor-pointer">Default pop-up</Label>
+                  <Label htmlFor={`${uid}-default`} className="text-sm cursor-pointer">{t("Default pop-up")}</Label>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button type="button" aria-label="What does Default pop-up do?" className="text-muted-foreground hover:text-foreground transition-colors">
+                      <button type="button" aria-label={t("What does Default pop-up do?")} className="text-muted-foreground hover:text-foreground transition-colors">
                         <Info className="w-3.5 h-3.5" />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-[260px] leading-relaxed">
-                      The fallback shown to visitors who don't match any segment-targeted pop-up, so everyone sees something. Typically only one pop-up is the default.
+                      {t("The fallback shown to visitors who don't match any segment-targeted pop-up, so everyone sees something. Typically only one pop-up is the default.")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -364,40 +366,40 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 
           {/* ── Template ── */}
           <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Template</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("Template")}</h3>
             <div className="space-y-1.5">
-              <Label className="text-xs">Pop-Up Template <span className="text-destructive">*</span></Label>
+              <Label className="text-xs">{t("Pop-Up Template")} <span className="text-destructive">*</span></Label>
               <Select value={selectedTemplateId || ""} onValueChange={handleSelectTemplate}>
                 <SelectTrigger className="h-9 text-sm">
-                  <SelectValue placeholder="Select a template" />
+                  <SelectValue placeholder={t("Select a template")} />
                 </SelectTrigger>
                 <SelectContent>
                   {selectedTemplateId === "__custom__" && (
-                    <SelectItem value="__custom__" disabled>Custom design (current)</SelectItem>
+                    <SelectItem value="__custom__" disabled>{t("Custom design (current)")}</SelectItem>
                   )}
                   {allTemplates.length === 0 && (
-                    <SelectItem value="_empty" disabled>No templates available</SelectItem>
+                    <SelectItem value="_empty" disabled>{t("No templates available")}</SelectItem>
                   )}
-                  {allTemplates.map(t => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}{t.category ? ` · ${t.category}` : ""}
+                  {allTemplates.map(tpl => (
+                    <SelectItem key={tpl.id} value={tpl.id}>
+                      {tpl.name}{tpl.category ? ` · ${tpl.category}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                Choose a design for this pop-up. To create or edit a template's design, go to the <strong>Templates</strong> tab.
+                {t("Choose a design for this pop-up. To create or edit a template's design, go to the")} <strong>{t("Templates")}</strong> {t("tab.")}
               </p>
             </div>
           </section>
 
           {/* ── Targeting Rules ── */}
           <section className="space-y-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Targeting</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t("Targeting")}</h3>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-visit`} className="text-xs">Visit Threshold</Label>
+                <Label htmlFor={`${uid}-visit`} className="text-xs">{t("Visit Threshold")}</Label>
                 <Input
                   id={`${uid}-visit`}
                   type="number" min="1"
@@ -405,10 +407,10 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                   onChange={e => setRule("visit", e.target.value)}
                   className="h-9 text-sm"
                 />
-                <p className="text-[11px] text-muted-foreground">Min page visits before showing (default: 3)</p>
+                <p className="text-[11px] text-muted-foreground">{t("Min page visits before showing (default: 3)")}</p>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor={`${uid}-exit`} className="text-xs">Daily Exit Threshold</Label>
+                <Label htmlFor={`${uid}-exit`} className="text-xs">{t("Daily Exit Threshold")}</Label>
                 <Input
                   id={`${uid}-exit`}
                   type="number" min="1"
@@ -416,35 +418,34 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                   onChange={e => setRule("exit_threshold", e.target.value)}
                   className="h-9 text-sm"
                 />
-                <p className="text-[11px] text-muted-foreground">Max deliveries per day (default: 50)</p>
+                <p className="text-[11px] text-muted-foreground">{t("Max deliveries per day (default: 50)")}</p>
               </div>
             </div>
 
             <div className="border border-border rounded-lg p-4 space-y-4 bg-secondary/10">
               <div className="flex items-center gap-2">
                 <Users className="w-3.5 h-3.5 text-muted-foreground" />
-                <p className="text-xs font-medium">Segment Targeting</p>
+                <p className="text-xs font-medium">{t("Segment Targeting")}</p>
               </div>
               <p className="text-[11px] text-muted-foreground -mt-2">
-                Select segments to target. The GA IDs from each segment are resolved and passed to the WordPress plugin as targeting criteria.
-                Leave both empty to show to all visitors meeting the visit threshold.
+                {t("Select segments to target. The GA IDs from each segment are resolved and passed to the WordPress plugin as targeting criteria. Leave both empty to show to all visitors meeting the visit threshold.")}
               </p>
 
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1.5">
-                  <Ghost className="w-3 h-3" /> Anonymous Segment
+                  <Ghost className="w-3 h-3" /> {t("Anonymous Segment")}
                 </Label>
                 <Select
                   value={form.rules.anonymous_segment_id || "none"}
                   onValueChange={v => setRule("anonymous_segment_id", v === "none" ? "" : v)}
                 >
                   <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="No anonymous targeting" />
+                    <SelectValue placeholder={t("No anonymous targeting")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No anonymous targeting</SelectItem>
+                    <SelectItem value="none">{t("No anonymous targeting")}</SelectItem>
                     {anonymousSegments.length === 0 && (
-                      <SelectItem value="_empty" disabled>No anonymous segments saved</SelectItem>
+                      <SelectItem value="_empty" disabled>{t("No anonymous segments saved")}</SelectItem>
                     )}
                     {anonymousSegments.map(s => (
                       <SelectItem key={s.id} value={s.id}>
@@ -454,25 +455,25 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                   </SelectContent>
                 </Select>
                 {selectedAnonSegment && (
-                  <p className="text-[11px] text-muted-foreground">{selectedAnonSegment.description || "Anonymous visitor segment"}</p>
+                  <p className="text-[11px] text-muted-foreground">{selectedAnonSegment.description || t("Anonymous visitor segment")}</p>
                 )}
               </div>
 
               <div className="space-y-1.5">
                 <Label className="text-xs flex items-center gap-1.5">
-                  <Users className="w-3 h-3" /> Customer Segment
+                  <Users className="w-3 h-3" /> {t("Customer Segment")}
                 </Label>
                 <Select
                   value={form.rules.customer_segment_id || "none"}
                   onValueChange={v => setRule("customer_segment_id", v === "none" ? "" : v)}
                 >
                   <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="No customer targeting" />
+                    <SelectValue placeholder={t("No customer targeting")} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">No customer targeting</SelectItem>
+                    <SelectItem value="none">{t("No customer targeting")}</SelectItem>
                     {customerSegments.length === 0 && (
-                      <SelectItem value="_empty" disabled>No customer segments saved</SelectItem>
+                      <SelectItem value="_empty" disabled>{t("No customer segments saved")}</SelectItem>
                     )}
                     {customerSegments.map(s => (
                       <SelectItem key={s.id} value={s.id}>
@@ -482,16 +483,16 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                   </SelectContent>
                 </Select>
                 {selectedCustSegment && (
-                  <p className="text-[11px] text-muted-foreground">{selectedCustSegment.description || "Customer segment"}</p>
+                  <p className="text-[11px] text-muted-foreground">{selectedCustSegment.description || t("Customer segment")}</p>
                 )}
               </div>
             </div>
           </section>
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
-            <Button type="button" variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>{t("Cancel")}</Button>
             <Button type="submit" size="sm" disabled={isSaving}>
-              {isSaving ? "Saving…" : isEdit ? "Save Changes" : "Save as Draft"}
+              {isSaving ? t("Saving…") : isEdit ? t("Save Changes") : t("Save as Draft")}
             </Button>
           </div>
         </form>
@@ -503,9 +504,10 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 // ── Popup Card ─────────────────────────────────────────────────────────────────
 
 function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats, segments = [] }) {
+  const { t } = usePreferences();
   const accent = STATUS_ACCENT[popup.status] || STATUS_ACCENT.draft;
   const isActive = popup.status === "active";
-  const typeLabel = INTERACTION_TYPES.find(t => t.value === popup.interaction_type)?.label || popup.interaction_type;
+  const typeLabel = INTERACTION_TYPES.find(it => it.value === popup.interaction_type)?.label || popup.interaction_type;
 
   // Stats are meaningful once a pop-up is (or has been) live: active now, or its
   // scheduled run has already ended (completed). Drafts that never went live show none.
@@ -523,15 +525,15 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-sm leading-snug truncate">{popup.name}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{typeLabel}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t(typeLabel)}</p>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0 mt-0.5">
             {popup.is_default && (
-              <Badge className="bg-secondary text-muted-foreground border border-border text-[10px] h-4 px-1.5">Default</Badge>
+              <Badge className="bg-secondary text-muted-foreground border border-border text-[10px] h-4 px-1.5">{t("Default")}</Badge>
             )}
             <Badge className={`${STATUS_STYLE[popup.status] || STATUS_STYLE.draft} text-[10px] h-4 px-1.5 flex items-center gap-0.5`}>
               {isActive ? <CheckCircle2 className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
-              {popup.status}
+              {t(isActive ? "Active" : "Draft")}
             </Badge>
           </div>
         </div>
@@ -542,18 +544,18 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
             <span>
               {popup.start_time ? format(new Date(popup.start_time), "MMM d, yyyy") : "-"}
               {" → "}
-              {popup.end_time ? format(new Date(popup.end_time), "MMM d, yyyy") : "No end"}
+              {popup.end_time ? format(new Date(popup.end_time), "MMM d, yyyy") : t("No end")}
             </span>
           </div>
         )}
 
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] text-muted-foreground">
-            Visit: <strong className="text-foreground">{popup.rules?.visit ?? 3}</strong>
+            {t("Visit:")} <strong className="text-foreground">{popup.rules?.visit ?? 3}</strong>
           </span>
           <span className="text-muted-foreground/40">·</span>
           <span className="text-[11px] text-muted-foreground">
-            Cap: <strong className="text-foreground">{popup.rules?.exit_threshold ?? 50}/day</strong>
+            {t("Cap:")} <strong className="text-foreground">{popup.rules?.exit_threshold ?? 50}{t("/day")}</strong>
           </span>
           {anonSeg && (
             <>
@@ -579,20 +581,20 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
           variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
           onClick={() => onPreview(popup)}
         >
-          <Eye className="w-3 h-3 flex-shrink-0" /> Preview
+          <Eye className="w-3 h-3 flex-shrink-0" /> {t("Preview")}
         </Button>
         <Button
           variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
           onClick={() => onEdit(popup)}
         >
-          <Pencil className="w-3 h-3 flex-shrink-0" /> Edit
+          <Pencil className="w-3 h-3 flex-shrink-0" /> {t("Edit")}
         </Button>
         {canViewStats && (
           <Button
             variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
             onClick={() => onStats(popup)}
           >
-            <BarChart2 className="w-3 h-3 flex-shrink-0" /> Stats
+            <BarChart2 className="w-3 h-3 flex-shrink-0" /> {t("Stats")}
           </Button>
         )}
         <Button
@@ -600,11 +602,11 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
           onClick={() => onToggleActive(popup)}
         >
           {isActive ? <ToggleRight className="w-3.5 h-3.5 flex-shrink-0" /> : <ToggleLeft className="w-3.5 h-3.5 flex-shrink-0" />}
-          {isActive ? "Deactivate" : "Activate"}
+          {isActive ? t("Deactivate") : t("Activate")}
         </Button>
         <Button
           variant="ghost" size="icon" className="h-7 w-7 ml-auto flex-shrink-0 text-muted-foreground hover:text-destructive"
-          title="Delete pop-up"
+          title={t("Delete pop-up")}
           onClick={() => onDelete(popup.id)}
         >
           <Trash2 className="w-3 h-3" />
@@ -636,6 +638,7 @@ function popupActiveOnDay(p, dayStartMs, dayEndMs) {
 }
 
 function PopupCalendar({ popups, onPreview }) {
+  const { t } = usePreferences();
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
 
   const scheduled = popups.filter(p => p.start_time || p.end_time);
@@ -645,7 +648,7 @@ function PopupCalendar({ popups, onPreview }) {
     alwaysOn.length > 0 && (
       <div className="border border-border rounded-lg p-3 bg-secondary/10">
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          Always active (no dates) · runs continuously
+          {t("Always active (no dates) · runs continuously")}
         </p>
         <div className="flex flex-wrap gap-1.5">
           {alwaysOn.map(p => (
@@ -707,32 +710,32 @@ function PopupCalendar({ popups, onPreview }) {
       {/* Month navigation + legend */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center border border-input rounded-md overflow-hidden h-8">
-          <button type="button" onClick={() => setCursor(c => addMonths(c, -1))} title="Previous month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+          <button type="button" onClick={() => setCursor(c => addMonths(c, -1))} title={t("Previous month")} className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
-          <button type="button" onClick={() => setCursor(startOfMonth(new Date()))} title="Jump to current month" className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors border-x border-input">
-            Today
+          <button type="button" onClick={() => setCursor(startOfMonth(new Date()))} title={t("Jump to current month")} className="h-8 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors border-x border-input">
+            {t("Today")}
           </button>
-          <button type="button" onClick={() => setCursor(c => addMonths(c, 1))} title="Next month" className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+          <button type="button" onClick={() => setCursor(c => addMonths(c, 1))} title={t("Next month")} className="h-8 w-8 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
         <p className="text-sm font-semibold">{format(cursor, "MMMM yyyy")}</p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground ml-auto">
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-foreground" /> Active</span>
-          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-secondary border border-border" /> Draft</span>
-          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-yellow-500" /> Overlapping</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-foreground" /> {t("Active")}</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-secondary border border-border" /> {t("Draft")}</span>
+          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 text-yellow-500" /> {t("Overlapping")}</span>
         </div>
       </div>
       <p className="text-[11px] text-muted-foreground/70 -mt-2">
-        {monthCount} pop up{monthCount !== 1 ? "s" : ""} active this month · a day with 2+ pop ups means overlapping schedules · click to preview
+        {monthCount} {monthCount !== 1 ? t("pop ups") : t("pop up")} {t("active this month · a day with 2+ pop ups means overlapping schedules · click to preview")}
       </p>
 
       {/* Calendar grid */}
       <div className="border border-border rounded-lg overflow-hidden">
         <div className="grid grid-cols-7 border-b border-border bg-secondary/20">
           {WEEKDAYS.map(d => (
-            <div key={d} className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-center">{d}</div>
+            <div key={d} className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground text-center">{t(d)}</div>
           ))}
         </div>
 
@@ -760,7 +763,7 @@ function PopupCalendar({ popups, onPreview }) {
                         <span className={`text-[11px] inline-flex items-center justify-center ${today ? "bg-foreground text-background rounded-full w-5 h-5 font-semibold" : inMonth ? "text-foreground" : "text-muted-foreground/40"}`}>
                           {format(day, "d")}
                         </span>
-                        {dayActive >= 2 && <AlertTriangle className="w-3 h-3 text-yellow-500" title={`${dayActive} pop ups overlap on this day`} />}
+                        {dayActive >= 2 && <AlertTriangle className="w-3 h-3 text-yellow-500" title={`${dayActive} ` + t("pop ups overlap on this day")} />}
                       </div>
                     </div>
                   );
@@ -783,7 +786,7 @@ function PopupCalendar({ popups, onPreview }) {
                   const roundedLeft  = start != null && start >= week[startCol].getTime();
                   const roundedRight = end != null && end <= week[endCol].getTime() + DAY_MS - 1;
                   const isActive = p.status === "active";
-                  const title = `${p.name}\n${start ? format(new Date(start), "MMM d, yyyy") : "No start"} → ${end ? format(new Date(end), "MMM d, yyyy") : "No end"}`;
+                  const title = `${p.name}\n${start ? format(new Date(start), "MMM d, yyyy") : t("No start")} → ${end ? format(new Date(end), "MMM d, yyyy") : t("No end")}`;
                   return (
                     <button
                       key={p.id}
@@ -801,7 +804,7 @@ function PopupCalendar({ popups, onPreview }) {
                 })}
                 {overflow > 0 && (
                   <span className="text-[10px] text-muted-foreground self-center pl-1" style={{ gridColumn: "1 / 8", gridRow: MAX_LANES + 1 }}>
-                    +{overflow} more
+                    +{overflow} {t("more")}
                   </span>
                 )}
               </div>
@@ -818,6 +821,7 @@ function PopupCalendar({ popups, onPreview }) {
 // ── Templates Tab ──────────────────────────────────────────────────────────────
 
 function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onTemplateFormClose, actionsRef }) {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [preview, setPreview] = useState(null);
   const [builderOpen, setBuilderOpen] = useState(false);    // for TemplateBuilder
@@ -859,7 +863,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       qc.invalidateQueries({ queryKey: ["popup-templates"] });
       setBuilderOpen(false); setBuilderTarget(null);
       onTemplateFormClose();
-      toast.success("Template saved");
+      toast.success(t("Template saved"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -870,26 +874,26 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       qc.invalidateQueries({ queryKey: ["popup-templates"] });
       setBuilderOpen(false); setBuilderTarget(null);
       onTemplateFormClose();
-      toast.success("Template updated");
+      toast.success(t("Template updated"));
     },
     onError: (e) => toast.error(e.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.popup.deleteTemplate(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popup-templates"] }); setDeleteTarget(null); toast.success("Template deleted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popup-templates"] }); setDeleteTarget(null); toast.success(t("Template deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const cloneMutation = useMutation({
-    mutationFn: (t) => appClient.popup.createTemplate({
-      name: `${t.name} (copy)`,
-      category: t.category,
-      description: t.description || "",
-      content: t.content || "",
-      ...(t.builder_state ? { builder_state: t.builder_state } : {}),
+    mutationFn: (tpl) => appClient.popup.createTemplate({
+      name: `${tpl.name} (copy)`,
+      category: tpl.category,
+      description: tpl.description || "",
+      content: tpl.content || "",
+      ...(tpl.builder_state ? { builder_state: tpl.builder_state } : {}),
     }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popup-templates"] }); toast.success("Template cloned"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popup-templates"] }); toast.success(t("Template cloned")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -914,15 +918,15 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
   // redesigned. Templates that already have builder state load their blocks;
   // HTML-only templates (e.g. imported HTML) are seeded as a single Custom HTML
   // block so their existing markup is preserved and fully editable.
-  const openEdit = (t) => {
-    if (t.builder_state) {
-      setBuilderTarget(t);
+  const openEdit = (tpl) => {
+    if (tpl.builder_state) {
+      setBuilderTarget(tpl);
     } else {
       setBuilderTarget({
-        ...t,
+        ...tpl,
         builder_state: {
           container: { ...DEFAULT_CONTAINER, background: "transparent", paddingY: "0", paddingX: "0", borderRadius: "0", shadow: false, maxWidth: "600" },
-          blocks: [{ type: "html", id: "imported-html", html: t.content || "" }],
+          blocks: [{ type: "html", id: "imported-html", html: tpl.content || "" }],
         },
       });
     }
@@ -931,20 +935,20 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
 
   const allTemplates = [
     ...BUILTIN_TEMPLATES,
-    ...customTemplates.map(t => ({ ...t, builtin: false })),
+    ...customTemplates.map(tpl => ({ ...tpl, builtin: false })),
   ];
-  const allCategories = [...new Set(allTemplates.map(t => t.category))].sort();
-  const visible = allTemplates.filter(t => {
+  const allCategories = [...new Set(allTemplates.map(tpl => tpl.category))].sort();
+  const visible = allTemplates.filter(tpl => {
     const q = search.toLowerCase();
-    const matchSearch = !q || t.name.toLowerCase().includes(q) || t.description?.toLowerCase().includes(q) || t.category.toLowerCase().includes(q);
-    const matchCat = !categoryFilter.length || categoryFilter.includes(t.category);
+    const matchSearch = !q || tpl.name.toLowerCase().includes(q) || tpl.description?.toLowerCase().includes(q) || tpl.category.toLowerCase().includes(q);
+    const matchCat = !categoryFilter.length || categoryFilter.includes(tpl.category);
     return matchSearch && matchCat;
   });
   const hasActiveFilters = categoryFilter.length > 0;
 
   const GROUPS = [
-    { key: "default", label: "Default Pop Ups", filter: t => t.builtin },
-    { key: "custom",  label: "Custom Pop Ups",  filter: t => !t.builtin },
+    { key: "default", label: "Default Pop Ups", filter: tpl => tpl.builtin },
+    { key: "custom",  label: "Custom Pop Ups",  filter: tpl => !tpl.builtin },
   ].filter(g => visible.some(g.filter));
 
   return (
@@ -957,30 +961,30 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search templates…"
+              placeholder={t("Search templates…")}
               className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <div ref={filterRef} className="relative">
             <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-              <Filter className="w-3.5 h-3.5" /> Filters
+              <Filter className="w-3.5 h-3.5" /> {t("Filters")}
               {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
             </Button>
             {showFilters && (
               <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-56">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
-                  {hasActiveFilters && <button onClick={() => setCategoryFilter([])} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>}
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
+                  {hasActiveFilters && <button onClick={() => setCategoryFilter([])} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>}
                 </div>
                 <div>
-                  <p className="text-[10px] text-muted-foreground mb-1">Category</p>
-                  <MultiSelect value={categoryFilter} onChange={setCategoryFilter} options={allCategories} placeholder="All Categories" />
+                  <p className="text-[10px] text-muted-foreground mb-1">{t("Category")}</p>
+                  <MultiSelect value={categoryFilter} onChange={setCategoryFilter} options={allCategories} placeholder={t("All Categories")} />
                 </div>
               </div>
             )}
           </div>
           <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="w-3.5 h-3.5" /> Import HTML
+            <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
           </Button>
           <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
         </div>
@@ -988,7 +992,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
           <div className="flex flex-wrap gap-1.5 mt-2">
             {categoryFilter.map(v => (
               <span key={v} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                Category: <strong>{v}</strong>
+                {t("Category:")} <strong>{v}</strong>
                 <button onClick={() => setCategoryFilter(categoryFilter.filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5">×</button>
               </span>
             ))}
@@ -1001,25 +1005,25 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       {!isLoading && visible.length === 0 && (
         <div className="text-center py-16 text-sm text-muted-foreground">
           <Layout className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          <p>No templates match your search.</p>
+          <p>{t("No templates match your search.")}</p>
         </div>
       )}
 
       {!isLoading && visible.length > 0 && GROUPS.map(group => (
         <div key={group.key} className="mb-8">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-            {group.label}
+            {t(group.label)}
           </p>
           <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-            {visible.filter(group.filter).map(t => (
+            {visible.filter(group.filter).map(tpl => (
               <TemplateCard
-                key={t.id || t.name}
-                template={t}
-                onPreview={() => setPreview(t)}
-                onUse={() => onUseTemplate(t)}
-                onClone={() => cloneMutation.mutate(t)}
-                onEdit={t.builtin ? undefined : () => openEdit(t)}
-                onDelete={t.builtin ? undefined : () => setDeleteTarget(t.id)}
+                key={tpl.id || tpl.name}
+                template={tpl}
+                onPreview={() => setPreview(tpl)}
+                onUse={() => onUseTemplate(tpl)}
+                onClone={() => cloneMutation.mutate(tpl)}
+                onEdit={tpl.builtin ? undefined : () => openEdit(tpl)}
+                onDelete={tpl.builtin ? undefined : () => setDeleteTarget(tpl.id)}
               />
             ))}
           </div>
@@ -1030,22 +1034,22 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{preview?.name} - Preview</DialogTitle>
+            <DialogTitle>{preview?.name} - {t("Preview")}</DialogTitle>
           </DialogHeader>
           <div className="border border-border rounded-lg overflow-hidden bg-gray-50">
-            <iframe srcDoc={preview?.content || ""} title="Template preview" className="w-full"
+            <iframe srcDoc={preview?.content || ""} title={t("Template preview")} className="w-full"
               style={{ height: 380, border: "none" }} sandbox="allow-same-origin" />
           </div>
           <div className="flex items-center justify-between pt-1">
             {preview && !preview.builtin && (
               <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => { openEdit(preview); setPreview(null); }}>
-                Open in Builder
+                {t("Open in Builder")}
               </Button>
             )}
             <div className="flex gap-2 ml-auto">
-              <Button variant="outline" size="sm" onClick={() => setPreview(null)}>Close</Button>
+              <Button variant="outline" size="sm" onClick={() => setPreview(null)}>{t("Close")}</Button>
               <Button size="sm" onClick={() => { onUseTemplate(preview); setPreview(null); }}>
-                Use Template
+                {t("Use Template")}
               </Button>
             </div>
           </div>
@@ -1069,17 +1073,17 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this template?</AlertDialogTitle>
-            <AlertDialogDescription>This cannot be undone.</AlertDialogDescription>
+            <AlertDialogTitle>{t("Delete this template?")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("This cannot be undone.")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => deleteMutation.mutate(deleteTarget)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleteMutation.isPending}
             >
-              Delete
+              {t("Delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1091,6 +1095,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
 // ── Template Card (shared) ─────────────────────────────────────────────────────
 
 function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete }) {
+  const { t } = usePreferences();
   return (
     <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all flex flex-col">
       <div className="h-1 flex-shrink-0 bg-gradient-to-r from-border to-muted-foreground/30" />
@@ -1112,20 +1117,20 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
             variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={onPreview}
           >
-            <Eye className="w-3 h-3" /> Preview
+            <Eye className="w-3 h-3" /> {t("Preview")}
           </Button>
           <Button
             variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={onClone}
           >
-            <Copy className="w-3 h-3" /> Clone
+            <Copy className="w-3 h-3" /> {t("Clone")}
           </Button>
           {onEdit && (
             <Button
               variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
               onClick={onEdit}
             >
-              <Pencil className="w-3 h-3" /> Edit
+              <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
           )}
           {onDelete && (
@@ -1140,7 +1145,7 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
         {/* Primary action */}
         <div className="px-3 pb-2.5">
           <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={onUse}>
-            <Plus className="w-3 h-3" /> Use Template
+            <Plus className="w-3 h-3" /> {t("Use Template")}
           </Button>
         </div>
       </div>
@@ -1170,6 +1175,7 @@ const PERF_COLUMNS = [
 ];
 
 function AnalyticsTab() {
+  const { t } = usePreferences();
   const [search, setSearch]   = useState("");
   const [filters, setFilters] = useState({});
   const [colOrder, setColOrder] = useState(() => PERF_COLUMNS.map(c => c.key));
@@ -1297,7 +1303,7 @@ function AnalyticsTab() {
       case "name": return (
         <td key={col.key} className={`px-4 py-3 font-medium ${col.width}`}>
           <p className="truncate max-w-[220px]">{p.name}</p>
-          {Number(p.emails) > 0 && <p className="text-[10px] text-muted-foreground">- Emails Collected tab</p>}
+          {Number(p.emails) > 0 && <p className="text-[10px] text-muted-foreground">{t("- Emails Collected tab")}</p>}
         </td>
       );
       case "interaction_type": return (
@@ -1337,8 +1343,8 @@ function AnalyticsTab() {
     return (
       <div className="px-8 py-6 flex flex-col items-center text-sm text-muted-foreground py-20">
         <BarChart2 className="w-10 h-10 mb-3 opacity-20" />
-        <p className="font-medium text-foreground mb-1">No pop ups yet</p>
-        <p className="text-xs">Create a pop-up to see analytics here.</p>
+        <p className="font-medium text-foreground mb-1">{t("No pop ups yet")}</p>
+        <p className="text-xs">{t("Create a pop-up to see analytics here.")}</p>
       </div>
     );
   }
@@ -1350,7 +1356,7 @@ function AnalyticsTab() {
       <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
         {/* Period date pickers */}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Period</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Period")}</p>
           <div className="flex items-center gap-1.5">
             <input
               type="date"
@@ -1370,20 +1376,20 @@ function AnalyticsTab() {
 
         {/* Compare toggle */}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Compare</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
           <button
             onClick={() => { if (!compare) syncCmp(dateFrom, dateTo); setCompare(v => !v); }}
             className={`h-8 px-3 text-xs border rounded-md transition-colors ${
               compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
             }`}
           >
-            {compare ? "On" : "Off"}
+            {compare ? t("On") : t("Off")}
           </button>
         </div>
 
         {/* Quick ranges */}
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Quick")}</p>
           <div className="flex gap-1">
             {[7, 30, 90].map(d => {
               const today = new Date();
@@ -1410,7 +1416,7 @@ function AnalyticsTab() {
         {/* Comparison period */}
         {compare && (
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
             <div className="flex items-center gap-1.5">
               <input type="date" value={cmpFrom} onChange={e => setCmpFrom(e.target.value)}
                 className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
@@ -1429,14 +1435,14 @@ function AnalyticsTab() {
               onClick={() => { setDateFrom(""); setDateTo(""); }}
               className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
             >
-              Clear
+              {t("Clear")}
             </button>
           </div>
         )}
 
         {(dateFrom || dateTo) && (
           <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">
-            {filtered.length} pop-up{filtered.length !== 1 ? "s" : ""} in range
+            {filtered.length} {filtered.length !== 1 ? t("pop-ups") : t("pop-up")} {t("in range")}
           </p>
         )}
       </div>
@@ -1444,46 +1450,46 @@ function AnalyticsTab() {
       {/* Summary tiles */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">Total Impressions</p>
+          <p className="text-xs text-muted-foreground">{t("Total Impressions")}</p>
           <p className="text-2xl font-bold">{totals.impressions.toLocaleString()}</p>
-          <p className="text-[11px] text-muted-foreground">{totals.unique_views.toLocaleString()} unique views</p>
+          <p className="text-[11px] text-muted-foreground">{totals.unique_views.toLocaleString()} {t("unique views")}</p>
           {compare && (
             <div className="flex items-center gap-1.5 pt-0.5">
               <Delta curr={totals.impressions} prev={pTotals.impressions} />
-              <span className="text-[10px] text-muted-foreground">vs {pTotals.impressions.toLocaleString()}</span>
+              <span className="text-[10px] text-muted-foreground">{t("vs")} {pTotals.impressions.toLocaleString()}</span>
             </div>
           )}
         </div>
         <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">Click-Through Rate</p>
+          <p className="text-xs text-muted-foreground">{t("Click-Through Rate")}</p>
           <p className="text-2xl font-bold">{pct(totals.clicks, totals.impressions)}%</p>
-          <p className="text-[11px] text-muted-foreground">{totals.clicks.toLocaleString()} total clicks</p>
+          <p className="text-[11px] text-muted-foreground">{totals.clicks.toLocaleString()} {t("total clicks")}</p>
           {compare && (
             <div className="flex items-center gap-1.5 pt-0.5">
               <Delta curr={pctN(totals.clicks, totals.impressions)} prev={pctN(pTotals.clicks, pTotals.impressions)} />
-              <span className="text-[10px] text-muted-foreground">vs {pct(pTotals.clicks, pTotals.impressions)}%</span>
+              <span className="text-[10px] text-muted-foreground">{t("vs")} {pct(pTotals.clicks, pTotals.impressions)}%</span>
             </div>
           )}
         </div>
         <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">Email Conversion</p>
+          <p className="text-xs text-muted-foreground">{t("Email Conversion")}</p>
           <p className="text-2xl font-bold">{pct(totals.emails, totals.impressions)}%</p>
-          <p className="text-[11px] text-muted-foreground">{totals.emails.toLocaleString()} emails collected</p>
+          <p className="text-[11px] text-muted-foreground">{totals.emails.toLocaleString()} {t("emails collected")}</p>
           {compare && (
             <div className="flex items-center gap-1.5 pt-0.5">
               <Delta curr={pctN(totals.emails, totals.impressions)} prev={pctN(pTotals.emails, pTotals.impressions)} />
-              <span className="text-[10px] text-muted-foreground">vs {pct(pTotals.emails, pTotals.impressions)}%</span>
+              <span className="text-[10px] text-muted-foreground">{t("vs")} {pct(pTotals.emails, pTotals.impressions)}%</span>
             </div>
           )}
         </div>
         <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">Avg Engagement Time</p>
+          <p className="text-xs text-muted-foreground">{t("Avg Engagement Time")}</p>
           <p className="text-2xl font-bold">{formatSecs(avgEngSecs)}</p>
-          <p className="text-[11px] text-muted-foreground">{pct(totals.dismissals, totals.impressions)}% close rate</p>
+          <p className="text-[11px] text-muted-foreground">{pct(totals.dismissals, totals.impressions)}% {t("close rate")}</p>
           {compare && pAvgEng != null && avgEngSecs != null && (
             <div className="flex items-center gap-1.5 pt-0.5">
               <Delta curr={avgEngSecs} prev={pAvgEng} />
-              <span className="text-[10px] text-muted-foreground">vs {formatSecs(pAvgEng)}</span>
+              <span className="text-[10px] text-muted-foreground">{t("vs")} {formatSecs(pAvgEng)}</span>
             </div>
           )}
         </div>
@@ -1491,34 +1497,34 @@ function AnalyticsTab() {
 
       {/* Per-popup performance table */}
       <div>
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Per Pop-Up Performance</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{t("Per Pop-Up Performance")}</p>
         <TableToolbar
           search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
           columns={PERF_COLUMNS} colOrder={colOrder} hiddenCols={hiddenCols}
           onToggleCol={toggleCol} onMoveCol={moveCol}
           filters={filters} onFilter={setFilter}
           resultCount={filtered.length} totalCount={analytics.length}
-          placeholder="Search by name..."
+          placeholder={t("Search by name...")}
         />
 
         {/* Selection toolbar */}
         {selected.size > 0 && (
           <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
-            <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+            <span className="font-medium text-sm flex-shrink-0">{selected.size} {t("selected")}</span>
             <div className="flex items-center gap-1 ml-2">
               <Button
                 size="sm" variant="secondary"
                 className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                 onClick={() => exportCsv(true)}
               >
-                Export CSV
+                {t("Export CSV")}
               </Button>
             </div>
             <button
               onClick={() => setSelected(new Set())}
               className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
             >
-              Clear
+              {t("Clear")}
             </button>
           </div>
         )}
@@ -1526,7 +1532,7 @@ function AnalyticsTab() {
         {filtered.length === 0 ? (
           <div className="border border-border rounded-lg py-12 text-center text-sm text-muted-foreground">
             <BarChart2 className="w-8 h-8 mx-auto mb-2 opacity-20" />
-            <p>No pop ups match your filters.</p>
+            <p>{t("No pop ups match your filters.")}</p>
           </div>
         ) : (
           <div className="border border-border rounded-lg overflow-x-auto">
@@ -1549,7 +1555,7 @@ function AnalyticsTab() {
                       className={`px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors ${col.align === "right" ? "text-right" : "text-left"}`}
                     >
                       <span className="inline-flex items-center gap-1">
-                        {col.label}
+                        {t(col.label)}
                         {sortKey === col.key
                           ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
                           : <ArrowUpDown className="w-3 h-3 opacity-30" />}
@@ -1584,7 +1590,7 @@ function AnalyticsTab() {
           </div>
         )}
         <p className="text-[11px] text-muted-foreground mt-2">
-          Emails submitted via pop-up forms are accessible in the Emails Collected tab.
+          {t("Emails submitted via pop-up forms are accessible in the Emails Collected tab.")}
         </p>
       </div>
     </div>
@@ -1625,6 +1631,7 @@ const PEC_COLUMNS = [
 const EMAIL_STATUS_OPTIONS = ["new", "contacted", "converted", "unsubscribed"];
 
 function EmailsTab({ popups }) {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [search, setSearch]   = useState("");
   const [filters, setFilters] = useState({});
@@ -1654,9 +1661,9 @@ function EmailsTab({ popups }) {
       const created = results.filter(r => r.action === "created").length;
       const linked  = results.filter(r => r.action === "linked").length;
       const parts = [];
-      if (created) parts.push(`${created} profile${created > 1 ? "s" : ""} created`);
-      if (linked)  parts.push(`${linked} linked to existing`);
-      toast.success(parts.join(", ") || "Done");
+      if (created) parts.push(`${created} ` + (created > 1 ? t("profiles created") : t("profile created")));
+      if (linked)  parts.push(`${linked} ` + t("linked to existing"));
+      toast.success(parts.join(", ") || t("Done"));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1667,7 +1674,7 @@ function EmailsTab({ popups }) {
       qc.invalidateQueries({ queryKey: ["popup-email-collected"] });
       setBulkStatusOpen(false);
       setSelected(new Set());
-      toast.success(`${ids.length} record${ids.length > 1 ? "s" : ""} updated to "${status}"`);
+      toast.success(`${ids.length} ` + (ids.length > 1 ? t("records") : t("record")) + " " + t("updated to") + ` "${status}"`);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -1804,13 +1811,13 @@ function EmailsTab({ popups }) {
         onFilter={setFilter}
         resultCount={total}
         totalCount={total}
-        placeholder="Search email, name, URL..."
+        placeholder={t("Search email, name, URL...")}
       />
 
       {/* Selection toolbar */}
       {selected.size > 0 && (
         <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
-          <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+          <span className="font-medium text-sm flex-shrink-0">{selected.size} {t("selected")}</span>
           <div className="flex items-center gap-1 ml-2 flex-wrap">
             {canCreateProfile && (
               <Button
@@ -1819,7 +1826,7 @@ function EmailsTab({ popups }) {
                 onClick={() => setProfileBulkTarget(selectedRows.filter(r => !r.profile_created))}
                 disabled={createProfileMutation.isPending}
               >
-                Create Profiles ({selectedRows.filter(r => !r.profile_created).length})
+                {t("Create Profiles")} ({selectedRows.filter(r => !r.profile_created).length})
               </Button>
             )}
             <Button
@@ -1827,21 +1834,21 @@ function EmailsTab({ popups }) {
               className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
               onClick={() => setBulkStatusOpen(true)}
             >
-              Update Status
+              {t("Update Status")}
             </Button>
             <Button
               size="sm" variant="secondary"
               className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
               onClick={handleExport}
             >
-              Export CSV
+              {t("Export CSV")}
             </Button>
           </div>
           <button
             onClick={() => setSelected(new Set())}
             className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0"
           >
-            Clear
+            {t("Clear")}
           </button>
         </div>
       )}
@@ -1855,7 +1862,7 @@ function EmailsTab({ popups }) {
       {!isLoading && rows.length === 0 && (
         <div className="text-center py-16 text-sm text-muted-foreground">
           <Mail className="w-8 h-8 mx-auto mb-2 opacity-20" />
-          <p>No emails collected yet.</p>
+          <p>{t("No emails collected yet.")}</p>
         </div>
       )}
 
@@ -1881,7 +1888,7 @@ function EmailsTab({ popups }) {
                       className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors"
                     >
                       <span className="inline-flex items-center gap-1">
-                        {col.label}
+                        {t(col.label)}
                         {sortKey === col.key
                           ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
                           : <ArrowUpDown className="w-3 h-3 opacity-30" />}
@@ -1916,7 +1923,7 @@ function EmailsTab({ popups }) {
                       </td>
                       {visibleCols.map(col => {
                         switch (col.key) {
-                          case "email":        return <td key={col.key} className="px-4 py-3"><p className="text-sm font-mono truncate max-w-[200px]">{r.email}</p>{r.profile_created && <p className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Link2 className="w-2.5 h-2.5" />{r.profile_lineage?.matched_existing ? "Linked" : "Profile created"}</p>}</td>;
+                          case "email":        return <td key={col.key} className="px-4 py-3"><p className="text-sm font-mono truncate max-w-[200px]">{r.email}</p>{r.profile_created && <p className="text-[10px] text-muted-foreground flex items-center gap-0.5"><Link2 className="w-2.5 h-2.5" />{r.profile_lineage?.matched_existing ? t("Linked") : t("Profile created")}</p>}</td>;
                           case "name":         return <td key={col.key} className="px-4 py-3 text-sm min-w-[120px]">{r.first_name || r.last_name ? `${r.first_name || ""} ${r.last_name || ""}`.trim() : <span className="text-muted-foreground">-</span>}</td>;
                           case "phone":        return <td key={col.key} className="px-4 py-3 text-xs text-muted-foreground font-mono whitespace-nowrap">{r.phone || "-"}</td>;
                           case "popup_name":   return <td key={col.key} className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate">{r.popup_name || "-"}</td>;
@@ -1947,10 +1954,10 @@ function EmailsTab({ popups }) {
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
-              <p className="text-xs text-muted-foreground">Page {page} of {totalPages} ({total.toLocaleString()} total)</p>
+              <p className="text-xs text-muted-foreground">{t("Page")} {page} {t("of")} {totalPages} ({total.toLocaleString()} {t("total")})</p>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" className="h-8 px-3 text-xs" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
-                <Button variant="outline" size="sm" className="h-8 px-3 text-xs" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>{t("Previous")}</Button>
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>{t("Next")}</Button>
               </div>
             </div>
           )}
@@ -1961,27 +1968,27 @@ function EmailsTab({ popups }) {
       <AlertDialog open={!!profileBulkTarget} onOpenChange={(o) => !o && setProfileBulkTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Create Profiles for {profileBulkTarget?.length} Email{profileBulkTarget?.length !== 1 ? "s" : ""}</AlertDialogTitle>
+            <AlertDialogTitle>{t("Create Profiles for")} {profileBulkTarget?.length} {profileBulkTarget?.length !== 1 ? t("Emails") : t("Email")}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-sm">
                 <div className="rounded-lg border border-border bg-secondary/20 px-3 py-2.5 space-y-1 text-xs text-muted-foreground">
-                  <p className="font-medium text-foreground">What happens for each email:</p>
+                  <p className="font-medium text-foreground">{t("What happens for each email:")}</p>
                   <ul className="space-y-0.5 list-disc list-inside">
-                    <li>If the email matches an existing customer - it will be <strong>linked</strong> to that profile with a popup lineage tag.</li>
-                    <li>If the email is new - a <strong>new customer profile</strong> will be created, tagged with <code>source: popup_email_collection</code> and the originating popup's details.</li>
+                    <li>{t("If the email matches an existing customer - it will be")} <strong>{t("linked")}</strong> {t("to that profile with a popup lineage tag.")}</li>
+                    <li>{t("If the email is new - a")} <strong>{t("new customer profile")}</strong> {t("will be created, tagged with")} <code>source: popup_email_collection</code> {t("and the originating popup's details.")}</li>
                   </ul>
                 </div>
-                <p className="text-[11px] text-muted-foreground">All profiles are traceable back to the popup that captured the email.</p>
+                <p className="text-[11px] text-muted-foreground">{t("All profiles are traceable back to the popup that captured the email.")}</p>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => createProfileMutation.mutate(profileBulkTarget)}
               disabled={createProfileMutation.isPending}
             >
-              {createProfileMutation.isPending ? "Creating…" : `Create ${profileBulkTarget?.length} Profile${profileBulkTarget?.length !== 1 ? "s" : ""}`}
+              {createProfileMutation.isPending ? t("Creating…") : t("Create") + ` ${profileBulkTarget?.length} ` + (profileBulkTarget?.length !== 1 ? t("Profiles") : t("Profile"))}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1991,10 +1998,10 @@ function EmailsTab({ popups }) {
       <Dialog open={bulkStatusOpen} onOpenChange={setBulkStatusOpen}>
         <DialogContent className="max-w-xs">
           <DialogHeader>
-            <DialogTitle>Update Status for {selected.size} Record{selected.size !== 1 ? "s" : ""}</DialogTitle>
+            <DialogTitle>{t("Update Status for")} {selected.size} {selected.size !== 1 ? t("Records") : t("Record")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-xs text-muted-foreground">Choose the new status to apply to all selected emails.</p>
+            <p className="text-xs text-muted-foreground">{t("Choose the new status to apply to all selected emails.")}</p>
             <select
               value={bulkStatus}
               onChange={e => setBulkStatus(e.target.value)}
@@ -2006,13 +2013,13 @@ function EmailsTab({ popups }) {
             </select>
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={() => setBulkStatusOpen(false)}>Cancel</Button>
+            <Button variant="outline" size="sm" onClick={() => setBulkStatusOpen(false)}>{t("Cancel")}</Button>
             <Button
               size="sm"
               onClick={() => bulkStatusMutation.mutate({ ids: [...selected], status: bulkStatus })}
               disabled={bulkStatusMutation.isPending}
             >
-              {bulkStatusMutation.isPending ? "Updating…" : "Apply"}
+              {bulkStatusMutation.isPending ? t("Updating…") : t("Apply")}
             </Button>
           </div>
         </DialogContent>
@@ -2024,6 +2031,7 @@ function EmailsTab({ popups }) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function PopUp() {
+  const { t } = usePreferences();
   const qc = useQueryClient();
   const [tab, setTab] = useState("popups");
   const [formOpen, setFormOpen] = useState(false);
@@ -2065,7 +2073,7 @@ export default function PopUp() {
 
   const createMutation = useMutation({
     mutationFn: (data) => appClient.popup.create(data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); setFormOpen(false); toast.success("Pop-up created"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); setFormOpen(false); toast.success(t("Pop-up created")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -2075,20 +2083,20 @@ export default function PopUp() {
       qc.invalidateQueries({ queryKey: ["popups"] });
       setEditTarget(null);
       setFormOpen(false);
-      toast.success("Pop-up updated");
+      toast.success(t("Pop-up updated"));
     },
     onError: (e) => toast.error(e.message),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.popup.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); setDeleteTarget(null); toast.success("Pop-up deleted"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); setDeleteTarget(null); toast.success(t("Pop-up deleted")); },
     onError: (e) => toast.error(e.message),
   });
 
   const toggleMutation = useMutation({
     mutationFn: ({ id, is_active }) => appClient.popup.update(id, { is_active }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); toast.success("Pop-up updated"); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["popups"] }); toast.success(t("Pop-up updated")); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -2120,39 +2128,39 @@ export default function PopUp() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">Pop Up</h1>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Pop Up")}</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Create and manage pop ups served to visitors through your WordPress plugin.
+              {t("Create and manage pop ups served to visitors through your WordPress plugin.")}
             </p>
           </div>
           {tab === "popups" && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
-              <Plus className="w-3.5 h-3.5" /> New Pop Up
+              <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
             </Button>
           )}
           {tab === "templates" && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setTemplateFormOpen(true)}>
-              <Plus className="w-3.5 h-3.5" /> New Template
+              <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
           )}
         </div>
 
         {/* Tabs */}
         <div className="flex border-b border-border gap-6">
-          {TABS.map(t => {
-            const Icon = t.icon;
+          {TABS.map(tabDef => {
+            const Icon = tabDef.icon;
             return (
               <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
+                key={tabDef.key}
+                onClick={() => setTab(tabDef.key)}
                 className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
-                  tab === t.key
+                  tab === tabDef.key
                     ? "border-foreground text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {t.label}
+                {t(tabDef.label)}
               </button>
             );
           })}
@@ -2173,66 +2181,66 @@ export default function PopUp() {
                   <input
                     value={search}
                     onChange={e => setSearch(e.target.value)}
-                    placeholder="Search pop ups…"
+                    placeholder={t("Search pop ups…")}
                     className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
                 <div ref={popupFilterRef} className="relative">
                   <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-                    <Filter className="w-3.5 h-3.5" /> Filters
+                    <Filter className="w-3.5 h-3.5" /> {t("Filters")}
                     {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
                   </Button>
                   {showFilters && (
                     <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-80 md:w-[480px]">
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                         {hasActiveFilters && (
-                          <button onClick={() => setFilters({ status: [], interaction_type: [], is_default: "" })} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                          <button onClick={() => setFilters({ status: [], interaction_type: [], is_default: "" })} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
                         )}
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Status")}</p>
                           <MultiSelect value={filters.status} onChange={v => setPopupFilter("status", v)}
-                            options={["active","draft"]} placeholder="All" />
+                            options={["active","draft"]} placeholder={t("All")} />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Type</p>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Type")}</p>
                           <MultiSelect value={filters.interaction_type} onChange={v => setPopupFilter("interaction_type", v)}
-                            options={[{ value: "banner", label: "Banner" }, { value: "modal", label: "Modal" }, { value: "slide_in", label: "Slide-in" }, { value: "notification", label: "Notification" }]} placeholder="All" />
+                            options={[{ value: "banner", label: t("Banner") }, { value: "modal", label: t("Modal") }, { value: "slide_in", label: t("Slide-in") }, { value: "notification", label: t("Notification") }]} placeholder={t("All")} />
                         </div>
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Default Pop-Up</p>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Default Pop-Up")}</p>
                           <select value={filters.is_default} onChange={e => setPopupFilter("is_default", e.target.value)}
                             className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                            <option value="">All</option>
-                            <option value="yes">Default only</option>
-                            <option value="no">Non-default only</option>
+                            <option value="">{t("All")}</option>
+                            <option value="yes">{t("Default only")}</option>
+                            <option value="no">{t("Non-default only")}</option>
                           </select>
                         </div>
                       </div>
 
                       {/* Sort */}
                       <div className="mt-3 pt-3 border-t border-border">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Sort by")}</p>
                         <div className="flex items-center gap-2">
                           <select value={sortBy} onChange={e => setSortBy(e.target.value)}
                             className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                            <option value="date">Date</option>
-                            <option value="name">Name</option>
-                            <option value="status">Status</option>
+                            <option value="date">{t("Date")}</option>
+                            <option value="name">{t("Name")}</option>
+                            <option value="status">{t("Status")}</option>
                           </select>
                           <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
                             className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
-                            {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                            {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                           </button>
                         </div>
                       </div>
                       {popupView === "grid" && (
                         <div className="mt-3 pt-3 border-t border-border">
-                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Group by")}</p>
                           <label className="flex items-center justify-between cursor-pointer">
-                            <span className="text-xs text-muted-foreground">Status</span>
+                            <span className="text-xs text-muted-foreground">{t("Status")}</span>
                             <input type="checkbox" checked={groupByStatus} onChange={e => setGroupByStatus(e.target.checked)}
                               className="rounded border-border cursor-pointer" />
                           </label>
@@ -2249,14 +2257,14 @@ export default function PopUp() {
                     onClick={() => setPopupView("grid")}
                     className={`h-9 px-2.5 flex items-center gap-1.5 text-xs transition-colors ${popupView === "grid" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <LayoutGrid className="w-3.5 h-3.5" /> Grid
+                    <LayoutGrid className="w-3.5 h-3.5" /> {t("Grid")}
                   </button>
                   <button
                     type="button"
                     onClick={() => setPopupView("calendar")}
                     className={`h-9 px-2.5 flex items-center gap-1.5 text-xs border-l border-input transition-colors ${popupView === "calendar" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
                   >
-                    <Calendar className="w-3.5 h-3.5" /> Calendar
+                    <Calendar className="w-3.5 h-3.5" /> {t("Calendar")}
                   </button>
                 </div>
               </div>
@@ -2281,16 +2289,16 @@ export default function PopUp() {
             {!isLoading && filtered.length === 0 && (
               <div className="text-center py-20 text-sm text-muted-foreground">
                 <MousePointer2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="font-medium text-foreground mb-1">No pop ups yet</p>
+                <p className="font-medium text-foreground mb-1">{t("No pop ups yet")}</p>
                 <p className="text-xs mb-4">
-                  Create a pop-up or start from a template - the WordPress plugin will serve it to your visitors.
+                  {t("Create a pop-up or start from a template - the WordPress plugin will serve it to your visitors.")}
                 </p>
                 <div className="flex items-center justify-center gap-2">
                   <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
-                    <Plus className="w-3.5 h-3.5" /> New Pop Up
+                    <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
                   </Button>
                   <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setTab("templates")}>
-                    <Layout className="w-3.5 h-3.5" /> Browse Templates
+                    <Layout className="w-3.5 h-3.5" /> {t("Browse Templates")}
                   </Button>
                 </div>
               </div>
@@ -2313,7 +2321,7 @@ export default function PopUp() {
                 <div key={group.key} className="mb-8">
                   {groupByStatus && (
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                      {group.label}
+                      {t(group.label)}
                     </p>
                   )}
                   <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
@@ -2378,21 +2386,21 @@ export default function PopUp() {
       <Dialog open={!!previewTarget} onOpenChange={(o) => !o && setPreviewTarget(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{previewTarget?.name} - Preview</DialogTitle>
+            <DialogTitle>{previewTarget?.name} - {t("Preview")}</DialogTitle>
           </DialogHeader>
           <div className="border border-border rounded-lg overflow-hidden bg-gray-50">
             <iframe
               srcDoc={previewTarget?.content || ""}
-              title="Pop-up preview"
+              title={t("Pop-up preview")}
               className="w-full"
               style={{ height: 380, border: "none" }}
               sandbox="allow-same-origin"
             />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={() => setPreviewTarget(null)}>Close</Button>
-            <Button size="sm" onClick={() => { const t = previewTarget; setPreviewTarget(null); openEdit(t); }}>
-              Edit
+            <Button variant="outline" size="sm" onClick={() => setPreviewTarget(null)}>{t("Close")}</Button>
+            <Button size="sm" onClick={() => { const target = previewTarget; setPreviewTarget(null); openEdit(target); }}>
+              {t("Edit")}
             </Button>
           </div>
         </DialogContent>
@@ -2402,19 +2410,19 @@ export default function PopUp() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this pop-up?</AlertDialogTitle>
+            <AlertDialogTitle>{t("Delete this pop-up?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the pop-up from the CDP. The WordPress plugin will stop serving it to visitors. This cannot be undone.
+              {t("This will remove the pop-up from the CDP. The WordPress plugin will stop serving it to visitors. This cannot be undone.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => deleteMutation.mutate(deleteTarget)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleteMutation.isPending}
             >
-              Delete
+              {t("Delete")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

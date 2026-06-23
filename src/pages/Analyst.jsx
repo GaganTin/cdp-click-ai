@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import PlanGate from "@/components/PlanGate";
 import { usePlan } from "@/lib/usePlan";
+import { parseChartConfig } from "@/lib/utils";
 import { useAuth } from "@/lib/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -439,8 +440,7 @@ export default function Analyst() {
   };
 
   const handleEditChartRequest = async (item) => {
-    let config = {};
-    try { config = JSON.parse(item.chart_config); } catch {}
+    const config = parseChartConfig(item.chart_config);
     const prompt = `Please update the chart titled "${item.title || config.title || "this chart"}". Here is the current configuration:\n\`\`\`json\n${JSON.stringify(config, null, 2)}\n\`\`\`\nWhat changes would you like? (e.g. add a date filter, change chart type, add a series, update the data)`;
     await handleSend(prompt);
   };

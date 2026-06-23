@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import MiniChart from "./MiniChart";
 import ChartExplainer from "./ChartExplainer";
+import { parseChartConfig } from "@/lib/utils";
 import { format, subDays, subMonths, parseISO, isAfter } from "date-fns";
 
 const SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large", wide: "Wide" };
@@ -44,8 +45,7 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
   const [chart] = useState(initialChart);
   const [dateFilter, setDateFilter] = useState("all");
 
-  let config = {};
-  try { config = JSON.parse(chart.chart_config); } catch {}
+  const config = parseChartConfig(chart.chart_config);
 
   const filteredConfig = useMemo(() => {
     const xKey = config.xKey || "name";

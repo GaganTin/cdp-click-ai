@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { useStickyState } from "@/lib/useStickyState";
 import { usePlan } from "@/lib/usePlan";
+import { usePreferences } from "@/lib/PreferencesContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
@@ -40,6 +41,7 @@ const GROUPS = [
 const STATUS_OPTIONS = ["active", "paused", "completed", "archived"];
 
 export default function Campaigns() {
+  const { t } = usePreferences();
   const [tab, setTab] = useState("utm");
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -113,12 +115,12 @@ export default function Campaigns() {
 
   const createMutation = useMutation({
     mutationFn: (data) => appClient.entities.Campaign.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["campaigns"] }); setCreateOpen(false); toast.success("Campaign created"); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["campaigns"] }); setCreateOpen(false); toast.success(t("Campaign created")); },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => appClient.entities.Campaign.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["campaigns"] }); setEditTarget(null); toast.success("Campaign updated"); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["campaigns"] }); setEditTarget(null); toast.success(t("Campaign updated")); },
   });
 
   const deleteMutation = useMutation({
@@ -128,26 +130,26 @@ export default function Campaigns() {
 
   const handleCreate = async (form) => {
     const nameTaken = campaigns.some(c => c.name.toLowerCase() === form.name.trim().toLowerCase());
-    if (nameTaken) { toast.error("A campaign with this name already exists."); return; }
+    if (nameTaken) { toast.error(t("A campaign with this name already exists.")); return; }
     const full_utm_url = buildUTMUrl(form);
     const urlTaken = full_utm_url && campaigns.some(c => c.full_utm_url === full_utm_url);
-    if (urlTaken) { toast.error("An identical UTM link already exists in CDP."); return; }
+    if (urlTaken) { toast.error(t("An identical UTM link already exists in CDP.")); return; }
     const utmCampaign = form.utm_campaign || form.name;
     if (form.utm_source && form.utm_medium && utmCampaign) {
       try {
         const { exists } = await appClient.utm.exists(form.utm_source, form.utm_medium, utmCampaign);
-        if (exists) { toast.error(`This UTM combination (${form.utm_source} / ${form.utm_medium} / ${utmCampaign}) already exists in Google Analytics.`); return; }
-      } catch { toast.warning("Could not verify against GA. Proceeding."); }
+        if (exists) { toast.error(t("This UTM combination") + ` (${form.utm_source} / ${form.utm_medium} / ${utmCampaign}) ` + t("already exists in Google Analytics.")); return; }
+      } catch { toast.warning(t("Could not verify against GA. Proceeding.")); }
     }
     createMutation.mutate({ ...form, full_utm_url, utm_campaign: utmCampaign });
   };
 
   const handleEdit = (form) => {
     const nameTaken = campaigns.some(c => c.id !== editTarget.id && c.name.toLowerCase() === form.name.trim().toLowerCase());
-    if (nameTaken) { toast.error("A campaign with this name already exists."); return; }
+    if (nameTaken) { toast.error(t("A campaign with this name already exists.")); return; }
     const full_utm_url = buildUTMUrl(form);
     const urlTaken = full_utm_url && campaigns.some(c => c.id !== editTarget.id && c.full_utm_url === full_utm_url);
-    if (urlTaken) { toast.error("An identical UTM link already exists."); return; }
+    if (urlTaken) { toast.error(t("An identical UTM link already exists.")); return; }
     updateMutation.mutate({ id: editTarget.id, data: { ...form, full_utm_url, utm_campaign: form.utm_campaign || form.name } });
   };
 
@@ -167,7 +169,7 @@ export default function Campaigns() {
     }));
     queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     setSelected(new Set());
-    toast.success(`${selectedCampaigns.length} campaign${selectedCampaigns.length > 1 ? "s" : ""} cloned`);
+    toast.success(`${selectedCampaigns.length} ` + (selectedCampaigns.length > 1 ? t("campaigns cloned") : t("campaign cloned")));
   };
 
   const handleBatchStatus = async (newStatus) => {
@@ -175,7 +177,7 @@ export default function Campaigns() {
     queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     setSelected(new Set());
     setBatchStatusOpen(false);
-    toast.success(`${selectedCampaigns.length} campaign${selectedCampaigns.length > 1 ? "s" : ""} updated to ${newStatus}`);
+    toast.success(`${selectedCampaigns.length} ` + (selectedCampaigns.length > 1 ? t("campaigns updated to") : t("campaign updated to")) + ` ${newStatus}`);
   };
 
   const handleBatchDelete = async () => {
@@ -183,14 +185,14 @@ export default function Campaigns() {
     queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     setSelected(new Set());
     setBatchDeleteOpen(false);
-    toast.success(`${selectedDrafts.length} draft${selectedDrafts.length > 1 ? "s" : ""} deleted`);
+    toast.success(`${selectedDrafts.length} ` + (selectedDrafts.length > 1 ? t("drafts deleted") : t("draft deleted")));
   };
 
   const handleCopyLinks = () => {
     const urls = selectedCampaigns.map(c => ensureHttps(c.full_utm_url || buildUTMUrl(c))).filter(Boolean);
-    if (!urls.length) { toast.error("No URLs to copy."); return; }
+    if (!urls.length) { toast.error(t("No URLs to copy.")); return; }
     navigator.clipboard.writeText(urls.join("\n"));
-    toast.success(`${urls.length} URL${urls.length > 1 ? "s" : ""} copied`);
+    toast.success(`${urls.length} ` + (urls.length > 1 ? t("URLs copied") : t("URL copied")));
   };
 
   const handleExportSelected = () => {
@@ -242,8 +244,8 @@ export default function Campaigns() {
   );
 
   const TABS = [
-    { key: "utm",       label: "UTM Links", icon: <LinkIcon className="w-3.5 h-3.5" /> },
-    { key: "analytics", label: "Analytics", icon: <BarChart2 className="w-3.5 h-3.5" /> },
+    { key: "utm",       label: t("UTM Links"), icon: <LinkIcon className="w-3.5 h-3.5" /> },
+    { key: "analytics", label: t("Analytics"), icon: <BarChart2 className="w-3.5 h-3.5" /> },
   ];
 
   const { canUseFeatures } = usePlan();
@@ -254,12 +256,12 @@ export default function Campaigns() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h1 className="font-heading text-3xl font-semibold tracking-tight">UTM</h1>
-            <p className="text-sm text-muted-foreground mt-1">Create, manage, and analyse your UTM tracking links.</p>
+            <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("UTM")}</h1>
+            <p className="text-sm text-muted-foreground mt-1">{t("Create, manage, and analyse your UTM tracking links.")}</p>
           </div>
           {tab === "utm" && canUseFeatures && (
             <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}>
-              <Plus className="w-3.5 h-3.5" /> New UTM
+              <Plus className="w-3.5 h-3.5" /> {t("New UTM")}
             </Button>
           )}
         </div>
@@ -285,82 +287,82 @@ export default function Campaigns() {
                 <div className="relative flex-1 max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                   <input value={search} onChange={e => { setSearch(e.target.value); setSelected(new Set()); }}
-                    placeholder="Search UTM links..."
+                    placeholder={t("Search UTM links...")}
                     className="w-full h-9 pl-9 pr-3 text-sm bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div ref={filterRef} className="relative">
                   <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setShowFilters(f => !f)}>
-                    <Filter className="w-3.5 h-3.5" /> Filters
+                    <Filter className="w-3.5 h-3.5" /> {t("Filters")}
                     {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
                   </Button>
                   {showFilters && (
                     <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-80 md:w-[480px]">
                       <div className="flex items-center justify-between mb-3">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by</p>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
                         {hasActiveFilters && (
-                          <button onClick={() => setFilters({ status: [], source: [], medium: [], campaign: [], content: [], term: [] })} className="text-[11px] text-muted-foreground hover:text-foreground">Clear all</button>
+                          <button onClick={() => setFilters({ status: [], source: [], medium: [], campaign: [], content: [], term: [] })} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
                         )}
                       </div>
                       <div className="grid grid-cols-2 gap-3 max-h-72 overflow-y-auto">
                         <div>
-                          <p className="text-[10px] text-muted-foreground mb-1">Status</p>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Status")}</p>
                           <MultiSelect value={filters.status} onChange={v => setFilter("status", v)}
-                            options={["active","draft","paused","completed","archived"]} placeholder="All" />
+                            options={["active","draft","paused","completed","archived"]} placeholder={t("All")} />
                         </div>
                         {uniqueSources.length > 0 && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Source</p>
-                            <MultiSelect value={filters.source} onChange={v => setFilter("source", v)} options={uniqueSources} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Source")}</p>
+                            <MultiSelect value={filters.source} onChange={v => setFilter("source", v)} options={uniqueSources} placeholder={t("All")} />
                           </div>
                         )}
                         {uniqueMediums.length > 0 && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Medium</p>
-                            <MultiSelect value={filters.medium} onChange={v => setFilter("medium", v)} options={uniqueMediums} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Medium")}</p>
+                            <MultiSelect value={filters.medium} onChange={v => setFilter("medium", v)} options={uniqueMediums} placeholder={t("All")} />
                           </div>
                         )}
                         {uniqueCampaigns.length > 0 && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Campaign</p>
-                            <MultiSelect value={filters.campaign} onChange={v => setFilter("campaign", v)} options={uniqueCampaigns} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Campaign")}</p>
+                            <MultiSelect value={filters.campaign} onChange={v => setFilter("campaign", v)} options={uniqueCampaigns} placeholder={t("All")} />
                           </div>
                         )}
                         {uniqueContents.length > 0 && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Content</p>
-                            <MultiSelect value={filters.content} onChange={v => setFilter("content", v)} options={uniqueContents} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Content")}</p>
+                            <MultiSelect value={filters.content} onChange={v => setFilter("content", v)} options={uniqueContents} placeholder={t("All")} />
                           </div>
                         )}
                         {uniqueTerms.length > 0 && (
                           <div>
-                            <p className="text-[10px] text-muted-foreground mb-1">Term</p>
-                            <MultiSelect value={filters.term} onChange={v => setFilter("term", v)} options={uniqueTerms} placeholder="All" />
+                            <p className="text-[10px] text-muted-foreground mb-1">{t("Term")}</p>
+                            <MultiSelect value={filters.term} onChange={v => setFilter("term", v)} options={uniqueTerms} placeholder={t("All")} />
                           </div>
                         )}
                       </div>
 
                       {/* Sort */}
                       <div className="mt-3 pt-3 border-t border-border">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Sort by</p>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Sort by")}</p>
                         <div className="flex items-center gap-2">
                           <select
                             value={["created_date", "name", "status"].includes(sortKey) ? sortKey : "created_date"}
                             onChange={e => setSortKey(e.target.value)}
                             className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
-                            <option value="created_date">Date</option>
-                            <option value="name">Name</option>
-                            <option value="status">Status</option>
+                            <option value="created_date">{t("Date")}</option>
+                            <option value="name">{t("Name")}</option>
+                            <option value="status">{t("Status")}</option>
                           </select>
                           <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
                             className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
-                            {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> Asc</> : <><ArrowDown className="w-3.5 h-3.5" /> Desc</>}
+                            {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                           </button>
                         </div>
                       </div>
                       <div className="mt-3 pt-3 border-t border-border">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">Group by</p>
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("Group by")}</p>
                         <label className="flex items-center justify-between cursor-pointer">
-                          <span className="text-xs text-muted-foreground">Status</span>
+                          <span className="text-xs text-muted-foreground">{t("Status")}</span>
                           <input type="checkbox" checked={groupByStatus} onChange={e => setGroupByStatus(e.target.checked)}
                             className="rounded border-border cursor-pointer" />
                         </label>
@@ -370,14 +372,14 @@ export default function Campaigns() {
                 </div>
                 <Button variant="outline" size="sm" className="h-9 gap-1.5"
                   onClick={() => setImportOpen(true)}>
-                  <Upload className="w-3.5 h-3.5" /> Import UTM
+                  <Upload className="w-3.5 h-3.5" /> {t("Import UTM")}
                 </Button>
               </div>
               {hasActiveFilters && (
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {Object.entries(filters).flatMap(([k, vals]) => vals.map(v => (
                     <span key={`${k}:${v}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
-                      {k}: <strong>{v}</strong>
+                      {t(k)}: <strong>{v}</strong>
                       <button onClick={() => setFilter(k, filters[k].filter(x => x !== v))} className="hover:text-foreground text-muted-foreground ml-0.5"><X className="w-3 h-3" /></button>
                     </span>
                   )))}
@@ -388,7 +390,7 @@ export default function Campaigns() {
             {gaLoading && (
               <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
                 <span className="w-3 h-3 border border-border border-t-foreground rounded-full animate-spin inline-block" />
-                Loading GA performance data…
+                {t("Loading GA performance data…")}
               </p>
             )}
 
@@ -399,40 +401,40 @@ export default function Campaigns() {
               const canDelete = single ? single.status === "draft" : canBatchDelete;
               return (
                 <div className="flex items-center gap-2 px-3 py-2 bg-foreground text-background rounded-lg text-sm">
-                  <span className="font-medium text-sm flex-shrink-0">{selected.size} selected</span>
+                  <span className="font-medium text-sm flex-shrink-0">{selected.size} {t("selected")}</span>
                   <div className="flex items-center gap-1 ml-2 flex-wrap">
                     {canEdit && (
                       <Button size="sm" variant="secondary"
                         className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                         onClick={() => { setEditTarget(single); setSelected(new Set()); }}>
-                        Edit
+                        {t("Edit")}
                       </Button>
                     )}
                     <Button size="sm" variant="secondary"
                       className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                       onClick={single ? () => { handleClone(single); setSelected(new Set()); } : handleBatchClone}>
-                      Clone
+                      {t("Clone")}
                     </Button>
                     <Button size="sm" variant="secondary"
                       className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                       onClick={handleCopyLinks}>
-                      Copy URL{selected.size > 1 ? "s" : ""}
+                      {selected.size > 1 ? t("Copy URLs") : t("Copy URL")}
                     </Button>
                     <Button size="sm" variant="secondary"
                       className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                       onClick={handleExportSelected}>
-                      Export CSV
+                      {t("Export CSV")}
                     </Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="sm" variant="secondary"
                           className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0">
-                          Change Status
+                          {t("Change Status")}
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start">
                         {STATUS_OPTIONS.map(s => (
-                          <DropdownMenuItem key={s} onClick={() => handleBatchStatus(s)} className="capitalize">{s}</DropdownMenuItem>
+                          <DropdownMenuItem key={s} onClick={() => handleBatchStatus(s)} className="capitalize">{t(s)}</DropdownMenuItem>
                         ))}
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -440,13 +442,13 @@ export default function Campaigns() {
                       <Button size="sm" variant="secondary"
                         className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0 text-red-300 hover:text-red-200"
                         onClick={() => setBatchDeleteOpen(true)}>
-                        Delete
+                        {t("Delete")}
                       </Button>
                     )}
                   </div>
                   <button onClick={() => setSelected(new Set())}
                     className="ml-auto text-background/70 hover:text-background text-xs flex-shrink-0">
-                    Clear
+                    {t("Clear")}
                   </button>
                 </div>
               );
@@ -458,8 +460,8 @@ export default function Campaigns() {
             ) : filteredCampaigns.length === 0 ? (
               <div className="border border-dashed border-border rounded-lg p-12 text-center">
                 <LinkIcon className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm font-medium mb-1">{campaigns.length === 0 ? "No UTM links yet" : "No results found"}</p>
-                <p className="text-xs text-muted-foreground">{campaigns.length === 0 ? "Create your first UTM tracking link." : "Try adjusting your search or filter."}</p>
+                <p className="text-sm font-medium mb-1">{campaigns.length === 0 ? t("No UTM links yet") : t("No results found")}</p>
+                <p className="text-xs text-muted-foreground">{campaigns.length === 0 ? t("Create your first UTM tracking link.") : t("Try adjusting your search or filter.")}</p>
               </div>
             ) : (
               (groupByStatus ? GROUPS : [{ key: "all", label: "All", filter: () => true }]).map(group => {
@@ -476,7 +478,7 @@ export default function Campaigns() {
                   <div key={group.key}>
                     {groupByStatus && (
                       <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        {group.label} · {items.length}
+                        {t(group.label)} · {items.length}
                       </p>
                     )}
                     <div className={`border border-border rounded-lg overflow-auto ${group.key === "archived" ? "opacity-60" : ""}`}>
@@ -490,19 +492,19 @@ export default function Campaigns() {
                                 onChange={toggleGroup} />
                             </th>
                             {[
-                              { key: "name",         label: "Name",         align: "left" },
-                              { key: "status",       label: "Status",       align: "left" },
-                              { key: "utm_source",   label: "Source",       align: "left" },
-                              { key: "utm_medium",   label: "Medium",       align: "left" },
-                              { key: "utm_campaign", label: "Campaign",     align: "left" },
-                              { key: "base_url",     label: "Base URL",     align: "left" },
-                              { key: "full_utm_url", label: "Full UTM URL", align: "left" },
-                              { key: "_ga_sessions",   label: "Sessions",    align: "right", info: "Total sessions in the last 30 days from GA where this campaign's UTM parameters were detected." },
-                              { key: "_ga_users",      label: "Active Users", align: "right", info: "Users who had at least one session in the last 30 days." },
-                              { key: "_ga_new_users",  label: "New Users",   align: "right", info: "First-time visitors to the site in the last 30 days." },
-                              { key: "_ga_bounce",     label: "Bounce",      align: "right", info: "Avg. bounce rate - percentage of sessions where users left without any meaningful interaction." },
-                              { key: "_ga_engagement", label: "Engagement",  align: "right", info: "Avg. engagement rate - sessions that lasted 10+ seconds, had a conversion event, or included 2+ page views." },
-                              { key: "created_date", label: "Created",      align: "left" },
+                              { key: "name",         label: t("Name"),         align: "left" },
+                              { key: "status",       label: t("Status"),       align: "left" },
+                              { key: "utm_source",   label: t("Source"),       align: "left" },
+                              { key: "utm_medium",   label: t("Medium"),       align: "left" },
+                              { key: "utm_campaign", label: t("Campaign"),     align: "left" },
+                              { key: "base_url",     label: t("Base URL"),     align: "left" },
+                              { key: "full_utm_url", label: t("Full UTM URL"), align: "left" },
+                              { key: "_ga_sessions",   label: t("Sessions"),    align: "right", info: t("Total sessions in the last 30 days from GA where this campaign's UTM parameters were detected.") },
+                              { key: "_ga_users",      label: t("Active Users"), align: "right", info: t("Users who had at least one session in the last 30 days.") },
+                              { key: "_ga_new_users",  label: t("New Users"),   align: "right", info: t("First-time visitors to the site in the last 30 days.") },
+                              { key: "_ga_bounce",     label: t("Bounce"),      align: "right", info: t("Avg. bounce rate - percentage of sessions where users left without any meaningful interaction.") },
+                              { key: "_ga_engagement", label: t("Engagement"),  align: "right", info: t("Avg. engagement rate - sessions that lasted 10+ seconds, had a conversion event, or included 2+ page views.") },
+                              { key: "created_date", label: t("Created"),      align: "left" },
                             ].map(col => (
                               <th
                                 key={col.key}
@@ -540,7 +542,7 @@ export default function Campaigns() {
                                 </td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">
                                   {c.status === "draft"
-                                    ? <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-700 border border-yellow-500/40 capitalize">draft</span>
+                                    ? <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-700 border border-yellow-500/40 capitalize">{t("draft")}</span>
                                     : <span className="text-muted-foreground capitalize">{c.status || "-"}</span>}
                                 </td>
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{c.utm_source || "-"}</td>
@@ -579,27 +581,27 @@ export default function Campaigns() {
       {/* Create Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle className="font-heading">Create UTM Link</DialogTitle></DialogHeader>
-          <UTMForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel="Create UTM Link" />
+          <DialogHeader><DialogTitle className="font-heading">{t("Create UTM Link")}</DialogTitle></DialogHeader>
+          <UTMForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel={t("Create UTM Link")} />
         </DialogContent>
       </Dialog>
 
       {/* Edit Dialog */}
       <Dialog open={!!editTarget} onOpenChange={v => !v && setEditTarget(null)}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle className="font-heading">Edit UTM Link</DialogTitle></DialogHeader>
-          {editTarget && <UTMForm initialValues={editTarget} onSubmit={handleEdit} isPending={updateMutation.isPending} submitLabel="Save Changes" />}
+          <DialogHeader><DialogTitle className="font-heading">{t("Edit UTM Link")}</DialogTitle></DialogHeader>
+          {editTarget && <UTMForm initialValues={editTarget} onSubmit={handleEdit} isPending={updateMutation.isPending} submitLabel={t("Save Changes")} />}
         </DialogContent>
       </Dialog>
 
       {/* Batch delete confirm */}
       <Dialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading">Delete {selectedDrafts.length} Draft{selectedDrafts.length > 1 ? "s" : ""}?</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">This action cannot be undone. Only draft campaigns will be deleted.</p>
+          <DialogHeader><DialogTitle className="font-heading">{t("Delete")} {selectedDrafts.length} {selectedDrafts.length > 1 ? t("Drafts?") : t("Draft?")}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">{t("This action cannot be undone. Only draft campaigns will be deleted.")}</p>
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setBatchDeleteOpen(false)}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={handleBatchDelete}>Delete</Button>
+            <Button variant="outline" size="sm" onClick={() => setBatchDeleteOpen(false)}>{t("Cancel")}</Button>
+            <Button variant="destructive" size="sm" onClick={handleBatchDelete}>{t("Delete")}</Button>
           </div>
         </DialogContent>
       </Dialog>
