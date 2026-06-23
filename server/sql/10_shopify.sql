@@ -3,10 +3,13 @@
 -- ----------------------------------------------------------------------------
 --  Raw, Shopify-NATIVE data synced by the click_cdp_ai Shopify DAGs
 --  (dags/click_cdp_ai/shopify/* via lib/shopify_transforms + lib/pg_loader).
---  Column sets mirror the DAG transforms 1:1; cross-platform normalization
---  (unified order status, date parts, refunded-qty) deliberately does NOT
+--  Column sets AND scalar types mirror the DAG transforms 1:1: pg_loader infers
+--  raw landing types from the pandas DataFrame, so money / amounts and the raw
+--  created_at land as TEXT and counts as BIGINT here. Cross-platform
+--  normalization + casting to numeric/timestamptz/boolean deliberately does NOT
 --  happen here - it happens in the neutral commerce.* layer (14_commerce.sql),
---  which is what the app / profile builder / AI analyst read.
+--  which is what the app / profile builder / AI analyst read. Keep these types
+--  matching pg_loader._pg_type_for_series or inserts will fail the type cast.
 --
 --  ID convention: {capsuite_ref}_{entity}_{shopifyNativeId}, e.g.
 --  acme_order_123, acme_cust_456, acme_product_789 (variant grain),
@@ -25,15 +28,15 @@
 CREATE TABLE shopify.customer (
   customer_id     TEXT        NOT NULL,
   company_id      UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
-  created_at      TIMESTAMPTZ,
+  created_at      TEXT,                       -- raw Shopify string (commerce.* casts)
   updated_at      TIMESTAMPTZ,
   email           TEXT,
   phone           TEXT,                       -- normalized, '+' stripped
   first_name      TEXT,
   last_name       TEXT,
   full_name       TEXT,
-  is_opt_in_email BOOLEAN,
-  is_opt_in_sms   BOOLEAN,
+  is_opt_in_email TEXT,                       -- 'true'/'false' string from transform
+  is_opt_in_sms   TEXT,
   tags            TEXT,
   capsuite_ref    TEXT,
   PRIMARY KEY (company_id, customer_id)
@@ -47,11 +50,11 @@ CREATE TABLE shopify."order" (
   company_id         UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
   customer_id        TEXT,
   order_name         TEXT,                    -- Shopify order name, e.g. "#1001"
-  created_at         TIMESTAMPTZ,
-  total_price        NUMERIC,
+  created_at         TEXT,                    -- raw Shopify string (commerce.* casts)
+  total_price        TEXT,
   currency           TEXT,
-  total_refunded     NUMERIC,
-  net_payment        NUMERIC,
+  total_refunded     TEXT,
+  net_payment        TEXT,
   financial_status   TEXT,                    -- PAID | PARTIALLY_REFUNDED | REFUNDED | VOIDED | ...
   fulfillment_status TEXT,                    -- FULFILLED | IN_PROGRESS | RESTOCKED | ...
   capsuite_ref       TEXT,
@@ -69,12 +72,12 @@ CREATE TABLE shopify.order_line (
   product_id            TEXT,                 -- variant grain ({ref}_product_{variantId})
   product_sku           TEXT,
   product_name          TEXT,
-  quantity_ordered      NUMERIC,
-  quantity_current      NUMERIC,              -- after removals/refunds
-  original_unit_price   NUMERIC,
-  discounted_unit_price NUMERIC,
+  quantity_ordered      BIGINT,
+  quantity_current      BIGINT,               -- after removals/refunds
+  original_unit_price   TEXT,
+  discounted_unit_price TEXT,
   currency              TEXT,
-  created_at            TIMESTAMPTZ,          -- order created_at (joined in transform)
+  created_at            TEXT,                 -- order created_at string (joined in transform)
   capsuite_ref          TEXT,
   PRIMARY KEY (company_id, order_line_id)
 );
@@ -87,12 +90,12 @@ CREATE TABLE shopify.product (
   company_id        UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
   product_temp_id   TEXT,
   product_sku       TEXT,
-  price             NUMERIC,
+  price             TEXT,
   product_name      TEXT,                     -- "Product - Variant" when variant-titled
   product_type      TEXT,
   taxonomy_category TEXT,                     -- Shopify taxonomy node name
   tags              TEXT,
-  created_at        TIMESTAMPTZ,
+  created_at        TEXT,                     -- raw Shopify string (commerce.* casts)
   updated_at        TIMESTAMPTZ,
   capsuite_ref      TEXT,
   PRIMARY KEY (company_id, product_id)
@@ -119,7 +122,7 @@ CREATE TABLE shopify.product_image (
   product_handle  TEXT,
   product_img_id  TEXT,
   product_img_url TEXT,
-  created_at      TIMESTAMPTZ,
+  created_at      TEXT,                       -- raw Shopify string (commerce.* casts)
   updated_at      TIMESTAMPTZ,
   capsuite_ref    TEXT,
   PRIMARY KEY (company_id, product_id)
@@ -133,7 +136,7 @@ CREATE TABLE shopify.inventory_level (
   inventory_level_id BIGINT,                  -- synthetic per-snapshot row number
   product_id         TEXT        NOT NULL,    -- variant grain
   location_id        TEXT        NOT NULL,
-  quantity           NUMERIC,
+  quantity           BIGINT,
   updated_at         TIMESTAMPTZ,
   capsuite_ref       TEXT,
   PRIMARY KEY (company_id, product_id, location_id)
@@ -145,8 +148,8 @@ CREATE TABLE shopify.refund (
   refund_id       TEXT        NOT NULL,
   company_id      UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
   order_id        TEXT,
-  refund_date     TIMESTAMPTZ,
-  refund_amount   NUMERIC,
+  refund_date     TEXT,                       -- raw Shopify string (commerce.* casts)
+  refund_amount   TEXT,
   refund_currency TEXT,
   note            TEXT,
   capsuite_ref    TEXT,
@@ -164,8 +167,8 @@ CREATE TABLE shopify.refund_line (
   order_line_id   TEXT,
   product_id      TEXT,
   product_sku     TEXT,
-  refunded_qty    NUMERIC,
-  refund_subtotal NUMERIC,
+  refunded_qty    BIGINT,
+  refund_subtotal TEXT,
   refund_currency TEXT,
   restock_type    TEXT,                       -- RETURN | CANCEL | NO_RESTOCK | LEGACY_RESTOCK
   capsuite_ref    TEXT,

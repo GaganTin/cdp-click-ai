@@ -50,6 +50,7 @@ CREATE TABLE ga_landing.path_exploration_duration (
   capsuite_sid             TEXT,
   capsuite_uid             TEXT,
   capsuite_apid            TEXT,
+  capsuite_identifier      TEXT,
   capsuite_ref             TEXT,
   property_id              TEXT,
   property_name            TEXT,
@@ -57,6 +58,24 @@ CREATE TABLE ga_landing.path_exploration_duration (
   PRIMARY KEY (company_id, id)
 );
 CREATE INDEX gal_ped_company_date_idx ON ga_landing.path_exploration_duration(company_id, date);
+
+-- ── Outbound-link clicks (event_name = 'click', external link_url) ───────────
+--  Same event grain as path_exploration; written by the GA path/outbound DAG.
+CREATE TABLE ga_landing.outbound_links_attributes (
+  id               BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id       UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  event_name       TEXT,
+  date_hour_minute TIMESTAMP,                 -- naive, GA property tz
+  date             TEXT,
+  page_location    TEXT,
+  link_url         TEXT,
+  capsuite_ref     TEXT,
+  property_id      TEXT,
+  property_name    TEXT,
+  synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_ola_company_date_idx ON ga_landing.outbound_links_attributes(company_id, date);
 
 -- ── UTM performance (minute / full-param) ───────────────────────────────────
 CREATE TABLE ga_landing.utm_performance (
@@ -209,6 +228,7 @@ CREATE TABLE ga_landing.page_metrics (
   page_views       INTEGER,
   sessions         INTEGER,
   engaged_sessions INTEGER,
+  bounced_sessions BIGINT,                    -- pg_loader infers int64 → BIGINT
   capsuite_ref     TEXT,
   property_id      TEXT,
   property_name    TEXT,
@@ -246,6 +266,9 @@ CREATE TABLE ga_landing.website_metrics (
   engaged_sessions         INTEGER,
   user_engagement_duration INTEGER,
   page_views               INTEGER,
+  engaged_sessions_per_active_user    DOUBLE PRECISION,
+  average_engagement_time_per_session DOUBLE PRECISION,
+  average_engagement_time_per_user    DOUBLE PRECISION,
   capsuite_ref             TEXT,
   property_id              TEXT,
   property_name            TEXT,
