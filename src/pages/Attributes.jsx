@@ -1323,9 +1323,11 @@ function PagesPanel() {
             </button>
           ))}
         </div>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={crawlMut.isPending}
+        <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={crawlMut.isPending || !cs?.ga_connected}
           onClick={() => crawlMut.mutate()}
-          title={t("Crawl your site's pages into this list without tagging - review and exclude them, then test attributes before a full Reconstruct.")}>
+          title={!cs?.ga_connected
+            ? t("Connect Google Analytics to crawl pages.")
+            : t("Crawl your site's pages into this list without tagging - review and exclude them, then test attributes before a full Reconstruct.")}>
           {crawlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
           {t("Crawl pages")}
         </Button>
@@ -1666,7 +1668,10 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
 }
 
 // First-run guided checklist shown when there are no content attributes yet.
-function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, crawling, onCrawl, onCreate, onSuggest }) {
+// firstStepsOnly: show just the source-setup steps (Connect → Sync → Crawl) as a
+// banner above existing attribute definitions - used after GA is disconnected, when
+// the definitions are kept but their data must be re-sourced.
+function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, crawling, onCrawl, onCreate, onSuggest, firstStepsOnly = false }) {
   const { t } = usePreferences();
   const navigate = useNavigate();
   // The current step is the first one not yet done (steps 4 & 5 are never auto-done).
@@ -1688,11 +1693,15 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
     </div>
   );
   return (
-    <div className="border border-border rounded-lg p-6 max-w-xl mx-auto mt-6 space-y-5">
+    <div className={`border border-border rounded-lg p-6 max-w-xl mx-auto space-y-5 ${firstStepsOnly ? "mb-6" : "mt-6"}`}>
       <div className="text-center">
         <Tag className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
         <p className="text-sm font-medium">{t("Get started with content attributes")}</p>
-        <p className="text-xs text-muted-foreground">{t("The AI reads your website, tags each page, and visitors inherit those tags - even anonymous ones.")}</p>
+        <p className="text-xs text-muted-foreground">
+          {firstStepsOnly
+            ? t("Google Analytics is disconnected. Your attribute definitions are kept - reconnect, sync, and re-crawl to tag your pages again.")
+            : t("The AI reads your website, tags each page, and visitors inherit those tags - even anonymous ones.")}
+        </p>
       </div>
       <div className="space-y-4">
         <Step done={gaConnected} n={1} current={currentN === 1} title={t("Connect Google Analytics")}>
@@ -1727,17 +1736,21 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
             </>
           )}
         </Step>
-        <Step done={false} n={4} current={currentN === 4} title={t("Create your first attribute")}>
-          {canCreate ? t("Name a dimension (e.g. “Country Name”) and give the AI an instruction.")
-            : t("Finish the steps above first - attributes need crawled pages to tag and test against.")}
-          <div className="flex items-center gap-2 mt-2">
-            <Button size="sm" className="h-8 gap-1.5" onClick={onCreate} disabled={!canCreate}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest} disabled={!canCreate}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
-          </div>
-        </Step>
-        <Step done={false} n={5} current={currentN === 5} title={t("Reconstruct to tag your pages")}>
-          {t("Open the attribute and hit")} <strong>{t("Reconstruct")}</strong> - {t("the AI crawls, tags, and propagates to profiles.")}
-        </Step>
+        {!firstStepsOnly && (
+          <>
+            <Step done={false} n={4} current={currentN === 4} title={t("Create your first attribute")}>
+              {canCreate ? t("Name a dimension (e.g. “Country Name”) and give the AI an instruction.")
+                : t("Finish the steps above first - attributes need crawled pages to tag and test against.")}
+              <div className="flex items-center gap-2 mt-2">
+                <Button size="sm" className="h-8 gap-1.5" onClick={onCreate} disabled={!canCreate}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest} disabled={!canCreate}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
+              </div>
+            </Step>
+            <Step done={false} n={5} current={currentN === 5} title={t("Reconstruct to tag your pages")}>
+              {t("Open the attribute and hit")} <strong>{t("Reconstruct")}</strong> - {t("the AI crawls, tags, and propagates to profiles.")}
+            </Step>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2872,7 +2885,15 @@ export default function Attributes() {
                 crawling={ACTIVE_JOB(globalJob) || crawlMut.isPending} onCrawl={() => crawlMut.mutate()}
                 onCreate={() => setCreateOpen(true)} onSuggest={() => setSuggestOpen(true)} />
             ) : (
-              <CardGrid {...gridProps} />
+              <>
+                {/* GA was disconnected (or never finished setup) but definitions are
+                    kept - show the source-setup steps above the existing cards. */}
+                {!canCreate && (
+                  <FirstRunChecklist firstStepsOnly gaConnected={gaConnected} gaSynced={gaSynced} pagesCrawled={pagesCrawled} crawledPages={crawledPages}
+                    crawling={ACTIVE_JOB(globalJob) || crawlMut.isPending} onCrawl={() => crawlMut.mutate()} />
+                )}
+                <CardGrid {...gridProps} />
+              </>
             )}
           </>
         )}
