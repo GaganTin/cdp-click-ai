@@ -748,7 +748,7 @@ function CompanyTab({ company, onRefresh }) {
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-5 max-w-3xl">
         <h2 className="font-heading text-lg font-semibold tracking-tight text-destructive">{t("Danger zone")}</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          {t("Permanently delete this workspace and everything in it — profiles, integrations, analytics, segments, campaigns, attributes and team access. This cannot be undone.")}
+          {t("Permanently delete this workspace and everything in it - profiles, integrations, analytics, segments, campaigns, attributes and team access. This cannot be undone.")}
         </p>
         {!showDelete ? (
           <Button variant="destructive" size="sm" className="mt-4 gap-1.5" onClick={() => setShowDelete(true)}>

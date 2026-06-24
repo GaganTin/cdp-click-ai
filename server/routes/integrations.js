@@ -243,7 +243,7 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
   const PURGE_TABLES = {
     googleAnalytics: [
       // Small aggregate tables that power the UTM / dashboard analytics. Purged
-      // FIRST so the UI stops showing data almost immediately — the big event
+      // FIRST so the UI stops showing data almost immediately - the big event
       // tables below can be millions of rows and take far longer to delete.
       "ga_landing.utm_performance", "ga_landing.utm_daily_performance",
       "ga_landing.utm_daily_full_param_performance", "ga_landing.utm_daily_utm_id_performance",
@@ -304,7 +304,7 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
     if (!tables || !companyId) return 0;
     // Each DELETE is isolated: a failure or lock-timeout on one table (e.g. the
     // multi-million-row event tables) must NOT abort the loop and leave the
-    // remaining tables — including the small analytics ones the UI reads —
+    // remaining tables - including the small analytics ones the UI reads -
     // populated. Failures are logged; the purge presses on.
     let purged = 0;
     const run = async (label, sql, params) => {

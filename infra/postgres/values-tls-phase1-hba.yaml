@@ -1,4 +1,4 @@
-# PHASE 1 overlay — TLS available but NOT enforced.
+# PHASE 1 overlay - TLS available but NOT enforced.
 # Layer this ON TOP of values-tls.yaml so the 0.0.0.0/0 + ::/0 rules stay `host`
 # (SSL optional) while clients are migrated. Existing sslmode=disable connections
 # keep working. For Phase 3 (enforce), drop this file and re-run with only

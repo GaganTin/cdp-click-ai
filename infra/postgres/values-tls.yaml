@@ -9,7 +9,7 @@
 # <SAME-CHART-SOURCE-AS-ORIGINAL> is whatever you installed from, e.g.
 #   oci://registry-1.docker.io/bitnamicharts/postgresql
 #
-# This is a passthrough (L4) LoadBalancer, so TLS terminates at Postgres itself —
+# This is a passthrough (L4) LoadBalancer, so TLS terminates at Postgres itself -
 # no change to the `cdp-ai-postgres-public` Service is needed.
 
 tls:

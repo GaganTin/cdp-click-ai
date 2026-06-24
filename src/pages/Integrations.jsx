@@ -87,7 +87,7 @@ const INTEGRATIONS = [
         ],
       },
     ],
-    disconnectWarning: "All Google Analytics data and its anonymous visitor profiles will be permanently deleted. Your content attributes and tagged pages are kept.",
+    disconnectWarning: "All Google Analytics data and its anonymous visitor profiles will be permanently deleted. Your content attributes' crawled pages, tags, and discovered values will also be cleared - only the attribute definitions are kept.",
   },
   {
     id: "googleSearchConsole",
@@ -1147,7 +1147,7 @@ export default function Integrations() {
                         </div>
                         {getStatus(activeRecord) === "synced" && (
                           <p className="text-[11px] text-muted-foreground mb-3 -mt-1">
-                            {t("This integration syncs automatically once a day — no need to sync manually anymore.")}
+                            {t("This integration syncs automatically once a day - no need to sync manually anymore.")}
                           </p>
                         )}
                         <SyncJobList type={activeIntegration.id} />

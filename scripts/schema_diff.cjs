@@ -290,11 +290,11 @@ async function buildActual(pool) {
   if (!missingTables.length) L.push("  (none)");
 
   L.push(`\n-- Tables in DB but NOT in any SQL file (${extraTables.length}) --`);
-  extraTables.forEach(t => L.push(`  ? ${t}  [cols: ${[...act.get(t).keys()].join(", ") || "—"}]`));
+  extraTables.forEach(t => L.push(`  ? ${t}  [cols: ${[...act.get(t).keys()].join(", ") || "-"}]`));
   if (!extraTables.length) L.push("  (none)");
 
   L.push(`\n-- Column drift on shared tables (${colIssues.length} tables) --`);
-  if (!colIssues.length) L.push("  (none — all shared tables match)");
+  if (!colIssues.length) L.push("  (none - all shared tables match)");
   for (const ci of colIssues) {
     L.push(`  ▸ ${ci.t}`);
     if (ci.missingCols.length) L.push(`      missing in DB  : ${ci.missingCols.join(", ")}`);
