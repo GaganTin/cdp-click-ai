@@ -1666,12 +1666,13 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
 }
 
 // First-run guided checklist shown when there are no content attributes yet.
-function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
+function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, crawling, onCrawl, onCreate, onSuggest }) {
   const { t } = usePreferences();
   const navigate = useNavigate();
-  // The current step is the first one not yet done (steps 3 & 4 are never auto-done).
-  const doneFlags = [gaConnected, gaSynced, false, false];
+  // The current step is the first one not yet done (steps 4 & 5 are never auto-done).
+  const doneFlags = [gaConnected, gaSynced, pagesCrawled, false, false];
   const currentN = doneFlags.findIndex(d => !d) + 1; // 0 when everything is done
+  const canCreate = gaConnected && gaSynced && pagesCrawled;
   const Step = ({ done, n, title, current, children }) => (
     <div className="flex items-start gap-3">
       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0 ${
@@ -1711,14 +1712,30 @@ function FirstRunChecklist({ gaConnected, gaSynced, onCreate, onSuggest }) {
             </>
           )}
         </Step>
-        <Step done={false} n={3} current={currentN === 3} title={t("Create your first attribute")}>
-          {t("Name a dimension (e.g. “Country Name”) and give the AI an instruction.")}
+        <Step done={pagesCrawled} n={3} current={currentN === 3} title={t("Crawl your website's pages")}>
+          {pagesCrawled ? (
+            <>{crawledPages} {t("pages crawled - review and exclude any in the")} <strong>{t("Pages")}</strong> {t("tab.")}</>
+          ) : (
+            <>
+              {t("Read your site's pages (URL + title) so you can review them and test attributes before tagging. No AI tagging happens yet.")}
+              <div className="mt-2">
+                <Button size="sm" className="h-8 gap-1.5" onClick={onCrawl} disabled={!gaSynced || crawling}>
+                  {crawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                  {crawling ? t("Crawling…") : t("Crawl pages")}
+                </Button>
+              </div>
+            </>
+          )}
+        </Step>
+        <Step done={false} n={4} current={currentN === 4} title={t("Create your first attribute")}>
+          {canCreate ? t("Name a dimension (e.g. “Country Name”) and give the AI an instruction.")
+            : t("Finish the steps above first - attributes need crawled pages to tag and test against.")}
           <div className="flex items-center gap-2 mt-2">
-            <Button size="sm" className="h-8 gap-1.5" onClick={onCreate}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
+            <Button size="sm" className="h-8 gap-1.5" onClick={onCreate} disabled={!canCreate}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest} disabled={!canCreate}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
           </div>
         </Step>
-        <Step done={false} n={4} current={currentN === 4} title={t("Reconstruct to tag your pages")}>
+        <Step done={false} n={5} current={currentN === 5} title={t("Reconstruct to tag your pages")}>
           {t("Open the attribute and hit")} <strong>{t("Reconstruct")}</strong> - {t("the AI crawls, tags, and propagates to profiles.")}
         </Step>
       </div>
@@ -2596,6 +2613,18 @@ export default function Attributes() {
     refetchInterval: (q) => (ACTIVE_JOB(q.state.data) ? 2500 : false),
   });
 
+  // When a run finishes, refresh the crawled-page count (and inventory) so the setup
+  // gate / first-run checklist advance from "Crawl pages" to "Create attribute".
+  const prevJobActive = useRef(false);
+  useEffect(() => {
+    const active = ACTIVE_JOB(globalJob);
+    if (prevJobActive.current && !active) {
+      qc.invalidateQueries({ queryKey: ["crawl-settings"] });
+      qc.invalidateQueries({ queryKey: ["web-pages"] });
+    }
+    prevJobActive.current = active;
+  }, [globalJob, qc]);
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ["attributes"] });
 
   const createMut = useMutation({
@@ -2647,6 +2676,16 @@ export default function Attributes() {
   const showHeaderActions = isContent && contentSub === "attributes" && !selectedAttrId;
   const gaConnected = !!crawlSettings?.ga_connected;
   const gaSynced = !!crawlSettings?.ga_synced;
+  const crawledPages = crawlSettings?.crawled_pages || 0;
+  const pagesCrawled = crawledPages > 0;
+  // Behavioral attributes can only be created once the source is set up end-to-end:
+  // GA connected -> synced -> pages crawled. This also re-gates creation if GA is
+  // later disconnected (which purges crawled pages), since there's nothing to tag.
+  const canCreate = gaConnected && gaSynced && pagesCrawled;
+  const createGateMsg = canCreate ? ""
+    : !gaConnected ? t("Connect Google Analytics first.")
+    : !gaSynced ? t("Sync your Google Analytics data first.")
+    : t("Crawl your pages first.");
 
   // Filter + sort + group the cards for the grid.
   const hasActiveFilters = Object.values(filters).some(Boolean);
@@ -2701,12 +2740,6 @@ export default function Attributes() {
             const activeCount = tabAttrs.filter((a) => a.status === "active").length;
             return (
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
-                onClick={() => crawlMut.mutate()}
-                title={t("Crawl pages into the Pages tab without tagging - review, exclude, and test attributes before a full Reconstruct.")}>
-                {crawlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
-                {t("Crawl pages only")}
-              </Button>
               {tabAttrs.length > 0 && (
                 <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
                   onClick={() => {
@@ -2717,8 +2750,10 @@ export default function Attributes() {
                   {running ? t("Running…") : t("Reconstruct all")}
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setSuggestOpen(true)}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
-              <Button size="sm" className="h-9 gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!canCreate} title={createGateMsg}
+                onClick={() => setSuggestOpen(true)}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
+              <Button size="sm" className="h-9 gap-1.5" disabled={!canCreate} title={createGateMsg}
+                onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
             </div>
             );
           })()}
@@ -2833,7 +2868,9 @@ export default function Attributes() {
                 {[1, 2, 3].map((i) => <div key={i} className="h-28 bg-secondary animate-pulse rounded-lg" />)}
               </div>
             ) : tabAttrs.length === 0 ? (
-              <FirstRunChecklist gaConnected={gaConnected} gaSynced={gaSynced} onCreate={() => setCreateOpen(true)} onSuggest={() => setSuggestOpen(true)} />
+              <FirstRunChecklist gaConnected={gaConnected} gaSynced={gaSynced} pagesCrawled={pagesCrawled} crawledPages={crawledPages}
+                crawling={ACTIVE_JOB(globalJob) || crawlMut.isPending} onCrawl={() => crawlMut.mutate()}
+                onCreate={() => setCreateOpen(true)} onSuggest={() => setSuggestOpen(true)} />
             ) : (
               <CardGrid {...gridProps} />
             )}

@@ -51,6 +51,13 @@ export function createAttributesRouter(pool) {
          WHERE company_id = $1 AND integration_type = 'googleAnalytics' LIMIT 1`,
         [req.companyId]
       );
+      // How many usable pages have been crawled - drives the "Crawl pages" setup
+      // gate (attributes can't be created until at least one page is crawled).
+      const { rows: pc } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM app.web_pages
+         WHERE company_id = $1 AND is_valid = true AND is_excluded = false`,
+        [req.companyId]
+      );
       res.json({
         ga_connected:     ga[0]?.is_connected || false,
         ga_synced:        ga[0]?.is_synced || false,
@@ -59,6 +66,7 @@ export function createAttributesRouter(pool) {
         url_domain:       dom[0]?.url_domain || null,
         url_pattern:      cfg[0]?.url_pattern || "",
         excluded_url_patterns: cfg[0]?.excluded_url_patterns || [],
+        crawled_pages:    pc[0]?.n || 0,
       });
     } catch (err) { fail(res, err); }
   });
