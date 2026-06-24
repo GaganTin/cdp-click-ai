@@ -26,6 +26,7 @@ import { createBillingRouter } from "./routes/billing.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createSupportRouter } from "./routes/support.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
+import { createAnnouncementsRouter } from "./routes/announcements.js";
 import { createPopupRouter } from "./routes/popup.js";
 import { createUtmRouter } from "./routes/utm.js";
 import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } from "./middleware/auth.js";
@@ -3000,6 +3001,7 @@ if (pool) {
   app.use("/api/admin", createAdminRouter(pool));
   app.use("/api/support", createSupportRouter(pool));
   app.use("/api/notifications", createNotificationsRouter(pool));
+  app.use("/api/announcements", createAnnouncementsRouter(pool));
 } else {
   // Fallback local-mode (no DB) - return static data so the UI is usable
   app.get("/api/plans", (_req, res) => res.json(FALLBACK_PLANS));

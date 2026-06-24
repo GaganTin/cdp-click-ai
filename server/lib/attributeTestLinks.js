@@ -123,6 +123,77 @@ export async function refreshGaTestLinks(pool, companyId) {
   return syncTestLinksFromRank(pool, companyId);
 }
 
+// "Test top pages" source: the company's most-visited VALID pages, ranked by GA
+// traffic from ga_landing.path_exploration. Reads the cached page-rank rollup
+// (cheap; lazily built from the recent window) joined to already-crawled valid,
+// non-excluded pages. If that recent window yields fewer than `target` valid
+// pages, falls back to an all-time path_exploration aggregation ("however many
+// days needed") to fill up to `target`. Returns [{url, title, content}], ranked.
+export async function gaTopValidPagesForTest(pool, companyId, target = MAX_TEST_LINKS) {
+  // Ensure the rollup exists (first call builds it from the recent window).
+  const { rows: have } = await pool.query(
+    `SELECT 1 FROM app.web_content_page_rank WHERE company_id = $1 LIMIT 1`, [companyId]
+  );
+  if (!have.length) {
+    try { await refreshPageRank(pool, companyId); }
+    catch (e) { console.warn("[test] page-rank build failed (non-fatal):", e.message); }
+  }
+
+  // Top valid pages by recent traffic (cheap: rollup is ≤ RANK_KEEP rows).
+  const fromRank = await pool.query(
+    `SELECT wp.url, wp.title, wp.content, pr.hits
+     FROM app.web_content_page_rank pr
+     JOIN app.web_pages wp
+       ON wp.company_id = pr.company_id AND app.norm_url(wp.url) = app.norm_url(pr.url)
+     WHERE pr.company_id = $1
+       AND wp.is_valid = true AND wp.is_excluded = false AND wp.content <> ''
+     ORDER BY pr.hits DESC
+     LIMIT $2`,
+    [companyId, target]
+  );
+  if (fromRank.rows.length >= target) return fromRank.rows;
+
+  // Thin recent window: re-rank valid pages by ALL-TIME GA traffic (the widest
+  // window) to fill up to target. Heavy, but only runs when the rollup fell short.
+  let allTime = { rows: [] };
+  try {
+    const { rows: cfgRows } = await pool.query(
+      `SELECT url_pattern FROM app.web_content_html_elements WHERE company_id = $1 ORDER BY created_date ASC LIMIT 1`,
+      [companyId]
+    );
+    const params = [companyId];
+    let patternClause = "";
+    if (cfgRows[0]?.url_pattern) { params.push(`%${cfgRows[0].url_pattern}%`); patternClause = ` AND pe.page_location ILIKE $${params.length}`; }
+    params.push(target);
+    allTime = await pool.query(
+      `SELECT wp.url, wp.title, wp.content, h.hits
+       FROM (
+         SELECT app.norm_url(pe.page_location) AS nu, COUNT(*) AS hits
+         FROM ga_landing.path_exploration pe
+         WHERE pe.company_id = $1 AND pe.page_location IS NOT NULL AND pe.page_location <> ''${patternClause}
+         GROUP BY app.norm_url(pe.page_location)
+       ) h
+       JOIN app.web_pages wp ON wp.company_id = $1 AND app.norm_url(wp.url) = h.nu
+       WHERE wp.is_valid = true AND wp.is_excluded = false AND wp.content <> ''
+       ORDER BY h.hits DESC
+       LIMIT $${params.length}`,
+      params
+    );
+  } catch (e) { console.warn("[test] all-time GA ranking failed (non-fatal):", e.message); }
+
+  // Merge recent-top first, then all-time, dedupe by normalised URL, cap at target.
+  const seen = new Set();
+  const out = [];
+  for (const r of [...fromRank.rows, ...allTime.rows]) {
+    const key = normUrl(r.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ url: r.url, title: r.title, content: r.content });
+    if (out.length >= target) break;
+  }
+  return out;
+}
+
 // Nightly cron: rebuild every GA-connected company's rollup once, then re-sync the
 // test set for companies whose test_links_refresh_mode = 'daily'. Static companies
 // keep their frozen set (and read the fresh rollup only when they click refresh).

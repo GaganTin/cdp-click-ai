@@ -486,7 +486,7 @@ function TestTab({
   return (
     <div className="space-y-4">
       <p className="text-[11px] text-muted-foreground">
-        {t("Dry-run - see what the AI would extract; nothing is saved. Leave the URL blank to test your top crawled pages.")}
+        {t("Dry-run - see what the AI would extract; nothing is saved. Leave the URL blank to test your 50 most-visited valid pages (ranked by Google Analytics traffic).")}
       </p>
 
       {/* One-off URL + run buttons */}

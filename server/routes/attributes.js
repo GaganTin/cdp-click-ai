@@ -4,7 +4,7 @@ import { processNextAttributeJob, repropagate } from "../lib/attributeQueue.js";
 import { crawlPage, contentHash, matchesExclusion, decodeUrl, isValidTitle } from "../lib/webCrawler.js";
 import { tagPage, isAIConfigured, groupValues, suggestAttributes } from "../lib/attributeAI.js";
 import { recordAiUsage } from "../lib/aiUsage.js";
-import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
+import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, gaTopValidPagesForTest, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
 import { triggerContentScrape } from "../lib/contentScrapeTrigger.js";
 import { ruleFieldRegistry, previewRule, repropagateRule } from "../lib/attributeRules.js";
 import { assignEntities, unassign, resolveSegmentEntities, resolveIdentifiers, findSingleConflicts, findMultiAssigned, recomputeManualCounts } from "../lib/attributeManual.js";
@@ -1343,30 +1343,36 @@ export function createAttributesRouter(pool) {
           } catch (e) { pages.push({ url: l.url, title: "", content: "", _failed: e.message }); }
         }
       } else {
-        const { rows } = await pool.query(
-          `SELECT url, title, content FROM app.web_pages
-           WHERE company_id = $1 AND is_valid = true AND is_excluded = false AND content <> ''
-           ORDER BY word_count DESC LIMIT 5`,
-          [req.companyId]
-        );
-        pages = rows;
+        // "Test top pages": the most-visited VALID pages by GA traffic
+        // (ga_landing.path_exploration), top MAX_TEST_LINKS, widening the window as
+        // needed. Already-crawled, so no live fetch here.
+        pages = await gaTopValidPagesForTest(pool, req.companyId);
       }
-      if (!pages.length) return res.json({ samples: [], note: "No crawled pages yet - run a reconstruct or test a specific URL." });
+      if (!pages.length) return res.json({ samples: [], note: "No crawled pages yet - click \"Crawl pages only\" first, or test a specific URL." });
 
-      const samples = [];
-      for (const page of pages) {
-        if (page._failed) { samples.push({ url: page.url, title: page.title, values: [], error: `Could not read: ${page._failed}` }); continue; }
-        try {
-          const [r] = await tagPage(page, [attribute], (u) => recordAiUsage(pool, {
-            companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
-            model: u.model, inputTokens: u.input, outputTokens: u.output,
-            metadata: { attribute_id: attribute.id, test: true },
-          }));
-          samples.push({ url: page.url, title: page.title, values: r?.values || [] });
-        } catch (e) {
-          samples.push({ url: page.url, title: page.title, values: [], error: e.message });
+      // Dry-run tag the sample in parallel (up to MAX_TEST_LINKS pages) so the test
+      // returns quickly; order is preserved by writing each result to its index.
+      const TEST_CONCURRENCY = 8;
+      const samples = new Array(pages.length);
+      let idx = 0;
+      const worker = async () => {
+        while (idx < pages.length) {
+          const i = idx++;
+          const page = pages[i];
+          if (page._failed) { samples[i] = { url: page.url, title: page.title, values: [], error: `Could not read: ${page._failed}` }; continue; }
+          try {
+            const [r] = await tagPage(page, [attribute], (u) => recordAiUsage(pool, {
+              companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
+              model: u.model, inputTokens: u.input, outputTokens: u.output,
+              metadata: { attribute_id: attribute.id, test: true },
+            }));
+            samples[i] = { url: page.url, title: page.title, values: r?.values || [] };
+          } catch (e) {
+            samples[i] = { url: page.url, title: page.title, values: [], error: e.message };
+          }
         }
-      }
+      };
+      await Promise.all(Array.from({ length: Math.min(TEST_CONCURRENCY, pages.length) }, worker));
       res.json({ samples });
     } catch (err) { fail(res, err); }
   });

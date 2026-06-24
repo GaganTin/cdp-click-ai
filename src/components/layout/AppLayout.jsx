@@ -3,11 +3,13 @@ import Sidebar from "./Sidebar";
 import TrialBanner from "./TrialBanner";
 import EmailVerifyBanner from "./EmailVerifyBanner";
 import ImpersonationBanner from "./ImpersonationBanner";
+import AnnouncementBanner from "./AnnouncementBanner";
 
 export default function AppLayout() {
   return (
     <div className="flex flex-col h-screen overflow-hidden">
       <ImpersonationBanner />
+      <AnnouncementBanner />
       <EmailVerifyBanner />
       <TrialBanner />
       <div className="flex flex-1 overflow-hidden">

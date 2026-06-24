@@ -1,0 +1,17 @@
+# PHASE 1 overlay — TLS available but NOT enforced.
+# Layer this ON TOP of values-tls.yaml so the 0.0.0.0/0 + ::/0 rules stay `host`
+# (SSL optional) while clients are migrated. Existing sslmode=disable connections
+# keep working. For Phase 3 (enforce), drop this file and re-run with only
+# values-tls.yaml (which uses `hostssl`).
+#
+#   helm upgrade cdp-ai-postgres oci://registry-1.docker.io/bitnamicharts/postgresql \
+#     --version 18.6.7 -n cdp-ai --reuse-values \
+#     -f infra/postgres/values-tls.yaml -f infra/postgres/values-tls-phase1-hba.yaml
+
+primary:
+  pgHbaConfiguration: |
+    local     all   all                    scram-sha-256
+    host      all   all   127.0.0.1/32     scram-sha-256
+    host      all   all   ::1/128          scram-sha-256
+    host      all   all   0.0.0.0/0        scram-sha-256
+    host      all   all   ::/0             scram-sha-256

@@ -179,6 +179,15 @@ export const appClient = {
     listTickets:  () => request("/support/tickets"),
     createTicket: (data) => request("/support/tickets", { method: "POST", body: JSON.stringify(data) }),
   },
+  // Platform-wide announcement banners. `listActive` is for every user (the
+  // banner); the rest are platform-owner only (Studio management).
+  announcements: {
+    listActive: () => request("/announcements/active"),
+    list:       () => request("/announcements"),
+    create:     (data) => request("/announcements", { method: "POST", body: JSON.stringify(data) }),
+    update:     (id, data) => request(`/announcements/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    remove:     (id) => request(`/announcements/${id}`, { method: "DELETE" }),
+  },
   notifications: {
     list: ({ limit = 20, unread = false } = {}) => {
       const params = new URLSearchParams();
