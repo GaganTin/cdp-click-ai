@@ -253,8 +253,10 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
       // Large event-level tables (slowest) go last.
       "ga_landing.path_exploration", "ga_landing.path_exploration_duration",
       // Anonymous visitor profiles are derived from path_exploration, so they go
-      // stale the moment GA data is removed. Content attributes / tagged pages
-      // (app.web_pages, app.attributes*) are deliberately NOT purged.
+      // stale the moment GA data is removed. Behavioral (web_content) attribute DATA
+      // - crawled pages, tags, discovered values, profile assignments - is purged too
+      // (see the googleAnalytics block in purgeIntegrationData below); the attribute
+      // DEFINITIONS are kept so a reconnect + Reconstruct repopulates them.
       "app.anonymous_profiles",
     ],
     googleSearchConsole: ["ga_landing.keyword_performance"],
@@ -343,6 +345,36 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
         `DELETE FROM ${controlTable}
          WHERE capsuite_ref = (SELECT capsuite_ref FROM app.companies WHERE id = $1)`,
         [companyId]);
+    }
+
+    // GA powers the behavioral (web_content) attributes: their crawled pages, tags,
+    // discovered values and profile assignments are all derived from
+    // ga_landing.path_exploration. On disconnect, purge that derived DATA so the
+    // attributes don't show stale values that nothing backs - but KEEP the attribute
+    // definitions (and their AI instructions / extract_from) so a reconnect +
+    // Reconstruct repopulates them. Each DELETE is isolated via run().
+    if (type === "googleAnalytics") {
+      const webAttrIds = `SELECT id FROM app.attributes WHERE company_id = $1 AND source = 'web_content'`;
+      // Web-content profile assignments (explicit; also clears any anonymous tags
+      // not already removed with app.anonymous_profiles above).
+      await run("app.profile_attribute_values",
+        `DELETE FROM app.profile_attribute_values WHERE company_id = $1 AND source = 'web_content'`, [companyId]);
+      // Discovered + curated values (cascades any remaining page/profile tags via FK).
+      await run("app.attribute_values",
+        `DELETE FROM app.attribute_values WHERE company_id = $1 AND attribute_id IN (${webAttrIds})`, [companyId]);
+      // Crawled pages (cascades app.page_attribute_values via FK).
+      await run("app.web_pages", `DELETE FROM app.web_pages WHERE company_id = $1`, [companyId]);
+      // GA-derived test sample pool + traffic rollup.
+      await run("app.web_content_test_links", `DELETE FROM app.web_content_test_links WHERE company_id = $1`, [companyId]);
+      await run("app.web_content_page_rank", `DELETE FROM app.web_content_page_rank WHERE company_id = $1`, [companyId]);
+      // Reconstruct job history (all attribute_jobs are behavioral). A live worker's
+      // lease-guarded heartbeat fails once its row is gone, so it aborts cleanly.
+      await run("app.attribute_jobs", `DELETE FROM app.attribute_jobs WHERE company_id = $1`, [companyId]);
+      // Unlock extract_from + clear the "last run" badge so the kept definitions are
+      // cleanly re-runnable after GA reconnects.
+      await run("app.attributes (reset)",
+        `UPDATE app.attributes SET content_applied = false, last_run_date = NULL, last_run_status = NULL
+         WHERE company_id = $1 AND source = 'web_content'`, [companyId]);
     }
     return purged;
   }
