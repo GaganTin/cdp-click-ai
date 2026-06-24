@@ -6,6 +6,7 @@
 // AI-discovered values land as review-queue exceptions and do NOT affect
 // targeting until approved; only approved values propagate.
 
+import { randomUUID } from "crypto";
 import { crawlPage, discoverUrls, contentHash, closeBrowser, isValidTitle, fetchSitemapLastmod, normUrl } from "./webCrawler.js";
 import { tagPage, isAIConfigured } from "./attributeAI.js";
 import { triggerContentScrape } from "./contentScrapeTrigger.js";
@@ -38,15 +39,40 @@ async function mergeProgress(pool, id, patch) {
   );
 }
 
-async function isCancelled(pool, id) {
-  const { rows } = await pool.query(`SELECT status FROM app.attribute_jobs WHERE id = $1`, [id]);
-  return rows[0]?.status === "cancelled";
+// Lease-guarded heartbeat. Advances progress + updated_date ONLY while this worker
+// still holds the job's current lease and the job is still 'running'. Returns false
+// if the row was cancelled, or re-claimed by another worker after a stale reset
+// (the re-claim stamps a fresh lease) - the caller must then stop immediately so a
+// zombie worker can never keep crawling/tagging a job someone else now owns (which
+// is what produced the "3750/2792" over-count). Empty patch = ownership probe.
+async function heartbeat(pool, id, lease, patch = {}) {
+  const { rows } = await pool.query(
+    `UPDATE app.attribute_jobs
+     SET progress = progress || $2::jsonb, updated_date = NOW()
+     WHERE id = $1 AND status = 'running' AND progress->>'lease' = $3
+     RETURNING id`,
+    [id, JSON.stringify(patch), lease]
+  );
+  return rows.length > 0;
 }
 
 async function runBatches(items, size, fn) {
   for (let i = 0; i < items.length; i += size) {
     await Promise.all(items.slice(i, i + size).map(fn));
   }
+}
+
+// Rolling pool: keeps `size` tasks in flight at all times (no per-batch barrier),
+// so one slow page never stalls the others. fn receives (item, index).
+async function mapPool(items, size, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
 }
 
 // ── pipeline ──────────────────────────────────────────────────
@@ -57,6 +83,10 @@ async function runBatches(items, size, fn) {
 //                 ignores the marker, replaces only that attribute's page tags
 async function runContentJob(pool, job, opts = { scrape: true, tag: true, scopedRetag: false }) {
   const companyId = job.company_id;
+  // The lease this worker claimed the job with (see drainAttributeJobs). Every
+  // heartbeat is guarded by it: if a stale reset lets another worker re-claim the
+  // job, our heartbeats fail and we bail out instead of double-running it.
+  const lease = job.progress?.lease;
 
   // 1) Active web_content attributes (optionally a single one)
   const attrParams = [companyId];
@@ -132,10 +162,10 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
 
   // 4) Crawl (hybrid, incremental)
   await setJob(pool, job.id, { phase: "scraping" });
-  let crawled = 0, skipped = 0;
+  let crawled = 0, skipped = 0, aborted = false;
   const blockedUrls = [];   // pages the fast crawler couldn't read (escalated to Selenium)
   await runBatches(urls, CRAWL_CONCURRENCY, async (url) => {
-    if (await isCancelled(pool, job.id)) return;
+    if (aborted) return;
     try {
       const { rows: existing } = await pool.query(
         `SELECT id, last_crawled, is_valid, metadata FROM app.web_pages WHERE company_id = $1 AND url = $2`,
@@ -191,11 +221,16 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
       blockedUrls.push(url);
     } finally {
       crawled++;
-      if (crawled % CRAWL_CONCURRENCY === 0) await mergeProgress(pool, job.id, { pages_crawled: crawled });
+      // Lease-guarded heartbeat doubles as the cancel/re-claim check: if it fails,
+      // we've lost the job (cancelled or stale-reclaimed) - stop crawling at once.
+      if (crawled % CRAWL_CONCURRENCY === 0) {
+        if (!(await heartbeat(pool, job.id, lease, { pages_crawled: crawled }))) aborted = true;
+      }
     }
   });
-  await mergeProgress(pool, job.id, { pages_crawled: crawled, pages_skipped: skipped });
   await closeBrowser();
+  if (aborted) return;
+  await heartbeat(pool, job.id, lease, { pages_crawled: crawled, pages_skipped: skipped });
 
   // Auto-escalate: pages the fast in-process crawler couldn't read (Cloudflare /
   // bot-block / JS-rendered / empty) go to the Selenium DAG, which uses a real
@@ -217,7 +252,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   }
   } // end opts.scrape
 
-  if (await isCancelled(pool, job.id)) return;
+  if (!(await heartbeat(pool, job.id, lease))) return;  // cancelled or re-claimed
 
   if (opts.tag) {
   // 5) Tag (skip if AI unavailable; re-tag when content OR the attribute
@@ -238,13 +273,19 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
        WHERE company_id = $1 AND is_valid = true AND is_excluded = false AND content <> ''`,
       [companyId]
     );
-    let tagged = 0, valuesFound = 0;
-    for (const page of pages) {
-      if (await isCancelled(pool, job.id)) return;
+    let tagged = 0, valuesFound = 0, aborted = false;
+    // LLM tagging is I/O-bound (each page waits seconds on Azure), so the loop was
+    // the whole job's wall-clock. Run TAG_CONCURRENCY pages at once - the SDK's
+    // built-in 429/5xx backoff (maxRetries in attributeAI.js) keeps us under the
+    // deployment's rate limit. The AI call already covers ALL attributes per page,
+    // so a page's tags are still derived from one call - no change to tag quality.
+    const TAG_CONCURRENCY = Math.max(1, Number(process.env.ATTR_TAG_CONCURRENCY) || 8);
+    await mapPool(pages, TAG_CONCURRENCY, async (page) => {
+      if (aborted) return;
       const marker = `${page.content_hash}:${sig}`;
       // Re-tag when: scopedRetag (new-value flow), the page is flagged needs_retag
       // (e.g. a per-page "re-tag"), or the content+attribute signature changed.
-      if (!opts.scopedRetag && !page.needs_retag && page.metadata?.tagged_sig === marker) { tagged++; continue; }
+      if (!opts.scopedRetag && !page.needs_retag && page.metadata?.tagged_sig === marker) { tagged++; return; }
       try {
         const results = await tagPage(page, attributes, (u) => recordAiUsage(pool, {
           companyId, feature: "attribute_tag", model: u.model,
@@ -279,16 +320,20 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
         console.warn(`[attr] tag failed ${page.url}:`, e.message);
       }
       tagged++;
-      // Heartbeat every page (bumps updated_date): a slow LLM call must never let a
-      // live job's updated_date drift past the stale-reset window, or a second worker
-      // could re-claim a still-running job (see resetStaleJobs / STALE_JOB_MINUTES).
-      await mergeProgress(pool, job.id, { pages_tagged: tagged, values_found: valuesFound });
-    }
-    await mergeProgress(pool, job.id, { pages_tagged: tagged, values_found: valuesFound });
+      // Heartbeat every ~TAG_CONCURRENCY completed pages (bumps updated_date): a slow
+      // LLM call must never let a live job's updated_date drift past the stale-reset
+      // window. The lease guard also catches a cancel or stale-reclaim here - if it
+      // fails we've lost the job, so stop tagging (one write per batch, not per page).
+      if (tagged % TAG_CONCURRENCY === 0) {
+        if (!(await heartbeat(pool, job.id, lease, { pages_tagged: tagged, values_found: valuesFound }))) aborted = true;
+      }
+    });
+    if (aborted) return;
+    await heartbeat(pool, job.id, lease, { pages_tagged: tagged, values_found: valuesFound });
   }
   } // end opts.tag
 
-  if (await isCancelled(pool, job.id)) return;
+  if (!(await heartbeat(pool, job.id, lease))) return;  // cancelled or re-claimed
 
   // 6) Propagate approved tags to profiles + recompute counts
   await setJob(pool, job.id, { phase: "propagating" });
@@ -315,9 +360,14 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
     [attrIds]
   );
   await mergeProgress(pool, job.id, { profiles_tagged: Number(profCount[0]?.n || 0) });
-  await setJob(pool, job.id, {
-    status: "completed", phase: "done", completed_at: new Date().toISOString(),
-  });
+  // Complete only if we still hold the lease - never mark done a job another worker
+  // re-claimed and may still be running.
+  await pool.query(
+    `UPDATE app.attribute_jobs
+     SET status = 'completed', phase = 'done', completed_at = NOW(), updated_date = NOW()
+     WHERE id = $1 AND status = 'running' AND progress->>'lease' = $2`,
+    [job.id, lease]
+  );
 }
 
 // Find or create an attribute value. Unknown values enter the review queue
@@ -436,9 +486,14 @@ async function drainAttributeJobs(pool) {
       // Claim the oldest queued job whose company has no job already running.
       // FOR UPDATE OF j SKIP LOCKED locks only the chosen row and lets parallel
       // workers grab different rows concurrently.
+      // Stamp a fresh lease on every claim. A stale-reset + re-claim of the same job
+      // gets a NEW lease, so the original (still-running) worker's lease-guarded
+      // heartbeat starts failing and it aborts - no two workers advance one job.
+      const lease = randomUUID();
       const { rows } = await pool.query(`
         UPDATE app.attribute_jobs
-        SET status = 'running', started_at = NOW(), updated_date = NOW()
+        SET status = 'running', started_at = NOW(), updated_date = NOW(),
+            progress = COALESCE(progress, '{}'::jsonb) || jsonb_build_object('lease', $1::text)
         WHERE id = (
           SELECT j.id FROM app.attribute_jobs j
           WHERE j.status = 'queued'
@@ -450,7 +505,7 @@ async function drainAttributeJobs(pool) {
           FOR UPDATE OF j SKIP LOCKED
           LIMIT 1
         )
-        RETURNING *`);
+        RETURNING *`, [lease]);
       job = rows[0];
     } catch (e) {
       console.error("[attr-queue] job claim error:", e.message);

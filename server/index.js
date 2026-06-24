@@ -2860,15 +2860,22 @@ if (pool) {
     try {
       const { company_id, job_id, changed = 0 } = req.body || {};
       if (!company_id) return res.status(400).json({ error: "company_id required" });
+      // A user-initiated "Crawl pages only" run is a 'refresh' job: complete it but
+      // do NOT auto-tag, so the user can review/exclude pages and dry-run attributes
+      // before committing to a full reconstruct. Other scrapes (escalations, etc.)
+      // still auto-tag the pages they changed.
+      let crawlOnly = false;
       if (job_id) {
-        await pool.query(
+        const { rows } = await pool.query(
           `UPDATE app.attribute_jobs SET status='completed', phase='done', completed_at=NOW()
-           WHERE id=$1 AND company_id=$2 AND status IN ('queued','running')`,
+           WHERE id=$1 AND company_id=$2 AND status IN ('queued','running')
+           RETURNING job_type`,
           [job_id, company_id]
         );
+        crawlOnly = rows[0]?.job_type === "refresh";
       }
       // If pages changed/were added, run the Node tag phase for them.
-      if (Number(changed) > 0) {
+      if (Number(changed) > 0 && !crawlOnly) {
         const { rows: busy } = await pool.query(
           `SELECT id FROM app.attribute_jobs WHERE company_id=$1 AND status IN ('queued','running') AND job_type IN ('tag','behavioral') LIMIT 1`,
           [company_id]

@@ -606,11 +606,11 @@ const UTM_COLS = [
   { key: "session_content",       label: "Content",     defaultVisible: true,  filterable: true,  type: "text" },
   { key: "session_term",          label: "Term",        defaultVisible: true,  filterable: true,  type: "text" },
   { key: "session_utm_id",        label: "UTM ID",      defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "sessions",              label: "Sessions",    defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "Total sessions in the period." },
-  { key: "active_users",          label: "Active Users",defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "Users with at least one session." },
-  { key: "new_users",             label: "New Users",   defaultVisible: false, filterable: false, numeric: true, align: "right", format: fmtNum,  info: "First-time visitors." },
-  { key: "bounce_rate",           label: "Bounce",      defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "Avg. bounce rate." },
-  { key: "engagement_rate",       label: "Engagement",  defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "Avg. engagement rate." },
+  { key: "sessions",              label: "Sessions",    defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Sessions: the number of sessions that began on your site or app. A session is a period of user engagement that starts when a user opens your site/app in the foreground; it ends after 30 minutes of inactivity (a new session starts on the user's return)." },
+  { key: "active_users",          label: "Active Users",defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Active Users: the number of distinct users who had an engaged session (a session lasting 10+ seconds, with a conversion event, or 2+ page/screen views). In GA4 this is the primary 'Users' metric, counting only people who actively engaged rather than every visitor." },
+  { key: "new_users",             label: "New Users",   defaultVisible: false, filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 New Users: the number of users who interacted with your site or app for the first time, counted by the first_visit (or first_open) event. Returning users are excluded." },
+  { key: "bounce_rate",           label: "Bounce",      defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "GA4 Bounce Rate: the percentage of sessions that were NOT engaged — i.e. sessions shorter than 10 seconds with no conversion event and fewer than 2 page/screen views. It is the inverse of Engagement Rate (Bounce Rate = 100% − Engagement Rate), and differs from the old Universal Analytics single-page-visit definition." },
+  { key: "engagement_rate",       label: "Engagement",  defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "GA4 Engagement Rate: the percentage of sessions that were engaged sessions — sessions that lasted 10+ seconds, included a conversion event, or had 2 or more page/screen views — out of all sessions." },
 ];
 
 export function GAUtmLinksSection() {

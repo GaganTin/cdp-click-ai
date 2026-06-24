@@ -123,13 +123,13 @@ function JobStatus({ job, onCancel, compact }) {
           run won't be applied, and the progress shown here resets to a fresh run. */}
       <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
         <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><AlertCircle className="w-4 h-4 text-destructive" /> {t("Cancel this run?")}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><AlertCircle className="w-4 h-4 text-foreground" /> {t("Cancel this run?")}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
             {t("This will stop the crawl right away. The AI tagging and profile updates for this run won't be applied, and you'll have to start a brand-new run to finish - the progress shown here resets to zero.")}
           </p>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" size="sm" onClick={() => setConfirmCancel(false)}>{t("Keep running")}</Button>
-            <Button variant="destructive" size="sm" onClick={() => { setConfirmCancel(false); onCancel?.(); }}>{t("Cancel run")}</Button>
+            <Button variant="default" size="sm" onClick={() => { setConfirmCancel(false); onCancel?.(); }}>{t("Cancel run")}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1240,6 +1240,13 @@ function PagesPanel() {
     onSuccess: (r) => { invalidate(); toast.success(r.mode === "scrape" ? `${t("Re-scraped")} ${r.rescraped} ${r.rescraped === 1 ? t("page") : t("pages")}` : t("Re-tag queued")); },
     onError: (e) => toast.error(e.message),
   });
+  // Crawl-only run, triggered from the Pages tab. Fills this list without tagging;
+  // progress shows in the job bar above. Backend 409s if a run is already going.
+  const crawlMut = useMutation({
+    mutationFn: () => appClient.attributes.refresh(),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["attribute-job", null] }); toast.success(t("Crawling pages - they'll appear here as they're read.")); },
+    onError: (e) => toast.error(e.message),
+  });
 
   // Exclusion rules (URL substring / glob patterns) - managed under the Excluded view.
   const { data: cs } = useQuery({ queryKey: ["crawl-settings"], queryFn: () => appClient.attributes.crawlSettings() });
@@ -1316,6 +1323,12 @@ function PagesPanel() {
             </button>
           ))}
         </div>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={crawlMut.isPending}
+          onClick={() => crawlMut.mutate()}
+          title={t("Crawl your site's pages into this list without tagging - review and exclude them, then test attributes before a full Reconstruct.")}>
+          {crawlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+          {t("Crawl pages")}
+        </Button>
         <div className="relative flex-1 max-w-[240px] ml-auto">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
           <input value={search} onChange={(e) => setSearch(decodeUrl(e.target.value))} placeholder={t("Search pages…")}
@@ -2613,6 +2626,13 @@ export default function Attributes() {
     onSuccess: () => { toast.success(t("Reconstruct started for all behavioral attributes")); qc.invalidateQueries({ queryKey: ["attribute-job", null] }); },
     onError: (e) => toast.error(e.message),
   });
+  // Crawl-only: scrape pages (URL + title) into the Pages tab WITHOUT AI tagging, so
+  // the user can review/exclude pages and dry-run attributes before a full reconstruct.
+  const crawlMut = useMutation({
+    mutationFn: () => appClient.attributes.refresh(),
+    onSuccess: () => { toast.success(t("Crawling pages - review and exclude them in the Pages tab, then test your attributes before Reconstruct.")); qc.invalidateQueries({ queryKey: ["attribute-job", null] }); },
+    onError: (e) => toast.error(e.message),
+  });
 
   const createSuggestion = (s) => createMut.mutate({
     name: s.name, description: s.description, source: "web_content",
@@ -2676,26 +2696,32 @@ export default function Attributes() {
             <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Attributes")}</h1>
             <p className="text-sm text-muted-foreground mt-1">{t("Custom targeting dimensions you can segment, pop-up, and email on.")}</p>
           </div>
-          {showHeaderActions && (
+          {showHeaderActions && (() => {
+            const running = ACTIVE_JOB(globalJob) || runAllMut.isPending || crawlMut.isPending;
+            const activeCount = tabAttrs.filter((a) => a.status === "active").length;
+            return (
             <div className="flex items-center gap-2">
-              {tabAttrs.length > 0 && (() => {
-                const running = ACTIVE_JOB(globalJob) || runAllMut.isPending;
-                const activeCount = tabAttrs.filter((a) => a.status === "active").length;
-                return (
-                  <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
-                    onClick={() => {
-                      if (activeCount === 0) { toast.error(t("No active attributes - set at least one attribute to Active first.")); return; }
-                      runAllMut.mutate();
-                    }}>
-                    {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                    {running ? t("Running…") : t("Reconstruct all")}
-                  </Button>
-                );
-              })()}
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
+                onClick={() => crawlMut.mutate()}
+                title={t("Crawl pages into the Pages tab without tagging - review, exclude, and test attributes before a full Reconstruct.")}>
+                {crawlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
+                {t("Crawl pages only")}
+              </Button>
+              {tabAttrs.length > 0 && (
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
+                  onClick={() => {
+                    if (activeCount === 0) { toast.error(t("No active attributes - set at least one attribute to Active first.")); return; }
+                    runAllMut.mutate();
+                  }}>
+                  {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                  {running ? t("Running…") : t("Reconstruct all")}
+                </Button>
+              )}
               <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setSuggestOpen(true)}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
               <Button size="sm" className="h-9 gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
             </div>
-          )}
+            );
+          })()}
           {(activeTab === "rule" || activeTab === "manual") && !selectedAttrId && (
             <Button size="sm" className="h-9 gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
           )}

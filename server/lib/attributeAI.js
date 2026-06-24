@@ -21,6 +21,9 @@ function getClient() {
     apiKey: key,
     defaultHeaders: { "api-key": key },
     defaultQuery: { "api-version": process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview" },
+    // Tagging runs many pages concurrently; lean on the SDK's built-in backoff
+    // (honours Retry-After) so transient 429/5xx don't drop a page's tags.
+    maxRetries: Math.max(2, Number(process.env.AZURE_OPENAI_MAX_RETRIES) || 5),
   });
   return _client;
 }
@@ -55,13 +58,19 @@ export async function tagPage(page, attributes, onUsage = null) {
   if (!client) throw new Error("Azure OpenAI is not configured.");
   if (!attributes?.length) return [];
 
+  // The URL slug is always a signal (e.g. .../university-of-essex-biomedical-science/),
+  // so the title and URL are ALWAYS provided. The page body is only included when at
+  // least one attribute needs it: "title" = look at title + URL only; "both"/"content"
+  // = also read the body. Omitting the body for title-only runs saves tokens too.
+  const anyContent = attributes.some((a) => a.extract_from !== "title");
+
   const fieldDocs = attributes.map((a) => {
     const kind = a.value_type === "single" ? "a single string" : "an array of strings";
     const sourceHint = a.extract_from === "title"
-      ? " Look ONLY at the page title."
+      ? " Look ONLY at the page title and URL."
       : a.extract_from === "content"
-      ? " Look ONLY at the page body, not the title."
-      : " Look at the page title and body.";
+      ? " Look at the page URL and body, not the title."
+      : " Look at the page title, URL, and body.";
     const enumHint = a.enumValues?.length
       ? ` Prefer these existing values when they fit: ${a.enumValues.slice(0, 60).join(", ")}.`
       : "";
@@ -71,15 +80,13 @@ export async function tagPage(page, attributes, onUsage = null) {
   const content = (page.content || "").slice(0, MAX_CONTENT_CHARS);
 
   const prompt = `You are tagging a web page with marketing attributes for a Customer Data Platform.
-Read the page and, for EACH attribute, extract the values that genuinely appear in or are clearly the subject of the page. Do not guess or pad. Use the page's own wording.
+Read the page and, for EACH attribute, extract the values that genuinely appear in or are clearly the subject of the page. The URL slug often names the subject (product, place, topic) - use it. Do not guess or pad. Use the page's own wording.
 
 ATTRIBUTES:
 ${fieldDocs}
 
 PAGE TITLE: ${page.title || "(none)"}
-PAGE URL: ${page.url || "(none)"}
-PAGE CONTENT:
-${content}
+PAGE URL: ${page.url || "(none)"}${anyContent ? `\nPAGE CONTENT:\n${content}` : ""}
 
 Respond with a JSON object whose keys are the exact attribute names above and whose values are arrays of strings (use a single-element array for single-value attributes; use [] when nothing matches). Return ONLY the JSON object.`;
 
