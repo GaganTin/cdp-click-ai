@@ -469,64 +469,45 @@ function AddGroupDialog({ open, onClose, dimension, existing = [], onAdd }) {
 // Dry-run Test tab: manage a sample link pool (GA top-50 or manual upload) and
 // run the AI extraction against a selection, a one-off URL, or top crawled pages.
 function TestTab({
-  testLinks, testResults, testUrl, setTestUrl, linkPaste, setLinkPaste,
-  testMut, uploadLinksMut, refreshLinksMut, linkModeMut, selectLinkMut, delLinkMut,
+  testLinks, testResults, testUrl, setTestUrl,
+  testMut, linkModeMut, selectLinkMut, delLinkMut,
 }) {
   const { t } = usePreferences();
   const links = testLinks?.links || [];
   const max = testLinks?.max || 50;
   const refreshMode = testLinks?.refresh_mode || "static";
-  const manualCount = links.filter((l) => l.source === "manual").length;
   const selectedCount = links.filter((l) => l.is_selected).length;
-  const upload = () => {
-    const urls = linkPaste.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
-    if (urls.length) uploadLinksMut.mutate(urls);
-  };
 
   return (
     <div className="space-y-4">
       <p className="text-[11px] text-muted-foreground">
-        {t("Dry-run - see what the AI would extract; nothing is saved. Leave the URL blank to test your 50 most-visited valid pages (ranked by Google Analytics traffic).")}
+        {t("Dry-run - see what the AI would extract; nothing is saved. Test one specific URL, or pick from your top Google Analytics pages below and run on them.")}
       </p>
 
       {/* One-off URL + run buttons */}
       <div className="flex flex-wrap gap-2">
         <Input value={testUrl} onChange={(e) => setTestUrl(decodeUrl(e.target.value))}
           placeholder={t("Optional: https://… a specific page")} className="h-8 text-sm flex-1 min-w-[14rem]" />
-        <Button size="sm" variant="outline" className="h-8" disabled={testMut.isPending}
-          onClick={() => testMut.mutate(testUrl.trim() ? { url: testUrl.trim() } : {})}>
-          {testMut.isPending && !testMut.variables?.use_test_links ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (testUrl.trim() ? t("Test this URL") : t("Test top pages"))}
+        <Button size="sm" variant="outline" className="h-8" disabled={testMut.isPending || !testUrl.trim()}
+          onClick={() => testMut.mutate({ url: testUrl.trim() })}>
+          {testMut.isPending && !testMut.variables?.use_test_links ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t("Test page")}
         </Button>
         <Button size="sm" className="h-8 gap-1.5" disabled={testMut.isPending || selectedCount === 0}
-          onClick={() => testMut.mutate({ use_test_links: true })} title={selectedCount === 0 ? t("Select some test links first") : ""}>
+          onClick={() => testMut.mutate({ use_test_links: true })} title={selectedCount === 0 ? t("Select some pages first") : ""}>
           {testMut.isPending && testMut.variables?.use_test_links ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
           {t("Run on")} {selectedCount} {t("selected")}
         </Button>
       </div>
 
-      {/* Test-link pool management */}
+      {/* Top GA pages to test against (auto-loaded when you crawl pages) */}
       <div className="rounded-lg border border-border p-3 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Test links")} · {links.length}/{max * 2}</p>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" disabled={refreshLinksMut.isPending}
-              onClick={() => refreshLinksMut.mutate()}>
-              {refreshLinksMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCw className="w-3 h-3" />} {t("Load top")} {max} {t("from GA")}
-            </Button>
-            <button onClick={() => linkModeMut.mutate(refreshMode === "daily" ? "static" : "daily")}
-              className={`text-[11px] px-2 py-1 rounded-md border ${refreshMode === "daily" ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
-              title={t("Re-pull the GA top pages automatically each day")}>
-              {t("Refresh daily:")} {refreshMode === "daily" ? t("on") : t("off")}
-            </button>
-          </div>
-        </div>
-
-        {/* Manual upload */}
-        <div className="flex gap-2 items-start">
-          <Textarea value={linkPaste} onChange={(e) => setLinkPaste(e.target.value)} rows={2}
-            placeholder={t("Paste URLs to add (one per line, up to") + ` ${max} ` + t("manual)…")} className="text-xs flex-1" />
-          <Button size="sm" variant="outline" className="h-8" disabled={!linkPaste.trim() || uploadLinksMut.isPending || manualCount >= max}
-            onClick={upload}>{t("Add")}</Button>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Top GA pages")} · {links.length}/{max}</p>
+          <button onClick={() => linkModeMut.mutate(refreshMode === "daily" ? "static" : "daily")}
+            className={`text-[11px] px-2 py-1 rounded-md border ${refreshMode === "daily" ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
+            title={t("Re-pull the GA top pages automatically each day")}>
+            {t("Refresh daily:")} {refreshMode === "daily" ? t("on") : t("off")}
+          </button>
         </div>
 
         {/* Select-all / clear */}
@@ -541,7 +522,7 @@ function TestTab({
         {/* Link list */}
         {links.length === 0 ? (
           <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-border rounded">
-            {t("No test links yet. Load the top")} {max} {t("pages from Google Analytics, or paste your own above.")}
+            {t("No pages yet. Click")} <strong>{t("Crawl pages")}</strong> {t("to load your top pages from Google Analytics.")}
           </p>
         ) : (
           <div className="max-h-72 overflow-y-auto divide-y divide-border/60">
@@ -550,8 +531,7 @@ function TestTab({
                 <input type="checkbox" checked={l.is_selected} className="accent-foreground flex-shrink-0"
                   onChange={() => selectLinkMut.mutate({ ids: [l.id], is_selected: !l.is_selected })} />
                 <span className="text-xs truncate flex-1" title={decodeUrl(l.url)}>{decodeUrl(l.url)}</span>
-                <Badge variant="outline" className="text-[9px] h-4 px-1">{l.source === "ga" ? "GA" : t("manual")}</Badge>
-                <button onClick={() => delLinkMut.mutate(l.id)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
+                <button onClick={() => delLinkMut.mutate(l.id)} title={t("Remove from the set")} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
               </div>
             ))}
           </div>
@@ -595,7 +575,6 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
   const [reviewSel, setReviewSel] = useState(() => new Set()); // selected review-queue values for bulk actions
   const [approvedSel, setApprovedSel] = useState(() => new Set()); // selected approved values for bulk merge/group
   const [showHistory, setShowHistory] = useState(false);
-  const [linkPaste, setLinkPaste] = useState("");
 
   const { data: attr } = useQuery({
     queryKey: ["attribute", attributeId],
@@ -691,16 +670,6 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
     enabled: tab === "test",
   });
   const invalidateTestLinks = () => qc.invalidateQueries({ queryKey: ["attribute-test-links"] });
-  const uploadLinksMut = useMutation({
-    mutationFn: (urls) => appClient.attributes.uploadTestLinks(urls),
-    onSuccess: (r) => { toast.success(`${t("Added")} ${r.added} ${r.added === 1 ? t("link") : t("links")}`); setLinkPaste(""); invalidateTestLinks(); },
-    onError: (e) => toast.error(e.message),
-  });
-  const refreshLinksMut = useMutation({
-    mutationFn: () => appClient.attributes.refreshTestLinks(),
-    onSuccess: (r) => { toast.success(`${t("Loaded")} ${r.count} ${r.count === 1 ? t("top page from GA") : t("top pages from GA")}`); invalidateTestLinks(); },
-    onError: (e) => toast.error(e.message),
-  });
   const linkModeMut = useMutation({
     mutationFn: (mode) => appClient.attributes.testLinkSettings(mode),
     onSuccess: invalidateTestLinks,
@@ -980,8 +949,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                   testLinks={testLinks}
                   testResults={testResults}
                   testUrl={testUrl} setTestUrl={setTestUrl}
-                  linkPaste={linkPaste} setLinkPaste={setLinkPaste}
-                  testMut={testMut} uploadLinksMut={uploadLinksMut} refreshLinksMut={refreshLinksMut}
+                  testMut={testMut}
                   linkModeMut={linkModeMut} selectLinkMut={selectLinkMut} delLinkMut={delLinkMut}
                 />
               ) : tab === "groups" ? (

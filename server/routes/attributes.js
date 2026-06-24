@@ -1136,6 +1136,10 @@ export function createAttributesRouter(pool) {
     try {
       if (await isBusy(req.companyId, null)) return res.status(409).json({ error: "A reconstruct job is already running." });
       const job = await createJob(req.companyId, req.user.id, null, "refresh");
+      // Auto-load the GA top pages into the Test-tab sample set so testing is ready
+      // without a separate "Load from GA" click. Fire-and-forget (builds the rollup
+      // lazily); failed/excluded URLs are pruned whenever the set is read.
+      refreshGaTestLinks(pool, req.companyId).catch((e) => console.warn("[attr] test-link auto-load failed:", e.message));
       try {
         const r = await triggerContentScrape(pool, req.companyId, { jobId: job.id });
         if (r.triggered) {
@@ -1346,23 +1350,42 @@ export function createAttributesRouter(pool) {
         if (!r.ok) return res.json({ samples: [], note: `Could not read that page: ${r.reason}` });
         pages = [{ url, title: r.title, content: r.text }];
       } else if (useSelectedLinks) {
-        // Crawl the user's selected managed test links (capped, no persistence).
+        // Test the user's selected GA pages. Use the content we ALREADY crawled into
+        // app.web_pages (fast, reliable, and exactly what a Reconstruct will tag) -
+        // only fall back to a live fetch for a selected page not yet crawled. Links
+        // pointing at excluded/invalid pages are skipped.
         const { rows: links } = await pool.query(
-          `SELECT tl.url FROM app.web_content_test_links tl
-           WHERE tl.company_id = $1 AND tl.is_selected = true
-             AND NOT EXISTS (
-               SELECT 1 FROM app.web_pages wp
-               WHERE wp.company_id = $1
-                 AND app.norm_url(wp.url) = app.norm_url(tl.url)
-                 AND (wp.is_excluded = true OR wp.is_valid = false)
-             )
-           ORDER BY tl.hits DESC LIMIT 20`,
+          `WITH sel AS (
+             SELECT tl.url, tl.hits
+             FROM app.web_content_test_links tl
+             WHERE tl.company_id = $1 AND tl.is_selected = true
+               AND NOT EXISTS (
+                 SELECT 1 FROM app.web_pages wp
+                 WHERE wp.company_id = $1
+                   AND app.norm_url(wp.url) = app.norm_url(tl.url)
+                   AND (wp.is_excluded = true OR wp.is_valid = false)
+               )
+             ORDER BY tl.hits DESC LIMIT 20
+           )
+           SELECT sel.url, wp.title AS wp_title, wp.content AS wp_content
+           FROM sel
+           LEFT JOIN LATERAL (
+             SELECT title, content FROM app.web_pages wp
+             WHERE wp.company_id = $1
+               AND app.norm_url(wp.url) = app.norm_url(sel.url)
+               AND wp.is_valid = true AND wp.is_excluded = false AND wp.content <> ''
+             ORDER BY wp.word_count DESC LIMIT 1
+           ) wp ON true
+           ORDER BY sel.hits DESC`,
           [req.companyId]
         );
-        if (!links.length) return res.json({ samples: [], note: "No test links selected. Add or tick some links first." });
-        const cfg = await loadCrawlConfig(pool, req.companyId);
+        if (!links.length) return res.json({ samples: [], note: "No pages selected. Tick some pages first." });
+        let cfg = null;
         for (const l of links) {
+          // Prefer already-crawled content; only hit the network for uncrawled pages.
+          if (l.wp_content) { pages.push({ url: l.url, title: l.wp_title, content: l.wp_content }); continue; }
           try {
+            cfg = cfg || await loadCrawlConfig(pool, req.companyId);
             const r = await crawlPage(l.url, cfg);
             if (r.ok) pages.push({ url: l.url, title: r.title, content: r.text });
             else pages.push({ url: l.url, title: r.title, content: "", _failed: r.reason });
