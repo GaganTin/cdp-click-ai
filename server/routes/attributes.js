@@ -12,13 +12,17 @@ import { assignEntities, unassign, resolveSegmentEntities, resolveIdentifiers, f
 // Load the scraper config for the CURRENT workspace for on-demand crawls.
 async function loadCrawlConfig(pool, companyId) {
   const { rows } = await pool.query(
-    `SELECT error_strings, valid_content_min_length
+    `SELECT error_strings, valid_content_min_length, valid_title_min_length
      FROM app.web_content_html_elements WHERE company_id = $1
      ORDER BY created_date ASC LIMIT 1`,
     [companyId]
   );
   const cfg = rows[0] || {};
-  return { minLen: cfg.valid_content_min_length || 60, errorStrings: cfg.error_strings || [] };
+  return {
+    minLen: cfg.valid_content_min_length || 60,
+    titleMinLen: cfg.valid_title_min_length ?? 1,
+    errorStrings: cfg.error_strings || [],
+  };
 }
 
 // Attributes API - custom targeting dimensions (behavioral / rule / manual).
@@ -36,7 +40,7 @@ export function createAttributesRouter(pool) {
   router.get("/crawl-settings", async (req, res) => {
     try {
       const { rows: cfg } = await pool.query(
-        `SELECT url_pattern, excluded_url_patterns
+        `SELECT url_pattern, excluded_url_patterns, valid_content_min_length, valid_title_min_length
          FROM app.web_content_html_elements WHERE company_id = $1
          ORDER BY created_date ASC LIMIT 1`,
         [req.companyId]
@@ -66,6 +70,8 @@ export function createAttributesRouter(pool) {
         url_domain:       dom[0]?.url_domain || null,
         url_pattern:      cfg[0]?.url_pattern || "",
         excluded_url_patterns: cfg[0]?.excluded_url_patterns || [],
+        valid_content_min_length: cfg[0]?.valid_content_min_length ?? 60,
+        valid_title_min_length:   cfg[0]?.valid_title_min_length ?? 1,
         crawled_pages:    pc[0]?.n || 0,
       });
     } catch (err) { fail(res, err); }
@@ -89,12 +95,50 @@ export function createAttributesRouter(pool) {
         params.push(patterns);
         sets.push(`excluded_url_patterns = $${params.length}`);
       }
+      // Validity thresholds: min chars for content (default 60) and title (default 1).
+      const clamp = (v, lo, hi, def) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : def; };
+      if ("valid_content_min_length" in req.body) {
+        params.push(clamp(req.body.valid_content_min_length, 0, 100000, 60));
+        sets.push(`valid_content_min_length = $${params.length}`);
+      }
+      if ("valid_title_min_length" in req.body) {
+        params.push(clamp(req.body.valid_title_min_length, 0, 1000, 1));
+        sets.push(`valid_title_min_length = $${params.length}`);
+      }
+      const revalidate = "valid_content_min_length" in req.body || "valid_title_min_length" in req.body;
       if (sets.length) {
         // scope by company_id as well as the row id (defence in depth)
         params.push(req.companyId);
         await pool.query(
           `UPDATE app.web_content_html_elements SET ${sets.join(", ")} WHERE id = $1 AND company_id = $${params.length}`,
           params
+        );
+      }
+
+      // Threshold changed: re-evaluate already-crawled pages against the new minimums
+      // (+ existing error strings) so the Valid/Failed split updates immediately - a
+      // lower title/content minimum can flip previously-failed pages to Valid.
+      if (revalidate) {
+        const { rows: c } = await pool.query(
+          `SELECT error_strings, valid_content_min_length AS cmin, valid_title_min_length AS tmin
+           FROM app.web_content_html_elements WHERE company_id = $1 ORDER BY created_date ASC LIMIT 1`,
+          [req.companyId]
+        );
+        const es = c[0]?.error_strings || [];
+        const cmin = c[0]?.cmin ?? 60;
+        const tmin = c[0]?.tmin ?? 1;
+        await pool.query(
+          `UPDATE app.web_pages SET
+             is_valid_content = (char_length(coalesce(content,'')) >= $2
+               AND NOT (lower(coalesce(content,'')) LIKE ANY (SELECT '%'||lower(x)||'%' FROM unnest($4::text[]) x))),
+             is_valid_title = (char_length(btrim(coalesce(title,''))) >= $3
+               AND NOT (lower(coalesce(title,'')) LIKE ANY (SELECT '%'||lower(x)||'%' FROM unnest($4::text[]) x)))
+           WHERE company_id = $1`,
+          [req.companyId, cmin, tmin, es]
+        );
+        await pool.query(
+          `UPDATE app.web_pages SET is_valid = (is_valid_content AND is_valid_title) WHERE company_id = $1`,
+          [req.companyId]
         );
       }
 
@@ -405,7 +449,7 @@ export function createAttributesRouter(pool) {
       const r = await crawlPage(url, cfg);
       const text = r.text || "";
       const validContent = r.ok;
-      const validTitle = isValidTitle(r.title, cfg.errorStrings);
+      const validTitle = isValidTitle(r.title, cfg.errorStrings, cfg.titleMinLen);
       const meta = JSON.stringify({ crawl_reason: r.ok ? null : (r.reason || "no content") });
       const { rows } = await pool.query(
         `INSERT INTO app.web_pages
@@ -524,7 +568,7 @@ export function createAttributesRouter(pool) {
           try {
             const r = await crawlPage(p.url, cfg);
             const text = r.text || "";
-            const validTitle = isValidTitle(r.title, cfg.errorStrings);
+            const validTitle = isValidTitle(r.title, cfg.errorStrings, cfg.titleMinLen);
             await pool.query(
               `UPDATE app.web_pages SET
                  title = $3, content = $4, excerpt = $5, content_hash = $6, word_count = $7,
@@ -784,10 +828,14 @@ export function createAttributesRouter(pool) {
         [req.companyId, trimmed]
       );
       if (dup.length) return res.status(409).json({ error: `An attribute named "${trimmed}" already exists.`, code: "DUPLICATE_NAME" });
+      // Content (web_content) attributes always apply to both audiences - their page
+      // tags propagate to known customers AND anonymous visitors. Scope is not user-
+      // editable for them.
+      const finalScope = source === "web_content" ? "both" : scope;
       const { rows } = await pool.query(
         `INSERT INTO app.attributes (company_id, created_by, name, description, source, value_type, scope, extract_from, status, rule)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [req.companyId, req.user.id, trimmed, description, source, value_type, scope, extract_from, status, JSON.stringify(rule)]
+        [req.companyId, req.user.id, trimmed, description, source, value_type, finalScope, extract_from, status, JSON.stringify(rule)]
       );
       const attr = rows[0];
       // Seed the user-provided values list as approved (the expected vocabulary).
@@ -804,7 +852,10 @@ export function createAttributesRouter(pool) {
         }
       }
       res.status(201).json(attr);
-    } catch (err) { fail(res, err); }
+    } catch (err) {
+      if (err.code === "23505") return res.status(409).json({ error: `An attribute named "${trimmed}" already exists.`, code: "DUPLICATE_NAME" });
+      fail(res, err);
+    }
   });
 
   router.get("/:id", async (req, res, next) => {
@@ -840,6 +891,8 @@ export function createAttributesRouter(pool) {
         [req.params.id, req.companyId]
       );
       if (!cur.length) return res.status(404).json({ error: "Attribute not found" });
+      // Content attributes always apply to both audiences - scope can't be changed.
+      if (cur[0].source === "web_content" && "scope" in req.body) req.body.scope = "both";
       // Renames must keep names unique within the workspace (case-insensitive).
       if ("name" in req.body) {
         const newName = String(req.body.name || "").trim();
@@ -880,7 +933,10 @@ export function createAttributesRouter(pool) {
       );
       if (!rows.length) return res.status(404).json({ error: "Attribute not found" });
       res.json(rows[0]);
-    } catch (err) { fail(res, err); }
+    } catch (err) {
+      if (err.code === "23505") return res.status(409).json({ error: "An attribute with that name already exists.", code: "DUPLICATE_NAME" });
+      fail(res, err);
+    }
   });
 
   router.delete("/:id", async (req, res) => {
@@ -929,7 +985,10 @@ export function createAttributesRouter(pool) {
         [clone.id, a.id]
       );
       res.status(201).json(clone);
-    } catch (err) { fail(res, err); }
+    } catch (err) {
+      if (err.code === "23505") return res.status(409).json({ error: "An attribute with that name already exists.", code: "DUPLICATE_NAME" });
+      fail(res, err);
+    }
   });
 
   // ── Values ──────────────────────────────────────────────────

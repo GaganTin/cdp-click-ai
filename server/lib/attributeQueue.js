@@ -118,7 +118,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
 
   // 2) Scraper config + domain for THIS workspace
   const { rows: cfgRows } = await pool.query(
-    `SELECT url_pattern, error_strings, valid_content_min_length, excluded_url_patterns
+    `SELECT url_pattern, error_strings, valid_content_min_length, valid_title_min_length, excluded_url_patterns
      FROM app.web_content_html_elements WHERE company_id = $1
      ORDER BY created_date ASC LIMIT 1`,
     [companyId]
@@ -131,6 +131,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   );
   const crawlOpts = {
     minLen: cfg.valid_content_min_length || 60,
+    titleMinLen: cfg.valid_title_min_length ?? 1,
     errorStrings: cfg.error_strings || [],
   };
 
@@ -192,7 +193,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
       const text = res.text || "";
       const excerpt = text.slice(0, 600);
       const hash = contentHash(text);
-      const validTitle = isValidTitle(res.title, crawlOpts.errorStrings);
+      const validTitle = isValidTitle(res.title, crawlOpts.errorStrings, crawlOpts.titleMinLen);
       const meta = JSON.stringify({
         crawl_reason: res.ok ? null : (res.reason || "no content"),
         is_new: !row,

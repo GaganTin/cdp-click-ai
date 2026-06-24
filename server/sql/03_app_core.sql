@@ -237,6 +237,7 @@ CREATE TABLE app.web_content_html_elements (
   update_time_elements     TEXT        NOT NULL DEFAULT 'og:updated_time',
   error_strings            TEXT[]      NOT NULL DEFAULT '{"Error 404","ERROR 403","seem to exist","頁面可能已被刪除","找不到頁面"}',
   valid_content_min_length INTEGER     NOT NULL DEFAULT 60,
+  valid_title_min_length   INTEGER     NOT NULL DEFAULT 1,
   url_pattern              TEXT        NOT NULL DEFAULT '',
   ga_lookback_days         INTEGER     NOT NULL DEFAULT 90,   -- 0 = all time
   excluded_url_patterns    TEXT[]      NOT NULL DEFAULT '{}',

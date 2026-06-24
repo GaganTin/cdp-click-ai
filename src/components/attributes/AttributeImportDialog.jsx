@@ -13,8 +13,8 @@ import { toast } from "sonner";
 const SOURCE_META = {
   web_content: {
     label: "Content",
-    columns: ["name", "description", "extract_from", "value_type", "scope", "status", "values"],
-    example: ["Country", "If any country is found in the text, extract it.", "both", "multi", "both", "draft", "England;Australia;Canada"],
+    columns: ["name", "description", "extract_from", "value_type", "status", "values"],
+    example: ["Country", "If any country is found in the text, extract it.", "both", "multi", "draft", "England;Australia;Canada"],
     hint: <><strong>name</strong> is required. <strong>values</strong> is a <code>;</code>-separated list of expected values (optional). After importing, open each attribute and <strong>Reconstruct</strong> to tag pages.</>,
   },
   manual: {

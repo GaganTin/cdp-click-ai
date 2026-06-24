@@ -88,11 +88,33 @@ export async function syncTestLinksFromRank(pool, companyId) {
   const bad = new Set(badRows.map((r) => normUrl(r.url)));
 
   const picked = [];
+  const seen = new Set();
   for (const r of rows) {
     const key = normUrl(r.url);
-    if (bad.has(key)) continue;
-    picked.push(r);
+    if (!key || bad.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    picked.push({ url: r.url, hits: r.hits });
     if (picked.length >= MAX_TEST_LINKS) break;
+  }
+
+  // GA often surfaces fewer than MAX_TEST_LINKS top pages. Top the set up to the cap
+  // with RANDOM valid crawled pages (not already picked) so there's always a full
+  // sample to dry-run against.
+  if (picked.length < MAX_TEST_LINKS) {
+    const { rows: extra } = await pool.query(
+      `SELECT url FROM app.web_pages
+       WHERE company_id = $1 AND is_valid = true AND is_excluded = false AND content <> ''
+       ORDER BY random()
+       LIMIT $2`,
+      [companyId, MAX_TEST_LINKS * 3]   // over-fetch so dedupe still leaves enough
+    );
+    for (const r of extra) {
+      if (picked.length >= MAX_TEST_LINKS) break;
+      const key = normUrl(r.url);
+      if (!key || seen.has(key)) continue;   // skip the top-GA pages already chosen
+      seen.add(key);
+      picked.push({ url: r.url, hits: 0 });   // hits 0 → sorts after the GA-ranked ones
+    }
   }
 
   await pool.query(`DELETE FROM app.web_content_test_links WHERE company_id = $1 AND source = 'ga'`, [companyId]);

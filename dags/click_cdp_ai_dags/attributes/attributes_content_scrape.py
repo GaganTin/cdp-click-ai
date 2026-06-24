@@ -93,9 +93,9 @@ def _is_valid_content(content, min_len, error_strings):
     return not any(e and str(e).lower() in low for e in (error_strings or []))
 
 
-def _is_valid_title(title, error_strings):
+def _is_valid_title(title, error_strings, min_len=1):
     t = (title or "").strip()
-    if len(t) < 5:
+    if len(t) < (min_len or 1):
         return False
     low = t.lower()
     return not any(e and str(e).lower() in low for e in (error_strings or []))
@@ -140,10 +140,17 @@ class _DriverDead(Exception):
 
 def _wait_for_cloudflare(driver, max_wait=30):
     deadline = time.time() + max_wait
+    blocked = False
     while time.time() < deadline:
         if not any(cf in driver.title.lower() for cf in _CLOUDFLARE_TITLES):
+            if blocked:
+                _log.info(f"[scrape] cleared bot-check after wait: {driver.current_url}")
             return True
+        blocked = True
         time.sleep(3)
+    # Still on the challenge page after max_wait - this URL is bot-blocked.
+    _log.warning(f"[scrape] 🛡 bot-blocked (challenge not cleared in {max_wait}s): "
+                 f"{getattr(driver, 'current_url', '?')} - title={driver.title!r}")
     return False
 
 
@@ -267,7 +274,7 @@ def _load_crawl_config(conn, company_id):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """SELECT url_pattern, error_strings, valid_content_min_length,
-                      ga_lookback_days, excluded_url_patterns
+                      valid_title_min_length, ga_lookback_days, excluded_url_patterns
                FROM app.web_content_html_elements WHERE company_id = %s
                ORDER BY created_date ASC LIMIT 1""", (company_id,))
         cfg = cur.fetchone() or {}
@@ -334,7 +341,16 @@ def _discover_urls(conn, company_id, cfg):
 
 def _upsert_page(conn, company_id, url, content, title, og, cfg, etag=None, last_modified=None):
     valid_content = _is_valid_content(content, cfg.get("valid_content_min_length"), cfg.get("error_strings"))
-    valid_title = _is_valid_title(title, cfg.get("error_strings"))
+    valid_title = _is_valid_title(title, cfg.get("error_strings"), cfg.get("valid_title_min_length"))
+    # Surface WHY a page is invalid so the Airflow log shows which URLs had issues
+    # (bot-blocked / error page / thin content / bad title).
+    if not (valid_content and valid_title):
+        reasons = []
+        if not valid_title:
+            reasons.append(f"invalid title ({len((title or '').strip())} chars: {(title or '')[:80]!r})")
+        if not valid_content:
+            reasons.append(f"thin/empty content ({len(content or '')} chars)")
+        _log.warning(f"[scrape] ⚠ INVALID {url} - {'; '.join(reasons)}")
     h = _content_hash(content or "")
     og_ts = None
     if og:

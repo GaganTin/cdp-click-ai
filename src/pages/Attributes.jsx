@@ -481,7 +481,7 @@ function TestTab({
   return (
     <div className="space-y-4">
       <p className="text-[11px] text-muted-foreground">
-        {t("Dry-run - see what the AI would extract; nothing is saved. Test one specific URL, or pick from your top Google Analytics pages below and run on them.")}
+        {t("Dry-run - see what the AI would extract; nothing is saved. Test one specific URL, or pick from your crawled pages below and run on them.")}
       </p>
 
       {/* One-off URL + run buttons */}
@@ -499,10 +499,10 @@ function TestTab({
         </Button>
       </div>
 
-      {/* Top GA pages to test against (auto-loaded when you crawl pages) */}
+      {/* Pages to test against - top GA pages, topped up with random crawled pages */}
       <div className="rounded-lg border border-border p-3 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Top GA pages")} · {links.length}/{max}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Test pages")} · {links.length}/{max}</p>
           <button onClick={() => linkModeMut.mutate(refreshMode === "daily" ? "static" : "daily")}
             className={`text-[11px] px-2 py-1 rounded-md border ${refreshMode === "daily" ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
             title={t("Re-pull the GA top pages automatically each day")}>
@@ -522,7 +522,7 @@ function TestTab({
         {/* Link list */}
         {links.length === 0 ? (
           <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-border rounded">
-            {t("No pages yet. Click")} <strong>{t("Crawl pages")}</strong> {t("to load your top pages from Google Analytics.")}
+            {t("No pages yet. Click")} <strong>{t("Crawl pages")}</strong> {t("to load pages to test against.")}
           </p>
         ) : (
           <div className="max-h-72 overflow-y-auto divide-y divide-border/60">
@@ -1290,6 +1290,23 @@ function PagesPanel() {
     },
     onError: (e) => toast.error(e.message),
   });
+  // Editable validity thresholds (min chars for title/content). Synced from settings.
+  const [titleMin, setTitleMin] = useState(null);
+  const [contentMin, setContentMin] = useState(null);
+  useEffect(() => {
+    if (!cs) return;
+    setTitleMin((v) => (v === null ? String(cs.valid_title_min_length ?? 1) : v));
+    setContentMin((v) => (v === null ? String(cs.valid_content_min_length ?? 60) : v));
+  }, [cs]);
+  const thresholdMut = useMutation({
+    mutationFn: () => appClient.attributes.updateCrawlSettings({
+      valid_title_min_length: Math.max(0, Math.round(Number(titleMin) || 0)),
+      valid_content_min_length: Math.max(0, Math.round(Number(contentMin) || 0)),
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["crawl-settings"] }); invalidate(); toast.success(t("Validity thresholds saved - existing pages re-checked.")); },
+    onError: (e) => toast.error(e.message),
+  });
+  const thresholdDirty = cs && (String(titleMin) !== String(cs.valid_title_min_length ?? 1) || String(contentMin) !== String(cs.valid_content_min_length ?? 60));
 
   const counts = data?.counts || {};
   const pages = data?.pages || [];
@@ -1396,10 +1413,28 @@ function PagesPanel() {
         </div>
       </div>
 
-      {/* Valid: add a missed page */}
+      {/* Valid: validity thresholds + add a missed page */}
       {view === "valid" && (
         <div className="mb-3">
           <p className="text-xs text-muted-foreground mb-2">{t("Pages the AI crawled successfully, with the values it tagged each with.")}</p>
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-secondary/10 p-2 mb-3 text-xs">
+            <span className="text-muted-foreground">{t("A page is valid when its title and content are at least:")}</span>
+            <label className="flex items-center gap-1">{t("Title")}
+              <input type="number" min="0" value={titleMin ?? ""} onChange={(e) => setTitleMin(e.target.value)}
+                className="w-14 h-7 px-1.5 border border-input rounded-md bg-background outline-none focus:ring-1 focus:ring-ring" placeholder="1" />
+              {t("chars")}
+            </label>
+            <label className="flex items-center gap-1">{t("Content")}
+              <input type="number" min="0" value={contentMin ?? ""} onChange={(e) => setContentMin(e.target.value)}
+                className="w-16 h-7 px-1.5 border border-input rounded-md bg-background outline-none focus:ring-1 focus:ring-ring" placeholder="60" />
+              {t("chars")}
+            </label>
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!thresholdDirty || thresholdMut.isPending}
+              onClick={() => thresholdMut.mutate()}>
+              {thresholdMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : t("Save")}
+            </Button>
+            <span className="text-muted-foreground/70">{t("Defaults: title 1, content 60.")}</span>
+          </div>
           <div className="flex gap-2 max-w-md">
             <Input value={newUrl} onChange={(e) => setNewUrl(decodeUrl(e.target.value))} placeholder={t("https://… add a page the crawler missed")} className="h-8 text-sm"
               onKeyDown={(e) => { if (e.key === "Enter" && newUrl.trim()) addMut.mutate(newUrl.trim()); }} />

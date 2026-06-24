@@ -31,6 +31,8 @@ CREATE TABLE app.attributes (
   metadata        JSONB       NOT NULL DEFAULT '{}'
 );
 CREATE INDEX attributes_company_idx ON app.attributes(company_id, source);
+-- Attribute names are unique within a workspace (case-insensitive).
+CREATE UNIQUE INDEX attributes_company_lower_name_idx ON app.attributes(company_id, lower(name));
 CREATE TRIGGER attributes_updated_date BEFORE UPDATE ON app.attributes
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 
@@ -70,7 +72,7 @@ CREATE TABLE app.web_pages (
   word_count      INTEGER     NOT NULL DEFAULT 0,
   is_valid        BOOLEAN     NOT NULL DEFAULT true,      -- overall validity = valid_content AND valid_title
   is_valid_content BOOLEAN    NOT NULL DEFAULT true,      -- body length ≥ min & no error strings
-  is_valid_title  BOOLEAN     NOT NULL DEFAULT true,      -- title length ≥ 5 chars & no error strings
+  is_valid_title  BOOLEAN     NOT NULL DEFAULT true,      -- title ≥ valid_title_min_length (default 1) & no error strings
   is_excluded     BOOLEAN     NOT NULL DEFAULT false,     -- "Excluded Pages"
   excluded_type   TEXT,                                   -- exact | pattern (how it was excluded)
   excluded_value  TEXT,                                   -- the URL or pattern that excluded it

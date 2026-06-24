@@ -23,11 +23,11 @@ export function contentHash(text) {
   return createHash("sha1").update(text || "").digest("hex");
 }
 
-// A title is valid when it is at least 5 characters and contains no error
-// markers (404/unavailable). Mirrors the content-validity rule in crawlPage.
-export function isValidTitle(title, errorStrings = []) {
+// A title is valid when it is at least `minLen` characters (default 1) and contains
+// no error markers (404/unavailable). minLen is configurable per workspace.
+export function isValidTitle(title, errorStrings = [], minLen = 1) {
   const t = String(title || "").trim();
-  if (t.length < 5) return false;
+  if (t.length < (minLen ?? 1)) return false;
   const lower = t.toLowerCase();
   return !errorStrings.some((s) => s && lower.includes(String(s).toLowerCase()));
 }
