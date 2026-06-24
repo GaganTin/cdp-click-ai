@@ -1235,6 +1235,11 @@ function PagesPanel() {
     mutationFn: ({ id, is_excluded }) => appClient.attributes.updateWebPage(id, { is_excluded }),
     onSuccess: invalidate,
   });
+  const exclFailedMut = useMutation({
+    mutationFn: () => appClient.attributes.excludeFailedPages(),
+    onSuccess: (r) => { invalidate(); toast.success(`${t("Excluded")} ${r.excluded} ${r.excluded === 1 ? t("page") : t("pages")}`); },
+    onError: (e) => toast.error(e.message),
+  });
   const rerunMut = useMutation({
     mutationFn: ({ ids, mode }) => appClient.attributes.rerunPages(ids, mode),
     onSuccess: (r) => { invalidate(); toast.success(r.mode === "scrape" ? `${t("Re-scraped")} ${r.rescraped} ${r.rescraped === 1 ? t("page") : t("pages")}` : t("Re-tag queued")); },
@@ -1352,9 +1357,19 @@ function PagesPanel() {
         </div>
       )}
 
-      {/* Failed: intro */}
+      {/* Failed: intro + bulk-exclude */}
       {view === "failed" && (
-        <p className="text-xs text-muted-foreground mb-3">{t("Pages the crawler couldn't read - blocked, empty, or an error page. These are never tagged.")}</p>
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <p className="text-xs text-muted-foreground">{t("Pages the crawler couldn't read - blocked, empty, or an error page. These are never tagged.")}</p>
+          {(counts.failed ?? 0) > 0 && (
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs flex-shrink-0" disabled={exclFailedMut.isPending}
+              onClick={() => exclFailedMut.mutate()}
+              title={t("Move every failed page to the Excluded tab so the crawler skips them.")}>
+              {exclFailedMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
+              {t("Exclude all failed")}
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Excluded: rule manager */}

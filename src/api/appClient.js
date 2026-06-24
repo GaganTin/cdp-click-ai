@@ -516,6 +516,7 @@ export const appClient = {
     },
     addWebPage: (url) => request("/attributes/web-pages", { method: "POST", body: JSON.stringify({ url }) }),
     updateWebPage: (pageId, data) => request(`/attributes/web-pages/${pageId}`, { method: "PATCH", body: JSON.stringify(data) }),
+    excludeFailedPages: () => request("/attributes/web-pages/exclude-failed", { method: "POST" }),
     deletePageTag: (pageId, valueId) => request(`/attributes/pages/${pageId}/tags/${valueId}`, { method: "DELETE" }),
     options: () => request("/attributes/options"),
     crawlSettings: () => request("/attributes/crawl-settings"),

@@ -372,6 +372,24 @@ def _upsert_page(conn, company_id, url, content, title, og, cfg, etag=None, last
     return bool(row and (row[0] or row[1]))
 
 
+# Live progress: merge {pages_total, pages_crawled, …} into the attribute_jobs row
+# so the app's crawl UI can show "X/Y crawled" (and updated_date keeps the job from
+# being treated as stale). Best-effort - a progress write must never abort a scrape.
+def _set_job_progress(conn, job_id, patch):
+    if not job_id:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE app.attribute_jobs
+                   SET progress = COALESCE(progress, '{}'::jsonb) || %s::jsonb,
+                       updated_date = NOW()
+                   WHERE id = %s AND status IN ('queued', 'running')""",
+                (json.dumps(patch), job_id))
+    except Exception as e:
+        _log.warning(f"[scrape] progress update failed: {e}")
+
+
 # ── DAG ───────────────────────────────────────────────────────────────────────
 @dag(
     schedule=None,
@@ -409,11 +427,14 @@ def cdp_click_ai_attributes_content_scrape():
                 raise RuntimeError(f"No company for capsuite_ref={capsuite_ref}")
             cfg = _load_crawl_config(conn, company_id)
 
+            job_id = params.get("job_id")
             if page_urls:
                 urls = [urllib.parse.unquote(str(u).split("?")[0]) for u in page_urls if u]
             else:
                 urls = _discover_urls(conn, company_id, cfg)
             _log.info(f"[scrape] {capsuite_ref}: {len(urls)} candidate URLs")
+            # Publish the total up front so the UI shows "0/Y crawled" immediately.
+            _set_job_progress(conn, job_id, {"pages_total": len(urls), "pages_crawled": 0})
 
             # incremental skip set: last_crawled + validity + stored HTTP validators
             fresh = {}
@@ -434,6 +455,10 @@ def cdp_click_ai_attributes_content_scrape():
             scraped = changed = skipped = 0
             i = 0
             while i < len(urls):
+                # Heartbeat the processed count every 10 URLs (this also bumps
+                # updated_date so a long crawl isn't reset as stale).
+                if job_id and i % 10 == 0:
+                    _set_job_progress(conn, job_id, {"pages_crawled": i})
                 url = urls[i]
                 nu = _norm_url(url)
                 prev = fresh.get(nu)
@@ -477,6 +502,7 @@ def cdp_click_ai_attributes_content_scrape():
                 driver.quit()
             except Exception:
                 pass
+            _set_job_progress(conn, job_id, {"pages_crawled": i, "pages_skipped": skipped})
             _log.info(f"[scrape] {capsuite_ref}: scraped={scraped} changed={changed} skipped={skipped}")
             return {"company_id": company_id, "job_id": params.get("job_id"),
                     "dag_run_id": params.get("dag_run_id"), "scraped": scraped, "changed": changed, "skipped": skipped}

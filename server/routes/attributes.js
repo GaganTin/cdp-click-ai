@@ -453,6 +453,24 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   });
 
+  // Exclude EVERY failed page in one go (the "exclude all" action on the Failed
+  // view). Failed = unreadable/invalid and not already excluded - these are never
+  // tagged anyway, so no repropagation is needed; just drop them from crawling and
+  // the test-link set.
+  router.post("/web-pages/exclude-failed", async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE app.web_pages
+         SET is_excluded = true, excluded_type = 'exact', excluded_value = url
+         WHERE company_id = $1 AND is_valid = false AND is_excluded = false
+         RETURNING id`,
+        [req.companyId]
+      );
+      if (rows.length) await pruneBadTestLinks(pool, req.companyId).catch(() => {});
+      res.json({ ok: true, excluded: rows.length });
+    } catch (err) { fail(res, err); }
+  });
+
   // Re-run specific pages. mode='scrape' re-crawls them now (Phase 1: Node);
   // mode='tag' flags them needs_retag and enqueues a tag pass.
   router.post("/web-pages/rerun", async (req, res) => {

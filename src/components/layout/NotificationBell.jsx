@@ -7,6 +7,7 @@ import {
 import { appClient } from "@/api/appClient";
 import { useAuth } from "@/lib/AuthContext";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // One icon per notification type (keys match app.notifications.type).
@@ -134,11 +135,15 @@ export default function NotificationBell({ collapsed = false }) {
                 <p className="text-sm text-muted-foreground">{t("You're all caught up.")}</p>
               </div>
             ) : (
-              notifications.map((n) => {
+              // Items are truncated to keep the list compact; hovering shows the full
+              // title + body in a portaled tooltip (escapes this panel's overflow).
+              <TooltipProvider delayDuration={250}>
+              {notifications.map((n) => {
                 const Icon = TYPE_ICON[n.type] || Bell;
                 return (
+                  <Tooltip key={n.id}>
+                    <TooltipTrigger asChild>
                   <button
-                    key={n.id}
                     onClick={() => onItemClick(n)}
                     className={cn(
                       "w-full text-left flex items-start gap-3 px-3 py-3 border-b border-border/60 last:border-0 hover:bg-secondary/60 transition-colors",
@@ -182,8 +187,17 @@ export default function NotificationBell({ collapsed = false }) {
                       </span>
                     </span>
                   </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right" align="start" collisionPadding={8}
+                      className="max-w-xs whitespace-normal break-words bg-popover text-popover-foreground border border-border shadow-lg p-3">
+                      <p className="text-sm font-semibold mb-0.5">{n.title}</p>
+                      {n.body && <p className="text-xs text-muted-foreground">{n.body}</p>}
+                      <p className="text-[11px] text-muted-foreground/70 mt-1.5">{relativeTime(n.created_date)}</p>
+                    </TooltipContent>
+                  </Tooltip>
                 );
-              })
+              })}
+              </TooltipProvider>
             )}
           </div>
         </div>
