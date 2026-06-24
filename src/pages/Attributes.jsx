@@ -125,7 +125,7 @@ function JobStatus({ job, onCancel, compact }) {
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><AlertCircle className="w-4 h-4 text-foreground" /> {t("Cancel this run?")}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {t("This will stop the crawl right away. The AI tagging and profile updates for this run won't be applied, and you'll have to start a brand-new run to finish - the progress shown here resets to zero.")}
+            {t("This will stop this run right away. The AI tagging and profile updates for this run won't be applied, and you'll have to start a brand-new run to finish - the progress shown here resets to zero.")}
           </p>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" size="sm" onClick={() => setConfirmCancel(false)}>{t("Keep running")}</Button>
@@ -1036,7 +1036,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground">{t("Pages tagged by this attribute, with the values the AI assigned. Remove any wrong tag with the ✕ - it updates targeting immediately.")}</p>
                   {pages.length === 0 ? (
-                    <p className="text-xs text-muted-foreground py-6 text-center">{t("No tagged pages yet. Run a reconstruct to crawl and tag pages.")}</p>
+                    <p className="text-xs text-muted-foreground py-6 text-center">{t("No tagged pages yet. Run Reconstruct to tag your crawled pages.")}</p>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                       {pages.map((pg) => (
@@ -1079,7 +1079,38 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
 }
 
 // ── Crawled pages sub-tab ─────────────────────────────────────
-const PAGE_VIEWS = [["valid", "Valid"], ["failed", "Failed"], ["excluded", "Excluded"]];
+const PAGE_VIEWS = [["valid", "Valid"], ["changed", "Changed"], ["failed", "Failed"], ["excluded", "Excluded"]];
+
+// Multi-select of attributes for the "Changed pages" re-tag picker.
+function AttrPicker({ attrs, selected, onToggle, onAll, t }) {
+  const all = attrs.length > 0 && selected.size === attrs.length;
+  const label = attrs.length === 0 ? t("No attributes")
+    : all ? t("All attributes")
+    : selected.size === 0 ? t("Pick attributes")
+    : `${selected.size} ${t("attributes")}`;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="h-7 px-2 text-xs border border-input rounded-md bg-background inline-flex items-center gap-1 max-w-[12rem] truncate">
+          {label} <ChevronDown className="w-3 h-3 flex-shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
+        {attrs.length === 0 && <p className="text-[11px] text-muted-foreground px-2 py-1">{t("No active attributes")}</p>}
+        {attrs.length > 0 && (
+          <DropdownMenuItem onSelect={(e) => { e.preventDefault(); onAll(); }}>
+            <span className="mr-2">{all ? "☑" : "☐"}</span>{t("All attributes")}
+          </DropdownMenuItem>
+        )}
+        {attrs.map((a) => (
+          <DropdownMenuItem key={a.id} onSelect={(e) => { e.preventDefault(); onToggle(a.id); }}>
+            <span className="mr-2">{selected.has(a.id) ? "☑" : "☐"}</span>{a.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 // Add-exclusions modal: single, paste a list, or upload a file (modeled on EDM's
 // "Add to Suppression List"). Patterns are substrings or globs ("/about/*").
@@ -1188,12 +1219,24 @@ function PagesPanel() {
   const [search, setSearch] = useState("");
   const [newUrl, setNewUrl] = useState("");
   const [exclOpen, setExclOpen] = useState(false);
+  const [changedSel, setChangedSel] = useState(() => new Set());  // selected changed pages
+  const [retagAttrs, setRetagAttrs] = useState(() => new Set());  // attributes to re-tag with
 
   const { data, isLoading } = useQuery({
     queryKey: ["web-pages", view, search],
     queryFn: () => appClient.attributes.webPages({ status: view, search, limit: 200 }),
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["web-pages"] });
+
+  // Active behavioral attributes power the "Changed pages" re-tag picker.
+  const { data: allAttrs } = useQuery({ queryKey: ["attributes"], queryFn: () => appClient.attributes.list() });
+  const activeAttrs = (allAttrs || []).filter((a) => a.source === "web_content" && a.status === "active");
+  // Default the picker to all attributes once they load (leave the user's choice alone after).
+  useEffect(() => {
+    if (activeAttrs.length && retagAttrs.size === 0) setRetagAttrs(new Set(activeAttrs.map((a) => a.id)));
+  }, [activeAttrs.length]);
+  const toggleSel = (id) => setChangedSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAttr = (id) => setRetagAttrs((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const addMut = useMutation({
     mutationFn: (url) => appClient.attributes.addWebPage(url),
     onSuccess: (r) => { setNewUrl(""); invalidate(); r.ok ? toast.success(t("Page added")) : toast.error(t("Couldn't read that page:") + ` ${r.reason || t("no content")}`); },
@@ -1218,6 +1261,21 @@ function PagesPanel() {
   const crawlMut = useMutation({
     mutationFn: () => appClient.attributes.refresh(),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["attribute-job", null] }); toast.success(t("Crawling pages - they'll appear here as they're read.")); },
+    onError: (e) => toast.error(e.message),
+  });
+  // Changed-pages review: re-tag chosen pages with chosen attributes, or keep as-is.
+  const retagMut = useMutation({
+    mutationFn: ({ page_ids, attribute_ids }) => appClient.attributes.retagPages(page_ids, attribute_ids),
+    onSuccess: (r) => {
+      invalidate(); setChangedSel(new Set());
+      toast.success(`${t("Re-tagged")} ${r.pages} ${r.pages === 1 ? t("page") : t("pages")}`
+        + (r.remaining ? ` · ${r.remaining} ${t("still pending - run again")}` : ""));
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const keepMut = useMutation({
+    mutationFn: (page_ids) => appClient.attributes.keepPages(page_ids),
+    onSuccess: (r) => { invalidate(); setChangedSel(new Set()); toast.success(`${t("Kept original tags on")} ${r.kept} ${r.kept === 1 ? t("page") : t("pages")}`); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -1280,6 +1338,33 @@ function PagesPanel() {
     </div>
   );
 
+  // Changed view: checkbox + current tags + a per-page "Keep" (dismiss the change).
+  const renderChangedPage = (pg) => (
+    <div key={pg.id} className="py-2 px-2 rounded hover:bg-secondary/40 flex items-start gap-2">
+      <input type="checkbox" checked={changedSel.has(pg.id)} onChange={() => toggleSel(pg.id)}
+        className="accent-foreground mt-1 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-xs truncate">{pg.title || pg.url}</p>
+        <a href={pg.url} target="_blank" rel="noreferrer" className="text-[10px] text-muted-foreground hover:text-foreground truncate flex items-center gap-1">
+          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> {decodeUrl(pg.url)}
+        </a>
+        {pg.tags?.length > 0 ? (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {pg.tags.map((tg, i) => (
+              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/60 border border-border">
+                <span className="text-muted-foreground">{tg.attr}:</span> {tg.value}
+              </span>
+            ))}
+          </div>
+        ) : <p className="text-[10px] text-muted-foreground mt-1">{t("No current tags")}</p>}
+      </div>
+      <button title={t("Keep the existing tags and dismiss the change")} onClick={() => keepMut.mutate([pg.id])} disabled={keepMut.isPending}
+        className="text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground flex-shrink-0">
+        {t("Keep")}
+      </button>
+    </div>
+  );
+
   return (
     <div>
       {cs?.url_pattern && (
@@ -1322,6 +1407,34 @@ function PagesPanel() {
               {addMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t("Add")}
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Changed: intro + bulk re-tag / keep toolbar */}
+      {view === "changed" && (
+        <div className="mb-3 space-y-2">
+          <p className="text-xs text-muted-foreground">{t("Pages whose content changed since they were last tagged. Re-tag them with the attributes you choose, or keep their existing tags.")}</p>
+          {pages.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-secondary/10 p-2">
+              <button className="text-[11px] text-muted-foreground hover:text-foreground" onClick={() => setChangedSel(new Set(pages.map((p) => p.id)))}>{t("Select all")}</button>
+              <button className="text-[11px] text-muted-foreground hover:text-foreground" onClick={() => setChangedSel(new Set())}>{t("Clear")}</button>
+              <span className="text-[11px] text-muted-foreground">{changedSel.size} {t("selected")}</span>
+              <div className="ml-auto flex items-center gap-2">
+                <AttrPicker attrs={activeAttrs} selected={retagAttrs} onToggle={toggleAttr}
+                  onAll={() => setRetagAttrs(retagAttrs.size === activeAttrs.length ? new Set() : new Set(activeAttrs.map((a) => a.id)))} t={t} />
+                <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={!changedSel.size || !retagAttrs.size || retagMut.isPending}
+                  onClick={() => retagMut.mutate({ page_ids: [...changedSel], attribute_ids: [...retagAttrs] })}
+                  title={!retagAttrs.size ? t("Pick at least one attribute") : ""}>
+                  {retagMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  {t("Re-tag selected")}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!changedSel.size || keepMut.isPending}
+                  onClick={() => keepMut.mutate([...changedSel])}>
+                  {t("Keep selected")}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1374,11 +1487,12 @@ function PagesPanel() {
           <p className="text-xs text-muted-foreground py-6 text-center">{t("Loading…")}</p>
         ) : pages.length === 0 ? (
           <p className="text-xs text-muted-foreground py-8 text-center">
-            {view === "valid" ? t("No valid pages yet. Run a reconstruct to crawl and tag your site.")
+            {view === "valid" ? t("No valid pages yet. Click Crawl pages to read your site.")
+              : view === "changed" ? t("No changed pages. When a re-crawl finds new content, those pages show up here to review.")
               : view === "failed" ? t("No failed pages.")
               : t("No individual pages excluded. Add a rule above, or exclude a page from the Valid view.")}
           </p>
-        ) : pages.map(renderPage)}
+        ) : view === "changed" ? pages.map(renderChangedPage) : pages.map(renderPage)}
       </div>
 
       <ExclusionsDialog
@@ -1452,7 +1566,7 @@ function ReviewPanel() {
         <div className="border border-dashed border-border rounded-lg p-10 text-center max-w-lg mx-auto mt-6">
           <ListChecks className="w-7 h-7 text-muted-foreground mx-auto mb-2 opacity-40" />
           <p className="text-sm font-medium mb-1">{filter === "new" ? t("Nothing new to review") : t("No tagged pages yet")}</p>
-          <p className="text-xs text-muted-foreground">{filter === "new" ? t("New pages and labels show up here after a reconstruct.") : t("Run a reconstruct to crawl and tag your pages.")}</p>
+          <p className="text-xs text-muted-foreground">{filter === "new" ? t("New pages and labels show up here after a reconstruct.") : t("Run Reconstruct to tag your crawled pages.")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -1730,7 +1844,7 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
               </div>
             </Step>
             <Step done={false} n={5} current={currentN === 5} title={t("Reconstruct to tag your pages")}>
-              {t("Open the attribute and hit")} <strong>{t("Reconstruct")}</strong> - {t("the AI crawls, tags, and propagates to profiles.")}
+              {t("Open the attribute and hit")} <strong>{t("Reconstruct")}</strong> - {t("the AI tags your crawled pages and propagates the values to profiles.")}
             </Step>
           </>
         )}

@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { authenticate, withCompany } from "../middleware/auth.js";
-import { processNextAttributeJob, repropagate } from "../lib/attributeQueue.js";
+import { processNextAttributeJob, repropagate, retagPagesScoped } from "../lib/attributeQueue.js";
 import { crawlPage, contentHash, matchesExclusion, decodeUrl, isValidTitle } from "../lib/webCrawler.js";
 import { tagPage, isAIConfigured, groupValues, suggestAttributes } from "../lib/attributeAI.js";
 import { recordAiUsage } from "../lib/aiUsage.js";
 import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, gaTopValidPagesForTest, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
-import { triggerContentScrape } from "../lib/contentScrapeTrigger.js";
+import { triggerContentScrape, cancelContentScrape } from "../lib/contentScrapeTrigger.js";
 import { ruleFieldRegistry, previewRule, repropagateRule } from "../lib/attributeRules.js";
 import { assignEntities, unassign, resolveSegmentEntities, resolveIdentifiers, findSingleConflicts, findMultiAssigned, recomputeManualCounts } from "../lib/attributeManual.js";
 
@@ -353,6 +353,10 @@ export function createAttributesRouter(pool) {
       // valid = readable content & title, not excluded. failed = not excluded but
       // scrape failed or invalid title/content (or tagging failed). excluded = is_excluded.
       if (status === "valid")    where += " AND is_valid = true AND is_excluded = false";
+      // "Changed" = a page that was ALREADY tagged and whose content changed since
+      // (needs_retag + has existing tags). Never-tagged pages are handled by a normal
+      // Reconstruct, not this review flow.
+      if (status === "changed")  where += " AND is_valid = true AND is_excluded = false AND needs_retag = true AND EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id)";
       if (status === "failed")   where += " AND is_valid = false AND is_excluded = false";
       if (status === "excluded") where += " AND is_excluded = true";
       if (search) { params.push(`%${search}%`); where += ` AND (url ILIKE $${params.length} OR title ILIKE $${params.length})`; }
@@ -360,6 +364,8 @@ export function createAttributesRouter(pool) {
       const { rows: counts } = await pool.query(
         `SELECT
            COUNT(*) FILTER (WHERE is_valid = true  AND is_excluded = false)  AS valid,
+           COUNT(*) FILTER (WHERE is_valid = true  AND is_excluded = false AND needs_retag = true
+                            AND EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = web_pages.id)) AS changed,
            COUNT(*) FILTER (WHERE is_valid = false AND is_excluded = false)   AS failed,
            COUNT(*) FILTER (WHERE is_excluded = true)                        AS excluded,
            COUNT(*)                                                          AS total
@@ -468,6 +474,35 @@ export function createAttributesRouter(pool) {
       );
       if (rows.length) await pruneBadTestLinks(pool, req.companyId).catch(() => {});
       res.json({ ok: true, excluded: rows.length });
+    } catch (err) { fail(res, err); }
+  });
+
+  // ── Changed pages (content changed since last tagged) ───────
+  // Re-tag the given pages with ONLY the chosen attributes (others keep their tags).
+  router.post("/web-pages/retag", async (req, res) => {
+    if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
+    const pageIds = Array.isArray(req.body?.page_ids) ? req.body.page_ids : [];
+    const attributeIds = Array.isArray(req.body?.attribute_ids) ? req.body.attribute_ids : [];
+    if (!pageIds.length || !attributeIds.length) return res.status(400).json({ error: "page_ids and attribute_ids required" });
+    try {
+      const r = await retagPagesScoped(pool, req.companyId, pageIds, attributeIds, (u) => recordAiUsage(pool, {
+        companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
+        model: u.model, inputTokens: u.input, outputTokens: u.output, metadata: { scoped_retag: true },
+      }));
+      res.json({ ok: true, ...r });
+    } catch (err) { fail(res, err); }
+  });
+
+  // "Keep original tags": dismiss the change on the given pages without re-tagging.
+  router.post("/web-pages/keep", async (req, res) => {
+    const pageIds = Array.isArray(req.body?.page_ids) ? req.body.page_ids : [];
+    if (!pageIds.length) return res.status(400).json({ error: "page_ids required" });
+    try {
+      const { rowCount } = await pool.query(
+        `UPDATE app.web_pages SET needs_retag = false WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+        [req.companyId, pageIds]
+      );
+      res.json({ ok: true, kept: rowCount });
     } catch (err) { fail(res, err); }
   });
 
@@ -740,11 +775,19 @@ export function createAttributesRouter(pool) {
     const { name, description = "", source = "web_content", value_type = "multi",
             scope = "both", extract_from = "both", status = "draft", rule = {}, values = [] } = req.body || {};
     if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+    const trimmed = name.trim();
     try {
+      // Names must be unique within a workspace (case-insensitive) so they're
+      // unambiguous in segments, pop-ups, and on profiles.
+      const { rows: dup } = await pool.query(
+        `SELECT 1 FROM app.attributes WHERE company_id = $1 AND lower(name) = lower($2) LIMIT 1`,
+        [req.companyId, trimmed]
+      );
+      if (dup.length) return res.status(409).json({ error: `An attribute named "${trimmed}" already exists.`, code: "DUPLICATE_NAME" });
       const { rows } = await pool.query(
         `INSERT INTO app.attributes (company_id, created_by, name, description, source, value_type, scope, extract_from, status, rule)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-        [req.companyId, req.user.id, name.trim(), description, source, value_type, scope, extract_from, status, JSON.stringify(rule)]
+        [req.companyId, req.user.id, trimmed, description, source, value_type, scope, extract_from, status, JSON.stringify(rule)]
       );
       const attr = rows[0];
       // Seed the user-provided values list as approved (the expected vocabulary).
@@ -797,6 +840,16 @@ export function createAttributesRouter(pool) {
         [req.params.id, req.companyId]
       );
       if (!cur.length) return res.status(404).json({ error: "Attribute not found" });
+      // Renames must keep names unique within the workspace (case-insensitive).
+      if ("name" in req.body) {
+        const newName = String(req.body.name || "").trim();
+        if (!newName) return res.status(400).json({ error: "name cannot be empty" });
+        const { rows: dup } = await pool.query(
+          `SELECT 1 FROM app.attributes WHERE company_id = $1 AND lower(name) = lower($2) AND id <> $3 LIMIT 1`,
+          [req.companyId, newName, req.params.id]
+        );
+        if (dup.length) return res.status(409).json({ error: `An attribute named "${newName}" already exists.`, code: "DUPLICATE_NAME" });
+      }
       if (cur[0].source === "web_content" && cur[0].content_applied) {
         const changingLocked =
           ("extract_from" in req.body && req.body.extract_from !== cur[0].extract_from) ||
@@ -820,7 +873,7 @@ export function createAttributesRouter(pool) {
         }
       }
       const sets = cols.map((c, i) => `${c} = $${i + 3}`).join(", ");
-      const vals = cols.map((c) => (c === "rule" ? JSON.stringify(req.body[c]) : req.body[c]));
+      const vals = cols.map((c) => (c === "rule" ? JSON.stringify(req.body[c]) : c === "name" ? String(req.body[c]).trim() : req.body[c]));
       const { rows } = await pool.query(
         `UPDATE app.attributes SET ${sets} WHERE id = $1 AND company_id = $2 RETURNING *`,
         [req.params.id, req.companyId, ...vals]
@@ -847,7 +900,17 @@ export function createAttributesRouter(pool) {
       );
       if (!src.length) return res.status(404).json({ error: "Attribute not found" });
       const a = src[0];
-      const name = String(req.body?.name || `${a.name} (copy)`).trim();
+      // Find a free name so the clone never collides (names are unique per workspace).
+      const base = String(req.body?.name || `${a.name} (copy)`).trim();
+      let name = base;
+      for (let n = 2; ; n++) {
+        const { rows: dup } = await pool.query(
+          `SELECT 1 FROM app.attributes WHERE company_id = $1 AND lower(name) = lower($2) LIMIT 1`,
+          [req.companyId, name]
+        );
+        if (!dup.length) break;
+        name = `${base} ${n}`;
+      }
       const { rows } = await pool.query(
         `INSERT INTO app.attributes
            (company_id, created_by, name, description, source, value_type, scope, extract_from, group_label, rule, status, content_applied)
@@ -1126,9 +1189,13 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   };
 
-  router.post("/:id/run", (req, res) => enqueue(req, res, req.params.id));     // refresh + tag (one attribute)
-  router.post("/run", (req, res) => enqueue(req, res, null));                  // refresh + tag (all)
-  router.post("/tag", (req, res) => enqueue(req, res, null, "tag"));           // tag new/changed pages only
+  // Reconstruct = TAG ONLY, over the already-crawled valid pages in app.web_pages.
+  // Crawling is a separate, explicit step ("Crawl pages" / refresh) so we never
+  // scrape the whole site twice. Per-attribute = re-tag that one attribute across
+  // every valid page; "all" = tag every active attribute over new/changed pages.
+  router.post("/:id/run", (req, res) => enqueue(req, res, req.params.id, "retag_attribute")); // re-tag one attribute
+  router.post("/run", (req, res) => enqueue(req, res, null, "tag"));            // tag all active attributes
+  router.post("/tag", (req, res) => enqueue(req, res, null, "tag"));            // tag new/changed pages only
 
   // Refresh (scrape new/changed pages). Prefers the Selenium Airflow DAG when
   // configured; otherwise the Node worker crawls in-process (Phase-1 fallback).
@@ -1468,6 +1535,11 @@ export function createAttributesRouter(pool) {
          WHERE id = $1 AND company_id = $2 AND status IN ('queued','running') RETURNING *`,
         [req.params.jobId, req.companyId]
       );
+      // Also stop the Selenium DAG if this crawl ran through Airflow (no-op for
+      // Node-only crawls / when the run already finished). Don't let an Airflow
+      // hiccup fail the cancel - the job is already marked cancelled.
+      cancelContentScrape(req.companyId, req.params.jobId)
+        .catch((e) => console.warn("[attr] DAG cancel failed (non-fatal):", e.message));
       res.json(rows[0] || { ok: true });
     } catch (err) { fail(res, err); }
   });

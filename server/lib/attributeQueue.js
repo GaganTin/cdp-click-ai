@@ -436,6 +436,83 @@ export async function repropagate(pool, companyId, attrIds) {
   );
 }
 
+// Re-tag a SPECIFIC set of pages with a SPECIFIC set of attributes (the "changed
+// pages" review flow). Only the chosen attributes' tags on those pages are replaced
+// - every other attribute keeps its existing tags. Clears needs_retag on the pages
+// (the user has made a decision) and repropagates the affected attributes. Runs
+// inline with bounded concurrency; intended for the handful of changed pages a user
+// reviews at a time.
+export async function retagPagesScoped(pool, companyId, pageIds, attributeIds, onUsage = null) {
+  if (!pageIds?.length || !attributeIds?.length) return { pages: 0, values: 0 };
+  if (!isAIConfigured()) throw new Error("Azure OpenAI is not configured.");
+
+  const { rows: attrs } = await pool.query(
+    `SELECT id, name, description, value_type, scope, extract_from FROM app.attributes
+     WHERE company_id = $1 AND source = 'web_content' AND status = 'active' AND id = ANY($2::uuid[])`,
+    [companyId, attributeIds]
+  );
+  if (!attrs.length) return { pages: 0, values: 0 };
+  const ids = attrs.map((a) => a.id);
+  const { rows: enumRows } = await pool.query(
+    `SELECT attribute_id, value FROM app.attribute_values
+     WHERE attribute_id = ANY($1::uuid[]) AND is_approved = true AND merged_into IS NULL`,
+    [ids]
+  );
+  const enumMap = {};
+  for (const r of enumRows) (enumMap[r.attribute_id] ||= []).push(r.value);
+  const attributes = attrs.map((a) => ({ ...a, enumValues: enumMap[a.id] || [] }));
+
+  const { rows: allPages } = await pool.query(
+    `SELECT id, url, title, content, content_hash FROM app.web_pages
+     WHERE company_id = $1 AND id = ANY($2::uuid[])
+       AND is_valid = true AND is_excluded = false AND content <> ''`,
+    [companyId, pageIds]
+  );
+  // Cap per call so this synchronous request can't run long enough to time out; the
+  // caller re-runs for the rest (unprocessed pages keep their needs_retag flag).
+  const MAX_PER_CALL = Math.max(1, Number(process.env.ATTR_RETAG_MAX) || 100);
+  const pages = allPages.slice(0, MAX_PER_CALL);
+  const remaining = allPages.length - pages.length;
+
+  let valuesFound = 0;
+  const TAG_CONCURRENCY = Math.max(1, Number(process.env.ATTR_TAG_CONCURRENCY) || 8);
+  await mapPool(pages, TAG_CONCURRENCY, async (page) => {
+    try {
+      const results = await tagPage(page, attributes, onUsage);
+      for (const r of results) {
+        // replace ONLY this (chosen) attribute's tags on the page
+        await pool.query(
+          `DELETE FROM app.page_attribute_values WHERE page_id = $1 AND attribute_id = $2`,
+          [page.id, r.attribute_id]
+        );
+        for (const value of r.values) {
+          const v = await upsertValue(pool, companyId, r.attribute_id, value);
+          if (v.is_blocked) continue;
+          await pool.query(
+            `INSERT INTO app.page_attribute_values (company_id, page_id, attribute_id, attribute_value_id)
+             VALUES ($1,$2,$3,$4) ON CONFLICT (page_id, attribute_value_id) DO NOTHING`,
+            [companyId, page.id, r.attribute_id, v.id]
+          );
+          valuesFound++;
+        }
+      }
+    } catch (e) {
+      console.warn(`[attr] scoped retag failed ${page.url}:`, e.message);
+    }
+  });
+
+  // Clear the "changed" flag only on the pages we actually processed this call.
+  const doneIds = pages.map((p) => p.id);
+  if (doneIds.length) {
+    await pool.query(
+      `UPDATE app.web_pages SET needs_retag = false WHERE company_id = $1 AND id = ANY($2::uuid[])`,
+      [companyId, doneIds]
+    );
+  }
+  await repropagate(pool, companyId, ids);
+  return { pages: pages.length, values: valuesFound, remaining };
+}
+
 // ── queue plumbing ────────────────────────────────────────────
 // A job is "stale" only if its updated_date hasn't advanced for this long. A live
 // worker heartbeats (mergeProgress) every crawled batch and every tagged page, so

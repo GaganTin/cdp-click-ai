@@ -44,6 +44,10 @@ const EXTRACT = ["both", "title", "content"];
 
 const parseList = (s) => [...new Set(String(s || "").split(/[;,\n]/).map((x) => x.trim()).filter(Boolean))];
 
+// Download filename base per source. The Content source (internal key "web_content")
+// just uses "attributes" so the file reads "attributes-template.csv".
+const fileBase = (source) => (source === "web_content" ? "attributes" : `${source}-attributes`);
+
 function csvEscape(v) {
   const s = v == null ? "" : String(v);
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -138,7 +142,7 @@ export async function exportAttributes(source, attrs) {
   };
   const header = meta.columns.join(",");
   const body = details.map((d) => meta.columns.map((c) => csvEscape(cell(d, c))).join(",")).join("\n");
-  downloadCsv(`${source}-attributes.csv`, `${header}\n${body}\n`);
+  downloadCsv(`${fileBase(source)}.csv`, `${header}\n${body}\n`);
 }
 
 export default function AttributeImportDialog({ open, source, attrs = [], onClose, onImported }) {
@@ -154,7 +158,7 @@ export default function AttributeImportDialog({ open, source, attrs = [], onClos
   const close = () => { reset(); onClose(); };
 
   const handleTemplate = () => {
-    downloadCsv(`${source}-attributes-template.csv`, `${meta.columns.join(",")}\n${meta.example.map(csvEscape).join(",")}\n`);
+    downloadCsv(`${fileBase(source)}-template.csv`, `${meta.columns.join(",")}\n${meta.example.map(csvEscape).join(",")}\n`);
   };
 
   const handleExport = async () => {

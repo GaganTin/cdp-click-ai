@@ -38,3 +38,33 @@ export async function triggerContentScrape(pool, companyId, { pageUrls = null, j
   }
   return { triggered: true, runId };
 }
+
+// Stop the content-scrape DAG run for a job (used when the user cancels a crawl).
+// The run id is deterministic - the same one triggerContentScrape created from the
+// company + job - so we can PATCH it to "failed", which tells Airflow to terminate
+// the running scrape task. No-op when Airflow isn't configured or the run is gone.
+export async function cancelContentScrape(companyId, jobId) {
+  const dagId = CONTENT_SCRAPE_DAG_ID;
+  const base = (process.env.AIRFLOW_BASE_URL || "").replace(/\/$/, "");
+  if (!base || !jobId) return { cancelled: false };
+
+  const user = process.env.AIRFLOW_USER || "admin";
+  const pass = process.env.AIRFLOW_PASS || "";
+  const runId = `content_scrape_${companyId}_${jobId}`;
+  const resp = await fetch(`${base}/api/v1/dags/${dagId}/dagRuns/${runId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`,
+    },
+    body: JSON.stringify({ state: "failed" }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  // 404 = no such run (Airflow wasn't used for this job, or it already finished).
+  if (resp.status === 404) return { cancelled: false };
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText);
+    throw new Error(`Airflow ${resp.status}: ${text}`);
+  }
+  return { cancelled: true, runId };
+}
