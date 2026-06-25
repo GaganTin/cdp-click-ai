@@ -39,6 +39,8 @@ export default function Login() {
     try {
       await appClient.auth.login(form.email, form.password);
       await checkUserAuth();
+      // Expand the sidebar on this first post-login view (one-time).
+      sessionStorage.setItem("expandSidebarOnce", "1");
       navigate("/");
     } catch (err) {
       // No account for this email → send them to sign-up with it pre-filled.

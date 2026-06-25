@@ -108,7 +108,15 @@ export default function Sidebar() {
   const queryClient = useQueryClient();
   const { t } = usePreferences();
   const isAnalyst = location.pathname === "/";
-  const [collapsed, setCollapsed] = useState(isAnalyst);
+  // Right after login/signup, show the sidebar expanded once (consume the
+  // one-time flag set by the auth flow); otherwise collapse on the Analyst page.
+  const [collapsed, setCollapsed] = useState(() => {
+    if (sessionStorage.getItem("expandSidebarOnce")) {
+      sessionStorage.removeItem("expandSidebarOnce");
+      return false;
+    }
+    return isAnalyst;
+  });
 
   const companies = user?.companies || [];
 
