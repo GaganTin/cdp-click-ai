@@ -3,15 +3,14 @@ import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil } from "lucide-reac
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseChartConfig } from "@/lib/utils";
+import { CHART_SIZES, normalizeSize, sizeMeta } from "@/lib/chartSizes";
 import MiniChart from "./MiniChart";
 
 const TABS_KEY = "dashboard_tabs_v1";
 
-const SIZE_OPTIONS = [
-  { label: "S", value: "small", h: "h-36" },
-  { label: "M", value: "medium", h: "h-52" },
-  { label: "L", value: "large", h: "h-72" },
-];
+// Pixel heights for this (narrow) preview panel; the column span comes from the
+// shared size model so "S"/"L" behave the same as on the full Dashboard.
+const PREVIEW_HEIGHTS = { small: "h-48", large: "h-72" };
 
 function loadState() {
   try { return JSON.parse(localStorage.getItem(TABS_KEY) || "null"); } catch { return null; }
@@ -194,13 +193,13 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
           <div className="grid grid-cols-2 gap-3">
             {activeCharts.map(chart => {
               const config = parseChartConfig(chart.chart_config);
-              const size = chartSizes[chart.id] || "medium";
-              const sizeH = SIZE_OPTIONS.find(s => s.value === size)?.h || "h-52";
+              const size = normalizeSize(chartSizes[chart.id]);
+              const sizeH = PREVIEW_HEIGHTS[size];
               const otherTabs = tabs.filter(t => t.id !== activeTab);
               return (
                 <div
                   key={chart.id}
-                  className="border border-border rounded-lg bg-card p-4 group relative hover:shadow-md transition-shadow col-span-1"
+                  className={`border border-border rounded-lg bg-card p-4 group relative hover:shadow-md transition-shadow ${sizeMeta(size).span}`}
                 >
                   {/* Hover actions */}
                   <div className="absolute top-2 right-2 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -224,9 +223,10 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
 
                   {/* Size + move controls */}
                   <div className="flex items-center gap-1 mb-2 flex-wrap">
-                    {SIZE_OPTIONS.map(s => (
+                    {CHART_SIZES.map(s => (
                       <button
                         key={s.value}
+                        title={`${s.name} size`}
                         className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
                           size === s.value
                             ? "border-foreground bg-foreground text-background"

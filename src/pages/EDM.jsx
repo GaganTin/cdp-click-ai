@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 import { usePlan } from "@/lib/usePlan";
 import { useStickyState } from "@/lib/useStickyState";
-import { Delta, syncPrevPeriod } from "@/components/analytics/AnalyticsKit";
+import { DateRangeBar, KpiTile } from "@/components/analytics/AnalyticsKit";
 import { toast } from "sonner";
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -16,6 +16,7 @@ import {
   ShieldOff, Search, Filter, Layout, Upload, Info,
   ArrowUp, ArrowDown, ArrowUpDown, Eye, Copy,
   FileText, FileDown, X, Calendar, LayoutGrid, ChevronLeft, ChevronRight,
+  Users, MousePointerClick,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
@@ -913,7 +914,6 @@ function AnalyticsTab() {
   const pClicks     = prevSent.reduce((s, c) => s + (c.click_count || 0), 0);
   const pAvgOpen    = pTotalSent > 0 ? Math.round((pOpens  / pTotalSent) * 100) : 0;
   const pAvgClick   = pTotalSent > 0 ? Math.round((pClicks / pTotalSent) * 100) : 0;
-  const syncCmp = (f, t) => { if (f && t) { const p = syncPrevPeriod(f, t); setCmpFrom(p.from); setCmpTo(p.to); } };
 
   const enriched = sent.map(c => ({
     ...c,
@@ -984,122 +984,29 @@ function AnalyticsTab() {
     <TooltipProvider>
       <div className="px-8 py-6 space-y-6">
 
-        {/* ── Date + filter bar - matches UTM analytics style ── */}
-        <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
-          {/* Period date pickers */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Period")}</p>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background"
-              />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background"
-              />
-            </div>
-          </div>
+        {/* ── Date period + compare bar (shared AnalyticsKit) ── */}
+        <DateRangeBar
+          t={t}
+          from={dateFrom} to={dateTo}
+          onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }}
+          compare={compare} setCompare={setCompare}
+          compareRange={{ from: cmpFrom, to: cmpTo }}
+          onCompareChange={({ from, to }) => { setCmpFrom(from); setCmpTo(to); }}
+          note={(dateFrom || dateTo)
+            ? `${sent.length} ${sent.length !== 1 ? t("campaigns in range") : t("campaign in range")}`
+            : undefined}
+        />
 
-          {/* Compare toggle */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
-            <button
-              onClick={() => { if (!compare) syncCmp(dateFrom, dateTo); setCompare(v => !v); }}
-              className={`h-8 px-3 text-xs border rounded-md transition-colors ${
-                compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
-              }`}
-            >
-              {compare ? t("On") : t("Off")}
-            </button>
-          </div>
-
-          {/* Quick ranges */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Quick")}</p>
-            <div className="flex gap-1">
-              {[7, 30, 90].map(d => {
-                const today = new Date();
-                const from = new Date(today - d * 86_400_000);
-                const toStr = today.toISOString().slice(0, 10);
-                const fromStr = from.toISOString().slice(0, 10);
-                const active = dateFrom === fromStr && dateTo === toStr;
-                return (
-                  <button
-                    key={d}
-                    onClick={() => { setDateFrom(fromStr); setDateTo(toStr); if (compare) syncCmp(fromStr, toStr); }}
-                    className={`h-8 px-2.5 text-xs border rounded-md transition-colors ${
-                      active
-                        ? "bg-foreground text-background border-foreground"
-                        : "border-input bg-background hover:bg-secondary"
-                    }`}
-                  >
-                    {d}d
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Comparison period */}
-          {compare && (
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
-              <div className="flex items-center gap-1.5">
-                <input type="date" value={cmpFrom} onChange={e => setCmpFrom(e.target.value)}
-                  className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-                <span className="text-xs text-muted-foreground">→</span>
-                <input type="date" value={cmpTo} onChange={e => setCmpTo(e.target.value)}
-                  className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-              </div>
-            </div>
-          )}
-
-          {/* Clear */}
-          {(dateFrom || dateTo) && (
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 opacity-0 select-none">·</p>
-              <button
-                onClick={() => { setDateFrom(""); setDateTo(""); }}
-                className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-              >
-                {t("Clear")}
-              </button>
-            </div>
-          )}
-
-          {(dateFrom || dateTo) && (
-            <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">
-              {sent.length} {sent.length !== 1 ? t("campaigns in range") : t("campaign in range")}
-            </p>
-          )}
-        </div>
-
-        {/* ── KPI tiles ── */}
+        {/* ── KPI tiles (shared AnalyticsKit) ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: t("Emails Sent"),       value: sent.length,                sub: t("campaigns"),        curr: sent.length, prev: prevSent.length, prevDisplay: prevSent.length },
-            { label: t("Total Recipients"),  value: totalSent.toLocaleString(), sub: t("across all sends"), curr: totalSent,   prev: pTotalSent,      prevDisplay: pTotalSent.toLocaleString() },
-            { label: t("Avg Open Rate"),     value: `${avgOpenRate}%`,          sub: `${totalOpens.toLocaleString()} ${t("opens")}`,  curr: avgOpenRate,  prev: pAvgOpen,  prevDisplay: `${pAvgOpen}%` },
-            { label: t("Avg Click Rate"),    value: `${avgClickRate}%`,         sub: `${totalClicks.toLocaleString()} ${t("clicks")}`, curr: avgClickRate, prev: pAvgClick, prevDisplay: `${pAvgClick}%` },
-          ].map(tile => (
-            <div key={tile.label} className="border border-border rounded-lg p-4 space-y-1">
-              <p className="text-xs text-muted-foreground">{tile.label}</p>
-              <p className="text-2xl font-bold">{tile.value}</p>
-              <p className="text-[11px] text-muted-foreground">{tile.sub}</p>
-              {compare && (
-                <div className="flex items-center gap-1.5 pt-0.5">
-                  <Delta curr={tile.curr} prev={tile.prev} />
-                  <span className="text-[10px] text-muted-foreground">{t("vs")} {tile.prevDisplay}</span>
-                </div>
-              )}
-            </div>
-          ))}
+          <KpiTile label={t("Emails Sent")} value={sent.length} sub={t("campaigns")} icon={Send}
+            curr={compare ? sent.length : undefined} prev={compare ? prevSent.length : undefined} prevDisplay={prevSent.length} />
+          <KpiTile label={t("Total Recipients")} value={totalSent.toLocaleString()} sub={t("across all sends")} icon={Users}
+            curr={compare ? totalSent : undefined} prev={compare ? pTotalSent : undefined} prevDisplay={pTotalSent.toLocaleString()} />
+          <KpiTile label={t("Avg Open Rate")} value={`${avgOpenRate}%`} sub={`${totalOpens.toLocaleString()} ${t("opens")}`} icon={Eye}
+            curr={compare ? avgOpenRate : undefined} prev={compare ? pAvgOpen : undefined} prevDisplay={`${pAvgOpen}%`} isRate />
+          <KpiTile label={t("Avg Click Rate")} value={`${avgClickRate}%`} sub={`${totalClicks.toLocaleString()} ${t("clicks")}`} icon={MousePointerClick}
+            curr={compare ? avgClickRate : undefined} prev={compare ? pAvgClick : undefined} prevDisplay={`${pAvgClick}%`} isRate />
         </div>
 
         {sent.length === 0 ? (

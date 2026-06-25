@@ -1,7 +1,7 @@
 import { useState, useId, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
-import { Delta, syncPrevPeriod } from "@/components/analytics/AnalyticsKit";
+import { DateRangeBar, KpiTile } from "@/components/analytics/AnalyticsKit";
 import { toast } from "sonner";
 import {
   format, startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -1199,11 +1199,18 @@ function AnalyticsTab() {
   const toggleCol = (key) => setHiddenCols(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else if (colOrder.filter(k => !n.has(k)).length > 1) n.add(key); return n; });
   const moveCol   = (key, dir) => setColOrder(prev => { const idx = prev.indexOf(key); if (idx === - 1) return prev; const n = [...prev]; if (dir==="up" && idx>0) [n[idx-1],n[idx]]=[n[idx],n[idx-1]]; else if (dir==="down" && idx<prev.length-1) [n[idx],n[idx+1]]=[n[idx+1],n[idx]]; return n; });
 
+  // Counts are aggregated server-side over the selected range (range-accurate),
+  // so the query key carries the period and refetches when it changes.
   const { data: analytics = [], isLoading: loadingAnalytics } = useQuery({
-    queryKey: ["popup-analytics"],
-    queryFn: () => appClient.popup.getAnalytics(),
+    queryKey: ["popup-analytics", dateFrom, dateTo],
+    queryFn: () => appClient.popup.getAnalytics({ from: dateFrom, to: dateTo }),
   });
-
+  // Comparison period - a parallel server query over the prev range (only when on).
+  const { data: prevAnalytics = [] } = useQuery({
+    queryKey: ["popup-analytics", cmpFrom, cmpTo],
+    queryFn: () => appClient.popup.getAnalytics({ from: cmpFrom, to: cmpTo }),
+    enabled: compare && !!(cmpFrom || cmpTo),
+  });
 
   const formatSecs = (secs) => {
     if (!secs) return "-";
@@ -1223,13 +1230,8 @@ function AnalyticsTab() {
     }
     return true;
   };
-  // Keep popup if its active period overlaps with the given range.
-  const overlaps = (p, f, t) => {
-    if (f && p.end_time && new Date(p.end_time) < new Date(f)) return false;
-    if (t && p.start_time && new Date(p.start_time) > new Date(t + "T23:59:59")) return false;
-    return true;
-  };
-  const filtered = analytics.filter(p => matchesNonDate(p) && overlaps(p, dateFrom, dateTo));
+  // Date range is applied server-side; here we only apply search / column filters.
+  const filtered = analytics.filter(matchesNonDate);
 
   const sumTotals = (rows) => rows.reduce((acc, p) => ({
     impressions: acc.impressions + Number(p.impressions || 0),
@@ -1247,12 +1249,11 @@ function AnalyticsTab() {
   const totals = sumTotals(filtered);
   const avgEngSecs = avgEng(filtered);
 
-  // Comparison period (overlap-based, same predicate with the prev range).
-  const prevFiltered = compare ? analytics.filter(p => matchesNonDate(p) && overlaps(p, cmpFrom, cmpTo)) : [];
+  // Comparison totals from the prev-range server query (same search/col filters).
+  const prevFiltered = compare ? prevAnalytics.filter(matchesNonDate) : [];
   const pTotals = sumTotals(prevFiltered);
   const pAvgEng = avgEng(prevFiltered);
   const pctN = (num, denom) => (denom > 0 ? (num / denom) * 100 : 0);
-  const syncCmp = (f, t) => { if (f && t) { const p = syncPrevPeriod(f, t); setCmpFrom(p.from); setCmpTo(p.to); } };
 
   const visibleColDefs = colOrder.filter(k => !hiddenCols.has(k)).map(k => PERF_COLUMNS.find(c => c.key === k)).filter(Boolean);
 
@@ -1352,147 +1353,40 @@ function AnalyticsTab() {
   return (
     <div className="px-8 py-6 space-y-6">
 
-      {/* ── Date period filter bar - same style as UTM / Email analytics ── */}
-      <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
-        {/* Period date pickers */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Period")}</p>
-          <div className="flex items-center gap-1.5">
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
-              className="h-8 px-2 text-xs border border-input rounded-md bg-background"
-            />
-            <span className="text-xs text-muted-foreground">→</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={e => setDateTo(e.target.value)}
-              className="h-8 px-2 text-xs border border-input rounded-md bg-background"
-            />
-          </div>
-        </div>
+      {/* ── Date period + compare bar (shared AnalyticsKit) ── */}
+      <DateRangeBar
+        t={t}
+        from={dateFrom} to={dateTo}
+        onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }}
+        compare={compare} setCompare={setCompare}
+        compareRange={{ from: cmpFrom, to: cmpTo }}
+        onCompareChange={({ from, to }) => { setCmpFrom(from); setCmpTo(to); }}
+        note={(dateFrom || dateTo)
+          ? `${filtered.length} ${filtered.length !== 1 ? t("pop-ups") : t("pop-up")} · ${totals.impressions.toLocaleString()} ${t("impressions in range")}`
+          : undefined}
+      />
 
-        {/* Compare toggle */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
-          <button
-            onClick={() => { if (!compare) syncCmp(dateFrom, dateTo); setCompare(v => !v); }}
-            className={`h-8 px-3 text-xs border rounded-md transition-colors ${
-              compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
-            }`}
-          >
-            {compare ? t("On") : t("Off")}
-          </button>
-        </div>
-
-        {/* Quick ranges */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Quick")}</p>
-          <div className="flex gap-1">
-            {[7, 30, 90].map(d => {
-              const today = new Date();
-              const fromStr = new Date(today - d * 86_400_000).toISOString().slice(0, 10);
-              const toStr   = today.toISOString().slice(0, 10);
-              const active  = dateFrom === fromStr && dateTo === toStr;
-              return (
-                <button
-                  key={d}
-                  onClick={() => { setDateFrom(fromStr); setDateTo(toStr); if (compare) syncCmp(fromStr, toStr); }}
-                  className={`h-8 px-2.5 text-xs border rounded-md transition-colors ${
-                    active
-                      ? "bg-foreground text-background border-foreground"
-                      : "border-input bg-background hover:bg-secondary"
-                  }`}
-                >
-                  {d}d
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Comparison period */}
-        {compare && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
-            <div className="flex items-center gap-1.5">
-              <input type="date" value={cmpFrom} onChange={e => setCmpFrom(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input type="date" value={cmpTo} onChange={e => setCmpTo(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-            </div>
-          </div>
-        )}
-
-        {/* Clear */}
-        {(dateFrom || dateTo) && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 opacity-0 select-none">·</p>
-            <button
-              onClick={() => { setDateFrom(""); setDateTo(""); }}
-              className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
-            >
-              {t("Clear")}
-            </button>
-          </div>
-        )}
-
-        {(dateFrom || dateTo) && (
-          <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">
-            {filtered.length} {filtered.length !== 1 ? t("pop-ups") : t("pop-up")} {t("in range")}
-          </p>
-        )}
-      </div>
-
-      {/* Summary tiles */}
+      {/* ── KPI tiles (shared AnalyticsKit) ── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("Total Impressions")}</p>
-          <p className="text-2xl font-bold">{totals.impressions.toLocaleString()}</p>
-          <p className="text-[11px] text-muted-foreground">{totals.unique_views.toLocaleString()} {t("unique views")}</p>
-          {compare && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <Delta curr={totals.impressions} prev={pTotals.impressions} />
-              <span className="text-[10px] text-muted-foreground">{t("vs")} {pTotals.impressions.toLocaleString()}</span>
-            </div>
-          )}
-        </div>
-        <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("Click-Through Rate")}</p>
-          <p className="text-2xl font-bold">{pct(totals.clicks, totals.impressions)}%</p>
-          <p className="text-[11px] text-muted-foreground">{totals.clicks.toLocaleString()} {t("total clicks")}</p>
-          {compare && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <Delta curr={pctN(totals.clicks, totals.impressions)} prev={pctN(pTotals.clicks, pTotals.impressions)} />
-              <span className="text-[10px] text-muted-foreground">{t("vs")} {pct(pTotals.clicks, pTotals.impressions)}%</span>
-            </div>
-          )}
-        </div>
-        <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("Email Conversion")}</p>
-          <p className="text-2xl font-bold">{pct(totals.emails, totals.impressions)}%</p>
-          <p className="text-[11px] text-muted-foreground">{totals.emails.toLocaleString()} {t("emails collected")}</p>
-          {compare && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <Delta curr={pctN(totals.emails, totals.impressions)} prev={pctN(pTotals.emails, pTotals.impressions)} />
-              <span className="text-[10px] text-muted-foreground">{t("vs")} {pct(pTotals.emails, pTotals.impressions)}%</span>
-            </div>
-          )}
-        </div>
-        <div className="border border-border rounded-lg p-4 space-y-1">
-          <p className="text-xs text-muted-foreground">{t("Avg Engagement Time")}</p>
-          <p className="text-2xl font-bold">{formatSecs(avgEngSecs)}</p>
-          <p className="text-[11px] text-muted-foreground">{pct(totals.dismissals, totals.impressions)}% {t("close rate")}</p>
-          {compare && pAvgEng != null && avgEngSecs != null && (
-            <div className="flex items-center gap-1.5 pt-0.5">
-              <Delta curr={avgEngSecs} prev={pAvgEng} />
-              <span className="text-[10px] text-muted-foreground">{t("vs")} {formatSecs(pAvgEng)}</span>
-            </div>
-          )}
-        </div>
+        <KpiTile label={t("Total Impressions")} value={totals.impressions.toLocaleString()}
+          sub={`${totals.unique_views.toLocaleString()} ${t("unique views")}`} icon={Eye}
+          curr={compare ? totals.impressions : undefined} prev={compare ? pTotals.impressions : undefined}
+          prevDisplay={pTotals.impressions.toLocaleString()} />
+        <KpiTile label={t("Click-Through Rate")} value={`${pct(totals.clicks, totals.impressions)}%`}
+          sub={`${totals.clicks.toLocaleString()} ${t("total clicks")}`} icon={MousePointer2}
+          curr={compare ? pctN(totals.clicks, totals.impressions) : undefined}
+          prev={compare ? pctN(pTotals.clicks, pTotals.impressions) : undefined}
+          prevDisplay={`${pct(pTotals.clicks, pTotals.impressions)}%`} isRate />
+        <KpiTile label={t("Email Conversion")} value={`${pct(totals.emails, totals.impressions)}%`}
+          sub={`${totals.emails.toLocaleString()} ${t("emails collected")}`} icon={Mail}
+          curr={compare ? pctN(totals.emails, totals.impressions) : undefined}
+          prev={compare ? pctN(pTotals.emails, pTotals.impressions) : undefined}
+          prevDisplay={`${pct(pTotals.emails, pTotals.impressions)}%`} isRate />
+        <KpiTile label={t("Avg Engagement Time")} value={formatSecs(avgEngSecs)}
+          sub={`${pct(totals.dismissals, totals.impressions)}% ${t("close rate")}`} icon={Clock}
+          curr={compare && avgEngSecs != null ? avgEngSecs : undefined}
+          prev={compare && pAvgEng != null ? pAvgEng : undefined}
+          prevDisplay={formatSecs(pAvgEng)} />
       </div>
 
       {/* Per-popup performance table */}

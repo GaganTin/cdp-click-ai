@@ -1,10 +1,12 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
+import { useStickyState } from "@/lib/useStickyState";
 import { Layers, CheckCircle2, FileEdit, Lock, RefreshCw, Users, BarChart2 } from "lucide-react";
 import { format } from "date-fns";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock, AnalyticsLoading,
+  DateRangeBar,
 } from "@/components/analytics/AnalyticsKit";
 
 const STATUS_OF = (s) => s.status || "draft";
@@ -26,6 +28,14 @@ export default function SegmentsAnalyticsPanel() {
     queryKey: ["segments"],
     queryFn: () => appClient.entities.Segment.list("-created_date"),
   });
+
+  // Period + compare selections persist across refresh (localStorage). The date
+  // range filters the KPI tiles by segment CREATION date; charts/table stay all-time.
+  const [dateFrom, setDateFrom] = useStickyState("", "segmentsAnalytics.dateFrom");
+  const [dateTo, setDateTo]     = useStickyState("", "segmentsAnalytics.dateTo");
+  const [compare, setCompare]   = useStickyState(false, "segmentsAnalytics.compare");
+  const [cmpFrom, setCmpFrom]   = useStickyState("", "segmentsAnalytics.cmpFrom");
+  const [cmpTo, setCmpTo]       = useStickyState("", "segmentsAnalytics.cmpTo");
 
   const a = useMemo(() => {
     const counts = (pred) => segments.filter(pred).length;
@@ -83,16 +93,61 @@ export default function SegmentsAnalyticsPanel() {
     );
   }
 
+  // KPI metrics for an arbitrary segment list (used for the selected period + compare).
+  const kpiOf = (list) => {
+    const sized = list.filter((s) => Number(s.estimated_size) > 0);
+    const reach = sized.reduce((sum, x) => sum + Number(x.estimated_size), 0);
+    return {
+      total: list.length,
+      active: list.filter((s) => STATUS_OF(s) === "active").length,
+      draft: list.filter((s) => STATUS_OF(s) === "draft").length,
+      archived: list.filter((s) => STATUS_OF(s) === "archived").length,
+      inUse: list.filter((s) => s.is_used).length,
+      refreshOn: list.filter((s) => s.daily_refresh).length,
+      reach,
+      avgSize: sized.length ? Math.round(reach / sized.length) : 0,
+    };
+  };
+  const inRange = (s, f, t) => {
+    if (!s.created_date) return false;
+    const d = new Date(s.created_date);
+    if (f && d < new Date(f)) return false;
+    if (t && d > new Date(t + "T23:59:59")) return false;
+    return true;
+  };
+  const hasRange = !!(dateFrom || dateTo);
+  // No range → all-time KPIs (current state); range set → segments created in window.
+  const periodSegs = hasRange ? segments.filter((s) => inRange(s, dateFrom, dateTo)) : segments;
+  const prevSegs   = compare ? segments.filter((s) => inRange(s, cmpFrom, cmpTo)) : [];
+  const kpi  = kpiOf(periodSegs);
+  const pkpi = kpiOf(prevSegs);
+
   return (
     <div className="px-8 py-6 space-y-6">
+      {/* Date period + compare bar (filters the KPI tiles by creation date) */}
+      <DateRangeBar
+        from={dateFrom} to={dateTo}
+        onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }}
+        compare={compare} setCompare={setCompare}
+        compareRange={{ from: cmpFrom, to: cmpTo }}
+        onCompareChange={({ from, to }) => { setCmpFrom(from); setCmpTo(to); }}
+        note={hasRange ? `${kpi.total.toLocaleString()} ${kpi.total !== 1 ? "segments" : "segment"} created in range` : undefined}
+      />
+
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <KpiTile label="Segments" value={a.total.toLocaleString()} icon={Layers} />
-        <KpiTile label="Active" value={a.active.toLocaleString()} sub={`${a.draft} draft · ${a.archived} archived`} icon={CheckCircle2} />
-        <KpiTile label="Drafts" value={a.draft.toLocaleString()} icon={FileEdit} />
-        <KpiTile label="In use" value={a.inUse.toLocaleString()} sub="locked by a campaign / pop-up" icon={Lock} />
-        <KpiTile label="Daily refresh on" value={a.refreshOn.toLocaleString()} icon={RefreshCw} />
-        <KpiTile label="Total reach" value={a.totalReach.toLocaleString()} sub={`avg ${a.avgSize.toLocaleString()} / segment`} icon={Users} />
+        <KpiTile label="Segments" value={kpi.total.toLocaleString()} icon={Layers}
+          curr={compare ? kpi.total : undefined} prev={compare ? pkpi.total : undefined} prevDisplay={pkpi.total.toLocaleString()} />
+        <KpiTile label="Active" value={kpi.active.toLocaleString()} sub={`${kpi.draft} draft · ${kpi.archived} archived`} icon={CheckCircle2}
+          curr={compare ? kpi.active : undefined} prev={compare ? pkpi.active : undefined} prevDisplay={pkpi.active.toLocaleString()} />
+        <KpiTile label="Drafts" value={kpi.draft.toLocaleString()} icon={FileEdit}
+          curr={compare ? kpi.draft : undefined} prev={compare ? pkpi.draft : undefined} prevDisplay={pkpi.draft.toLocaleString()} />
+        <KpiTile label="In use" value={kpi.inUse.toLocaleString()} sub="locked by a campaign / pop-up" icon={Lock}
+          curr={compare ? kpi.inUse : undefined} prev={compare ? pkpi.inUse : undefined} prevDisplay={pkpi.inUse.toLocaleString()} />
+        <KpiTile label="Daily refresh on" value={kpi.refreshOn.toLocaleString()} icon={RefreshCw}
+          curr={compare ? kpi.refreshOn : undefined} prev={compare ? pkpi.refreshOn : undefined} prevDisplay={pkpi.refreshOn.toLocaleString()} />
+        <KpiTile label="Total reach" value={kpi.reach.toLocaleString()} sub={`avg ${kpi.avgSize.toLocaleString()} / segment`} icon={Users}
+          curr={compare ? kpi.reach : undefined} prev={compare ? pkpi.reach : undefined} prevDisplay={pkpi.reach.toLocaleString()} />
       </div>
 
       {/* Charts */}

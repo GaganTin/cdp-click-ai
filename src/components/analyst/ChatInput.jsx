@@ -45,7 +45,7 @@ export default function ChatInput({
   const hasSkills = contextSkills.length > 0 || templateSkills.length > 0;
 
   return (
-    <form onSubmit={handleSubmit} className="border-t border-border p-4">
+    <form onSubmit={handleSubmit} className="border-t border-border px-4 py-3 flex-shrink-0">
       <div className="flex items-center gap-2 max-w-3xl mx-auto">
         <input ref={fileRef} type="file" className="hidden" onChange={handleFileUpload} />
 
@@ -166,7 +166,7 @@ export default function ChatInput({
           <Send className="w-4 h-4" />
         </Button>
       </div>
-      <p className="text-[10px] text-muted-foreground text-center mt-2">
+      <p className="text-[10px] text-muted-foreground text-center mt-1.5">
         Meritma Analyst · Connected to your data
       </p>
     </form>

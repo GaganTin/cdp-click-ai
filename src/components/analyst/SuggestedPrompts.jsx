@@ -52,8 +52,8 @@ export default function SuggestedPrompts({ onSelect }) {
   const prompts = PROMPT_SETS[dayOfYear % PROMPT_SETS.length];
 
   return (
-    <div className="flex-1 overflow-auto">
-      <div className="min-h-full flex flex-col items-center justify-center px-8 py-10">
+    <div className="flex-1 min-h-0 overflow-auto">
+      <div className="min-h-full flex flex-col items-center justify-center px-8 py-8">
         <div className="text-center mb-8">
           <h2 className="font-heading text-2xl font-semibold tracking-tight mb-2">
             What would you like to know?

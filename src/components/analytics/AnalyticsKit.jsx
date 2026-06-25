@@ -227,7 +227,9 @@ export function LineBlock({ data = [], height = 220, color = "#1a1a1a", prevData
 // ── Date range bar with quick ranges (matches Pop-up / UTM analytics) ──────────
 // Optional compare props: pass `compare`, `setCompare`, `compareRange` ({from,to})
 // and `onCompareChange` to enable a UTM-style "Compare" toggle + comparison period.
-export function DateRangeBar({ from, to, onChange, compare, setCompare, compareRange, onCompareChange }) {
+// Optional `t` translates the chrome labels (defaults to identity); optional `note`
+// renders a right-aligned summary line (e.g. "12 campaigns in range").
+export function DateRangeBar({ from, to, onChange, compare, setCompare, compareRange, onCompareChange, t = (s) => s, note }) {
   const canCompare = typeof setCompare === "function";
   // Changing the current period re-syncs the comparison period when compare is on.
   const set = (f, t) => {
@@ -242,7 +244,7 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
   return (
     <div className="flex flex-wrap items-end gap-4 p-4 border border-border rounded-lg bg-secondary/20">
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Period</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Period")}</p>
         <div className="flex items-center gap-1.5">
           <input type="date" value={from} onChange={(e) => set(e.target.value, to)}
             className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
@@ -253,17 +255,17 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
       </div>
       {canCompare && (
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Compare</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
           <button onClick={toggleCompare}
             className={`h-8 px-3 text-xs border rounded-md transition-colors ${
               compare ? "bg-foreground text-background border-foreground" : "border-input bg-background hover:bg-secondary"
             }`}>
-            {compare ? "On" : "Off"}
+            {compare ? t("On") : t("Off")}
           </button>
         </div>
       )}
       <div>
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick</p>
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Quick")}</p>
         <div className="flex gap-1">
           {[7, 30, 90].map((d) => {
             const today = new Date();
@@ -283,7 +285,7 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
       </div>
       {canCompare && compare && (
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
           <div className="flex items-center gap-1.5">
             <input type="date" value={compareRange?.from || ""} onChange={(e) => setCmp(e.target.value, compareRange?.to || "")}
               className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
@@ -296,9 +298,10 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
       {(from || to) && (
         <button onClick={() => set("", "")}
           className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground self-end">
-          Clear
+          {t("Clear")}
         </button>
       )}
+      {note && <p className="self-end pb-1 text-xs text-muted-foreground ml-auto">{note}</p>}
     </div>
   );
 }

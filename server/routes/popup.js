@@ -367,10 +367,28 @@ export function createPopupRouter(pool) {
 
   // ── Analytics ────────────────────────────────────────────────────────────────
 
-  // GET /api/popups/analytics
+  // GET /api/popups/analytics?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Counts (impressions/clicks/emails/dismissals/engagement) are aggregated ONLY
+  // over activity that occurred within [from, to] when those params are supplied,
+  // so the date period and compare deltas are range-accurate. Without them the
+  // numbers are lifetime. Popups with no in-range activity still return (zeros),
+  // because the date predicate lives in the activity JOIN, not the WHERE clause.
   router.get("/analytics", async (req, res) => {
     const cid = await companyId(req, res);
     if (!cid) return;
+    const { from, to } = req.query;
+    const params = [cid];
+    let actFilter = "", engFilter = "";
+    if (from) {
+      params.push(from);
+      actFilter += ` AND a.created_at >= $${params.length}::date`;
+      engFilter += ` AND ri.created_at >= $${params.length}::date`;
+    }
+    if (to) {
+      params.push(to);
+      actFilter += ` AND a.created_at < ($${params.length}::date + 1)`;
+      engFilter += ` AND ri.created_at < ($${params.length}::date + 1)`;
+    }
     try {
       const { rows } = await pool.query(`
         WITH eng AS (
@@ -387,7 +405,7 @@ export function createPopupRouter(pool) {
             ORDER BY na2.created_at
             LIMIT 1
           ) na
-          WHERE ri.action = 'retrieve_interaction'
+          WHERE ri.action = 'retrieve_interaction'${engFilter}
           GROUP BY ri.correlated_interaction_id
         )
         SELECT
@@ -409,7 +427,7 @@ export function createPopupRouter(pool) {
           eng.avg_secs AS avg_engagement_secs
         FROM app.popups p
         LEFT JOIN interaction.interactions i ON i.cdp_reference_id = p.cdp_reference_id
-        LEFT JOIN interaction.activities a ON a.correlated_interaction_id = i.id
+        LEFT JOIN interaction.activities a ON a.correlated_interaction_id = i.id${actFilter}
         LEFT JOIN eng ON eng.correlated_interaction_id = i.id
         LEFT JOIN app.segments s ON s.id = COALESCE(
           NULLIF(p.rules->>'anonymous_segment_id',''),
@@ -418,7 +436,7 @@ export function createPopupRouter(pool) {
         WHERE p.company_id = $1
         GROUP BY p.id, p.name, p.interaction_type, p.status, p.rules, p.start_time, p.end_time, p.created_date, s.name, eng.avg_secs
         ORDER BY impressions DESC NULLS LAST, p.created_date DESC
-      `, [cid]);
+      `, params);
       res.json(rows);
     } catch (e) {
       res.status(500).json({ error: e.message });

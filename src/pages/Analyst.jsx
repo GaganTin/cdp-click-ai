@@ -446,7 +446,7 @@ export default function Analyst() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* Conversation history sidebar */}
       <ConversationSidebar
         activeConversationId={conversationId}
@@ -506,13 +506,13 @@ export default function Analyst() {
 
         {/* Messages / gate */}
         {!canUseFeatures ? (
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 min-h-0 overflow-auto">
             <PlanGate feature="the AI Analyst" />
           </div>
         ) : messages.length === 0 ? (
           <SuggestedPrompts onSelect={handleSend} />
         ) : (
-          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-auto py-6">
+          <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-auto py-5">
             <div className="max-w-3xl mx-auto px-6 space-y-6">
               {messages.map((msg, i) => (
                 <ChatMessage

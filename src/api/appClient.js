@@ -454,7 +454,10 @@ export const appClient = {
     createTemplate: (data) => request("/popups/templates", { method: "POST", body: JSON.stringify(data) }),
     updateTemplate: (id, data) => request(`/popups/templates/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     deleteTemplate: (id) => request(`/popups/templates/${id}`, { method: "DELETE" }),
-    getAnalytics: () => request("/popups/analytics"),
+    getAnalytics: (params = {}) => {
+      const q = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ""))).toString();
+      return request(`/popups/analytics${q ? `?${q}` : ""}`);
+    },
     getDailyTrend: () => request("/popups/analytics/daily"),
     getEmailCollected: (params = {}) => {
       const q = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ""))).toString();

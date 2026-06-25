@@ -5,9 +5,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import MiniChart from "./MiniChart";
 import ChartExplainer from "./ChartExplainer";
 import { parseChartConfig } from "@/lib/utils";
+import { normalizeSize, sizeMeta } from "@/lib/chartSizes";
 import { format, subDays, subMonths, parseISO, isAfter } from "date-fns";
-
-const SIZE_LABELS = { small: "Small", medium: "Medium", large: "Large", wide: "Wide" };
 
 const DATE_FILTERS = [
   { key: "all", label: "All time" },
@@ -41,7 +40,8 @@ function applyDateFilter(data, xKey, filterKey) {
   });
 }
 
-export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, size = "medium" }) {
+export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, size = "small" }) {
+  const sz = normalizeSize(size);
   const [chart] = useState(initialChart);
   const [dateFilter, setDateFilter] = useState("all");
 
@@ -70,10 +70,10 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-muted-foreground"
-              title={`Resize chart (${SIZE_LABELS[size] || "Medium"})`}
+              title={`Resize chart (${sizeMeta(sz).name})`}
               onClick={onCycleSize}
             >
-              {size === "large" ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              {sz === "large" ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </Button>
           )}
           <Button

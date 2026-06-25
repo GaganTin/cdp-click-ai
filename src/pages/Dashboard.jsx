@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { usePreferences } from "@/lib/PreferencesContext";
 import PinnedChartCard from "../components/dashboard/PinnedChartCard";
+import { normalizeSize, sizeMeta, nextSize } from "@/lib/chartSizes";
 
 const TABS_STORAGE_KEY = "dashboard_tabs_v1";
 
@@ -18,12 +19,9 @@ function loadTabState() {
   return null;
 }
 
-const SIZE_CLASSES = {
-  small: "col-span-1 h-48",
-  medium: "col-span-1 h-64",
-  large: "col-span-2 h-80",
-  wide: "col-span-2 h-64",
-};
+// Pixel heights for the full-width dashboard grid; column span comes from the
+// shared size model (src/lib/chartSizes.js) so it matches the Dashboard Preview.
+const DASHBOARD_HEIGHTS = { small: "h-64", large: "h-80" };
 
 export default function Dashboard() {
   const { t } = usePreferences();
@@ -105,11 +103,7 @@ export default function Dashboard() {
   };
 
   const cycleSize = (chartId) => {
-    setChartSizes(prev => {
-      const current = prev[chartId] || "medium";
-      const next = current === "large" ? "medium" : "large";
-      return { ...prev, [chartId]: next };
-    });
+    setChartSizes(prev => ({ ...prev, [chartId]: nextSize(prev[chartId]) }));
   };
 
   // Get charts visible in active tab
@@ -248,9 +242,9 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-2 gap-4">
             {visibleCharts.map(chart => {
-              const size = chartSizes[chart.id] || "medium";
+              const size = normalizeSize(chartSizes[chart.id]);
               return (
-                <div key={chart.id} className={SIZE_CLASSES[size]}>
+                <div key={chart.id} className={`${sizeMeta(size).span} ${DASHBOARD_HEIGHTS[size]}`}>
                   <PinnedChartCard
                     chart={chart}
                     size={size}
