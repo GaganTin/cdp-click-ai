@@ -811,7 +811,7 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
       // Reset the record immediately
       const { rows } = await pool.query(
         `UPDATE app.data_integrations
-         SET config='{}', is_connected=false, last_connected_date=null,
+         SET config='{}', credential_fingerprint=null, is_connected=false, last_connected_date=null,
              last_tested_date=null, is_connection_error=false, connection_error=null,
              is_synced=false, last_synced_date=null, is_sync_error=false, sync_error=null,
              updated_date=NOW()
