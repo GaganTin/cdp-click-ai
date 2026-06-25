@@ -27,18 +27,34 @@ from dags.click_cdp_ai_dags.lib.log import get_logger
 
 _log = get_logger("digest")
 
-# (schema, control_table, human label) for every platform that keeps a watermark.
+# GSC shares the GA control table (ga_landing.ga_sync_control) but is a distinct
+# integration, so we split it out by report name into its own digest line.
+GSC_REPORTS = ["keyword_performance"]
+
+# Per-platform control-table sources. Each entry is a dict so GA and GSC can read
+# the SAME table but partition it by report (exclude_reports / include_reports).
 CONTROL_TABLES = [
-    ("ga_landing", "ga_sync_control", "GA"),
-    ("shopify", "shopify_sync_control", "Shopify"),
-    ("shopline", "shopline_sync_control", "Shopline"),
-    ("odoo", "odoo_sync_control", "Odoo"),
+    {"schema": "ga_landing", "table": "ga_sync_control", "label": "GA",
+     "exclude_reports": GSC_REPORTS},
+    {"schema": "ga_landing", "table": "ga_sync_control", "label": "GSC",
+     "include_reports": GSC_REPORTS},
+    {"schema": "shopify", "table": "shopify_sync_control", "label": "Shopify"},
+    {"schema": "shopline", "table": "shopline_sync_control", "label": "Shopline"},
+    {"schema": "odoo", "table": "odoo_sync_control", "label": "Odoo"},
 ]
 
-# The scheduled (daily) integration DAGs whose runs this digest reports on.
+# The integration DAGs whose runs this digest reports on (for the Airflow-metadata
+# failed / recovered-on-retry scan). NOTE these are the real dag_ids:
+#   - the 4 GA child report DAGs carry the precise failing task, so we scan THEM
+#     (not the GA orchestrator, whose rollup failure would just double-count a
+#     child failure; orchestrator own-task failures still fire a Tier 1 alert);
+#   - GSC's dag_id is click_cdp_ai_gsc_keyword_performance (no "integration_").
 FLEET_DAG_IDS = [
-    "click_cdp_ai_integration_ga_reports",
-    "click_cdp_ai_integration_gsc_keyword_performance",
+    "click_cdp_ai_integration_ga_reports_path_funnel",
+    "click_cdp_ai_integration_ga_reports_utm",
+    "click_cdp_ai_integration_ga_reports_content",
+    "click_cdp_ai_integration_ga_reports_purchase",
+    "click_cdp_ai_gsc_keyword_performance",
     "click_cdp_ai_integration_shopify",
     "click_cdp_ai_integration_shopline",
     "click_cdp_ai_integration_odoo",
@@ -64,7 +80,18 @@ def _collect_control(conn_kwargs, lookback_hours):
     out = {}
 
     def _do(conn):
-        for schema, table, label in CONTROL_TABLES:
+        for entry in CONTROL_TABLES:
+            schema, table, label = entry["schema"], entry["table"], entry["label"]
+            # WHERE: only the lookback window, plus an optional report partition so
+            # GA and GSC can share ga_sync_control yet report separately.
+            conds = [sql.SQL("last_run_at >= now() - %s::interval")]
+            params = [f"{lookback_hours} hours"]
+            if entry.get("include_reports"):
+                conds.append(sql.SQL("report = ANY(%s)"))
+                params.append(list(entry["include_reports"]))
+            if entry.get("exclude_reports"):
+                conds.append(sql.SQL("NOT (report = ANY(%s))"))
+                params.append(list(entry["exclude_reports"]))
             with conn.cursor() as cur:
                 # Skip platforms whose control table doesn't exist yet.
                 cur.execute("SELECT to_regclass(%s)", (f"{schema}.{table}",))
@@ -77,11 +104,12 @@ def _collect_control(conn_kwargs, lookback_hours):
                                COUNT(*)                          AS reports,
                                COALESCE(SUM(COALESCE(rows_loaded, 0)), 0) AS rows
                         FROM {}.{}
-                        WHERE last_run_at >= now() - %s::interval
+                        WHERE {}
                         GROUP BY capsuite_ref
                         """
-                    ).format(sql.Identifier(schema), sql.Identifier(table)),
-                    (f"{lookback_hours} hours",),
+                    ).format(sql.Identifier(schema), sql.Identifier(table),
+                             sql.SQL(" AND ").join(conds)),
+                    params,
                 )
                 rows = cur.fetchall()
             clients = len(rows)
@@ -233,12 +261,11 @@ def build_card(report):
         body.append(_bullet_list([f"{label} — {client}" for label, client in zero_pairs[:25]]))
 
     # Per-platform healthy roll-up.
-    if control:
-        facts = [
-            {"title": label,
-             "value": f"{info['clients']} clients · {info['rows']:,} rows"}
-            for label, info in control.items()
-        ]
+    facts = [
+        {"title": label, "value": f"{info['clients']} clients · {info['rows']:,} rows"}
+        for label, info in control.items() if info.get("clients", 0) > 0
+    ]
+    if facts:
         body.append({"type": "TextBlock", "weight": "Bolder", "text": "📊 By platform",
                      "spacing": "Medium"})
         body.append({"type": "FactSet", "facts": facts})

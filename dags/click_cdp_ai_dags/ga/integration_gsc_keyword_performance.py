@@ -118,6 +118,10 @@ def click_cdp_ai_gsc_keyword_performance():
 
             if not frames:
                 _log.info("%s no keyword data in window %s..%s", ctx(str_client_name), str_start_date, str_end_date)
+                # Connected but produced nothing -> record a 0-row run so the daily
+                # digest flags it (this branch never reaches persist_by_date).
+                from dags.click_cdp_ai_dags.lib import pg_loader
+                pg_loader.record_zero_row_run(str_client_name, "keyword_performance")
                 return dict_config
 
             df_all = pd.concat(frames, axis=0).reset_index(drop=True)

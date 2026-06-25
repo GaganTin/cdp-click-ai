@@ -221,6 +221,16 @@ def _record_zero_row_run(client, report, conn_kwargs, schema, control_table):
         _log.warning("%s could not record zero-row run: %s", ctx(client, report), exc)
 
 
+def record_zero_row_run(client, report, schema=None, control_table=None, conn_kwargs=None):
+    """Public: stamp (client, report) as "ran, 0 rows" for the daily digest.
+
+    Use this from persistence paths that short-circuit BEFORE calling
+    ``load_dataframe`` on empty data (e.g. lib/storage.persist_by_date and the GSC
+    DAG), so a connected client that produced no rows still shows up in the digest
+    as a 0-row sync rather than silently vanishing. Best-effort; never raises."""
+    _record_zero_row_run(client, report, conn_kwargs, schema, control_table)
+
+
 def load_dataframe(
     df,
     table_name,

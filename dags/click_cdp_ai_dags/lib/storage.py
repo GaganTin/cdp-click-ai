@@ -51,6 +51,11 @@ def persist_by_date(
     """
     if df is None or len(df) == 0:
         _log.warning("No new data can be exported")
+        # Record the 0-row run so the daily digest can flag a client that synced
+        # but produced nothing (otherwise an empty load is invisible).
+        if ga_config.postgres_enabled():
+            from dags.click_cdp_ai_dags.lib import pg_loader
+            pg_loader.record_zero_row_run(client, prefix)
         return
 
     view = ga_config.STR_TARGET_VIEW
@@ -92,6 +97,9 @@ def persist_funnel(df, client, blob=None):
     """
     if df is None or len(df) == 0:
         _log.warning("No new data can be exported")
+        if ga_config.postgres_enabled():
+            from dags.click_cdp_ai_dags.lib import pg_loader
+            pg_loader.record_zero_row_run(client, "funnel_report")
         return
 
     view = ga_config.STR_TARGET_VIEW
