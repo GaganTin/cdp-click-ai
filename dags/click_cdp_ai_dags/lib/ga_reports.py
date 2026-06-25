@@ -40,6 +40,16 @@ def _cdp_endpoint():
         return os.environ.get("CDP_ENDPOINT", "")
 
 
+def _webhook_secret():
+    """Shared secret sent with the dag-complete webhook so Node can verify the call
+    really came from Airflow. Stored in the `cdp_ai_webhook_secret` Airflow Variable."""
+    try:
+        from airflow.models import Variable
+        return Variable.get("cdp_ai_webhook_secret", default_var=os.environ.get("WEBHOOK_SECRET", ""))
+    except Exception:
+        return os.environ.get("WEBHOOK_SECRET", "")
+
+
 def _params(context):
     dag_run = context.get("dag_run")
     return (dag_run.conf if dag_run and dag_run.conf else {}) or {}
@@ -71,10 +81,12 @@ def notify_dag_complete(params, is_synced, error=None, records_synced=None):
         "sync_error": (str(error) if error else None),
         "records_synced": records_synced,
     }
+    secret = _webhook_secret()
+    headers = {"X-Webhook-Secret": secret} if secret else {}
     try:
         r = requests.post(
             f"{endpoint.rstrip('/')}/api/data-integrations/webhook/dag-complete",
-            json=payload, timeout=30,
+            json=payload, headers=headers, timeout=30,
         )
         _log.info(f"[ga] dag-complete webhook ({'scheduled' if scheduled else 'job'}) -> {r.status_code}")
     except Exception as e:

@@ -120,9 +120,21 @@ const VALID_TYPES = [
   "googleAnalytics",
   "googleSearchConsole",
   "shopify",
+  "shopline",
+  "odoo",
   "shopifyCustomApp",
   "wordpress",
 ];
+
+// Friendly labels for notifications. Falls back to the raw type if unmapped.
+const INTEGRATION_LABELS = {
+  googleAnalytics:     "Google Analytics",
+  googleSearchConsole: "Google Search Console",
+  shopify:             "Shopify",
+  shopline:            "Shopline",
+  odoo:                "Odoo",
+};
+const integrationLabel = (t) => INTEGRATION_LABELS[t] || t;
 
 // Types that support connection testing (others are manual/OAuth)
 const TESTABLE = new Set(["googleAnalytics", "googleSearchConsole", "shopify"]);
@@ -899,6 +911,11 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
   // ── POST webhook- Airflow calls this when a sync DAG completes ─────────────
   // No authenticate middleware- called by Airflow with company_id in the body.
   router.post("/webhook/dag-complete", async (req, res) => {
+    // Shared-secret gate. Only enforced when SYNC_WEBHOOK_SECRET is configured, so it
+    // can be rolled out safely (set the Airflow variable first, then this env var).
+    const secret = process.env.SYNC_WEBHOOK_SECRET;
+    if (secret && req.headers["x-webhook-secret"] !== secret) return err(res, "Unauthorized", 401);
+
     const { integration_type, company_id, job_id, scheduled, is_connected, connection_error,
             is_synced, sync_error, records_synced } = req.body;
 
@@ -918,7 +935,7 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
            RETURNING company_id`,
           [integration_type]
         );
-        const label = { googleAnalytics: "Google Analytics", googleSearchConsole: "Google Search Console", shopify: "Shopify" }[integration_type] || integration_type;
+        const label = integrationLabel(integration_type);
         const day = new Date().toISOString().slice(0, 10);
         for (const r of rows) {
           await notifyCompany(pool, {
@@ -952,7 +969,7 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
         );
 
         // In-app notification for the sync result (best-effort).
-        const label = { googleAnalytics: "Google Analytics", googleSearchConsole: "Google Search Console", shopify: "Shopify" }[integration_type] || integration_type;
+        const label = integrationLabel(integration_type);
         await notifyCompany(pool, {
           companyId: company_id,
           type: "sync_status",
