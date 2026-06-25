@@ -123,27 +123,27 @@ export default function Sidebar() {
 
   return (
     <aside className={cn(
-      "h-full border-r border-border flex flex-col transition-all duration-300 bg-background",
+      "relative h-full border-r border-border flex flex-col transition-all duration-300 bg-background",
       collapsed ? "w-16" : "w-60"
     )}>
-      {/* Top: Meritma branding */}
+      {/* Top: Meritma branding - mark stays visible when collapsed */}
       <div className={cn(
-        "h-14 flex items-center border-b border-border px-3 gap-2 flex-shrink-0",
-        collapsed && "justify-center"
+        "h-14 flex items-center border-b border-border px-3 flex-shrink-0",
+        collapsed ? "justify-center" : "gap-2"
       )}>
-        {!collapsed && (
-          <div className="flex-1 min-w-0">
-            <BrandLogo className="h-6" withName nameClass="text-base" />
-          </div>
-        )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="p-1.5 rounded-md hover:bg-secondary transition-colors text-muted-foreground flex-shrink-0"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-        </button>
+        {collapsed
+          ? <BrandLogo className="h-6" />
+          : <BrandLogo className="h-6" withName nameClass="text-base" />}
       </div>
+
+      {/* Collapse / expand toggle - floats on the right border, vertically centered */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="absolute top-1/2 -right-3 -translate-y-1/2 z-20 h-6 w-6 flex items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary shadow-sm transition-colors"
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
+      </button>
 
       {/* Nav */}
       <nav className="flex-1 min-h-0 py-3 px-2 overflow-y-auto">
