@@ -11,6 +11,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { usePreferences } from "@/lib/PreferencesContext";
 import NotificationBell from "./NotificationBell";
+import BrandLogo from "@/components/BrandLogo";
 
 const navGroups = [
   {
@@ -131,9 +132,9 @@ export default function Sidebar() {
         collapsed && "justify-center"
       )}>
         {!collapsed && (
-          <span className="font-heading font-bold text-base tracking-tight flex-1 select-none">
-            Meritma
-          </span>
+          <div className="flex-1 min-w-0">
+            <BrandLogo className="h-6" withName nameClass="text-base" />
+          </div>
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}

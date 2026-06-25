@@ -5,15 +5,12 @@ import { Mail, Users,
   Target, ArrowRight, Check, ChevronRight,
   BarChart2, Brain, Globe, Loader2,
 } from "lucide-react";
+import BrandLogo from "@/components/BrandLogo";
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
 function Logo() {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="font-bold text-lg tracking-tight">Meritma</span>
-    </div>
-  );
+  return <BrandLogo className="h-6" withName nameClass="text-lg" />;
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────

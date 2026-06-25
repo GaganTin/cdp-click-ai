@@ -2954,7 +2954,8 @@ export default function Attributes() {
             return (
             <div className="flex items-center gap-2">
               {tabAttrs.length > 0 && (
-                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running}
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running || !pagesCrawled}
+                  title={!pagesCrawled ? createGateMsg : ""}
                   onClick={() => {
                     if (activeCount === 0) { toast.error(t("No active attributes - set at least one attribute to Active first.")); return; }
                     runAllMut.mutate();

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BrandLogo from "@/components/BrandLogo";
 
 // Google "G" logo SVG
 export function GoogleIcon({ className = "w-5 h-5" }) {
@@ -74,11 +75,12 @@ export function MicrosoftButton({ action = "Continue" }) {
   );
 }
 
-// Branded logo - matches the landing page wordmark ("Meritma")
-export function Logo({ className = "" }) {
+// Branded logo lockup (mark + "Meritma"), linking home. `variant` lets callers
+// pick the right mark for the surface ("inverse" for the dark branding panel).
+export function Logo({ className = "", variant = "auto", nameClass = "" }) {
   return (
-    <Link to="/" className={`inline-flex items-center gap-2 ${className}`}>
-      <span className="font-bold text-lg tracking-tight">Meritma</span>
+    <Link to="/" className={`inline-flex items-center ${className}`}>
+      <BrandLogo variant={variant} withName className="h-6" nameClass={nameClass} />
     </Link>
   );
 }
@@ -94,7 +96,7 @@ export function AuthLayout({ children, title, subtitle, illustrationContent }) {
           <div className="absolute bottom-20 -right-10 w-96 h-96 rounded-full bg-white" />
         </div>
         <div className="relative z-10">
-          <Logo className="text-primary-foreground [&>span]:text-primary-foreground" />
+          <Logo variant="inverse" nameClass="text-primary-foreground" />
         </div>
         <div className="relative z-10 flex-1 flex flex-col justify-center">
           {illustrationContent || (
