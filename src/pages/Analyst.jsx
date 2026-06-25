@@ -607,7 +607,7 @@ export default function Analyst() {
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="flex-1 overflow-y-auto min-h-0 mt-2 space-y-6 pr-1">
+              <div className="flex-1 overflow-y-auto min-h-0 mt-2 space-y-6 px-1">
                 {/* Skills section */}
                 <div>
                   <div className="flex items-center gap-2 mb-2">

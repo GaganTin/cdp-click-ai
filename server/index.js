@@ -2736,6 +2736,29 @@ app.get("/api/segments/:id/size", authenticate, async (req, res) => {
   }
 });
 
+// Live member count for UNSAVED criteria (used by the create/edit form to preview
+// how many profiles a segment would match before it's saved). Same filter logic as
+// countSegmentEntities, but reads filter_criteria from the request body.
+app.post("/api/segments/preview-count", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const fc = req.body?.filter_criteria || {};
+    const isCustomer = (req.body?.segment_type || "customer") === "customer";
+    const { where, params } = isCustomer ? customerWhere(fc) : anonWhere(fc);
+    params.push(companyId);
+    const table = isCustomer ? "app.customer_profiles" : "app.anonymous_profiles";
+    const r = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM ${table} p WHERE (${where}) AND p.company_id = $${params.length}`,
+      params
+    );
+    res.json({ count: r.rows[0].n });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 app.get("/api/segments/:id/export", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
   const companyId = await companyGuard(req, res);

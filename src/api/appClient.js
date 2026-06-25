@@ -203,6 +203,8 @@ export const appClient = {
   segments: {
     // Live member count for a segment (matches its filter criteria).
     size: (id) => request(`/segments/${encodeURIComponent(id)}/size`),
+    // Live member count for unsaved criteria (segment create/edit preview).
+    previewCount: (body) => request("/segments/preview-count", { method: "POST", body: JSON.stringify(body) }),
     // Download a segment's matching profiles + criteria as a CSV file.
     async exportCsv(id, name) {
       const headers = {};

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
 import { Button } from "@/components/ui/button";
@@ -279,11 +279,32 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
   const attrChips = attrValueIds.map((id) => valueLabel[id]).filter(Boolean);
   const allChips = [...chips, ...attrChips];
 
+  // Live preview: how many profiles currently match the criteria being built.
+  // Debounced so dragging/typing a range doesn't fire a request per keystroke.
+  const previewBody = useMemo(() => {
+    const fc = Object.fromEntries(Object.entries(criteria).filter(([, v]) => (Array.isArray(v) ? v.length : v)));
+    if (attrValueIds.length) fc.attribute_value_ids = attrValueIds;
+    return { segment_type: segmentType, filter_criteria: fc };
+  }, [criteria, attrValueIds, segmentType]);
+  const [previewKey, setPreviewKey] = useState(() => JSON.stringify(previewBody));
+  useEffect(() => {
+    const k = JSON.stringify(previewBody);
+    const id = setTimeout(() => setPreviewKey(k), 400);
+    return () => clearTimeout(id);
+  }, [previewBody]);
+  const { data: previewData, isFetching: previewLoading } = useQuery({
+    queryKey: ["segment-preview-count", previewKey],
+    queryFn: () => appClient.segments.previewCount(JSON.parse(previewKey)),
+    enabled: !!previewKey,
+    staleTime: 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+  const previewCount = previewData?.count;
+
   const handleSubmit = () => {
-    const descParts = allChips.length ? `Criteria: ${allChips.join(", ")}.` : "";
-    const description = form.description
-      ? (allChips.length ? `${form.description} ${descParts}` : form.description)
-      : descParts;
+    // Description is whatever the user typed - never auto-appended. The criteria are
+    // kept separately in metadata.criteria, so mixing them into the description just
+    // duplicated the "Criteria: …" text on every re-save.
     const existingMeta = initialValues?.metadata || {};
     const filterCriteria = Object.fromEntries(activeCriteria);
     if (attrValueIds.length) filterCriteria.attribute_value_ids = attrValueIds;
@@ -295,7 +316,7 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
     };
     onSubmit({
       ...form,
-      description,
+      description: form.description || "",
       estimated_size: form.estimated_size ? Number(form.estimated_size) : undefined,
       metadata,
     });
@@ -473,6 +494,17 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
           onCheckedChange={v => set("daily_refresh", v)}
           className="flex-shrink-0 mt-0.5"
         />
+      </div>
+
+      <div className="border border-border rounded-lg px-3 py-2.5 flex items-center justify-between gap-3 bg-secondary/10">
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Users className="w-3.5 h-3.5 flex-shrink-0" />
+          {allChips.length ? t("Profiles matching these criteria") : t("Total profiles (no criteria yet)")}
+        </div>
+        <div className="text-sm font-semibold flex items-center gap-1.5 flex-shrink-0">
+          {previewLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
+          {previewCount == null ? "—" : previewCount.toLocaleString()}
+        </div>
       </div>
 
       <Button onClick={handleSubmit} disabled={!form.name || isPending} className="w-full">
@@ -858,7 +890,7 @@ export default function Segments() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
           <DialogHeader><DialogTitle className="font-heading">{t("Create")} {activeTab === "customer" ? t("Customer") : t("Anonymous")} {t("Segment")}</DialogTitle></DialogHeader>
-          <div className="overflow-y-auto flex-1 pr-1">
+          <div className="overflow-y-auto flex-1 px-1">
             <SegmentForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel="Create Segment" segmentType={activeTab} />
           </div>
         </DialogContent>
@@ -869,7 +901,7 @@ export default function Segments() {
         <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
           <DialogHeader><DialogTitle className="font-heading">{t("Edit Segment")}</DialogTitle></DialogHeader>
           {editTarget && (
-            <div className="overflow-y-auto flex-1 pr-1">
+            <div className="overflow-y-auto flex-1 px-1">
               <SegmentForm
                 initialValues={editTarget}
                 onSubmit={handleEdit}
