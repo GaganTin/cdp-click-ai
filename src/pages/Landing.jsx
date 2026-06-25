@@ -73,7 +73,7 @@ function Hero() {
         </h1>
 
         <p className="mt-6 text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-          Click is the AI-powered Customer Data Platform that unifies profiles,
+          Meritma is the AI-powered Customer Data Platform that unifies profiles,
           automates email campaigns, and lets you ask questions about your data in plain English.
         </p>
 
@@ -181,7 +181,7 @@ const FEATURES = [
   {
     icon: Globe,
     title: "Integrations",
-    description: "Connect your existing tools - CRM, GA4, email providers - and let Click stitch them together.",
+    description: "Connect your existing tools - CRM, GA4, email providers - and let Meritma stitch them together.",
   },
 ];
 
@@ -192,7 +192,7 @@ function Features() {
         <div className="text-center mb-16">
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight">Everything in one place</h2>
           <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-            From raw data to customer insights, Click handles the entire journey so your team can focus on growth.
+            From raw data to customer insights, Meritma handles the entire journey so your team can focus on growth.
           </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -222,7 +222,7 @@ const STEPS = [
   {
     n: "01",
     title: "Connect your data",
-    desc: "Plug in your CRM, GA4, or import a CSV. Click builds unified customer profiles automatically.",
+    desc: "Plug in your CRM, GA4, or import a CSV. Meritma builds unified customer profiles automatically.",
   },
   {
     n: "02",
@@ -368,7 +368,7 @@ function CTABanner() {
           Ready to understand your customers?
         </h2>
         <p className="mt-4 text-muted-foreground">
-          Join teams using Click to turn raw data into revenue. Free to start, no engineers required.
+          Join teams using Meritma to turn raw data into revenue. Free to start, no engineers required.
         </p>
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
           <Link
