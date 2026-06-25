@@ -72,7 +72,12 @@ _CHILD_CONF = {
         "job_id": Param(None, type=["string", "null"]),
         "integration_type": Param("googleAnalytics", type=["string", "null"]),
     },
-    on_failure_callback=tf.on_dag_failure_callback,
+    # Child report DAGs each send their own (precise) failure alert; suppress the
+    # orchestrator's duplicate when the failure is just a child trigger. Keep the
+    # task ids here in sync with the _trigger(...) calls below.
+    on_failure_callback=tf.make_orchestrator_failure_callback(
+        ["run_path_funnel", "run_utm", "run_content", "run_purchase"]
+    ),
 )
 def click_cdp_ai_integration_ga_reports():
 

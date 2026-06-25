@@ -41,6 +41,7 @@ _DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_ga_api_pool", "GA_API_POOL")
     default_args=_DEFAULT_ARGS,
     tags=["cdp-click-ai", "data_extraction", "ga", "purchase", "integration"],
     owner_links={"capsuite": "https://capsuite.co"},
+    on_failure_callback=tf.on_dag_failure_callback,
     params={
         "str_client_name": Param(None, type=["string", "null"]),
         "is_debugging": Param(False, type=["boolean", "string"]),

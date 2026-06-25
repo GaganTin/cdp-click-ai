@@ -79,6 +79,7 @@ def _add_capsuite_param_dims(dict_config, gaConnector, list_dimensions):
     default_args=_DEFAULT_ARGS,
     tags=["cdp-click-ai", "data_extraction", "ga", "path_funnel", "integration"],
     owner_links={"capsuite": "https://capsuite.co"},
+    on_failure_callback=tf.on_dag_failure_callback,
     params={
         "str_client_name": Param(None, type=["string", "null"]),
         "is_debugging": Param(False, type=["boolean", "string"]),

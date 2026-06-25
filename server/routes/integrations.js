@@ -899,12 +899,40 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
   // ── POST webhook- Airflow calls this when a sync DAG completes ─────────────
   // No authenticate middleware- called by Airflow with company_id in the body.
   router.post("/webhook/dag-complete", async (req, res) => {
-    const { integration_type, company_id, job_id, is_connected, connection_error,
+    const { integration_type, company_id, job_id, scheduled, is_connected, connection_error,
             is_synced, sync_error, records_synced } = req.body;
 
     if (!integration_type || !VALID_TYPES.includes(integration_type))
       return err(res, "Invalid integration_type");
-    if (!company_id) return err(res, "company_id is required");
+
+    // Scheduled (all-workspace) DAG run: no company_id/job_id. A successful run means
+    // every connected workspace of this type just refreshed, so stamp last_synced_date
+    // on all of them and post a once-per-day "daily sync completed" notification.
+    if (scheduled || !company_id) {
+      try {
+        if (!is_synced) return ok(res, { scheduled: true, updated: 0 }); // failures: DAG on_failure handles alerts
+        const { rows } = await pool.query(
+          `UPDATE app.data_integrations
+           SET is_synced=true, last_synced_date=NOW(), is_sync_error=false, sync_error=NULL, updated_date=NOW()
+           WHERE is_connected=true AND integration_type=$1
+           RETURNING company_id`,
+          [integration_type]
+        );
+        const label = { googleAnalytics: "Google Analytics", googleSearchConsole: "Google Search Console", shopify: "Shopify" }[integration_type] || integration_type;
+        const day = new Date().toISOString().slice(0, 10);
+        for (const r of rows) {
+          await notifyCompany(pool, {
+            companyId: r.company_id, type: "sync_status",
+            title: `${label} daily sync completed`,
+            body: "Your latest data has finished syncing.",
+            link: "/integrations",
+            metadata: { integration_type, status: "completed", scheduled: true },
+            dedupeKey: `daily-sync:${integration_type}:${day}`,
+          });
+        }
+        return ok(res, { scheduled: true, updated: rows.length });
+      } catch (e) { return err(res, e.message, 500); }
+    }
 
     try {
       // Update the sync job if a job_id was provided

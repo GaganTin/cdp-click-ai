@@ -198,6 +198,29 @@ def _insert_rows(conn, schema, table, columns, df, batch_size):
     return inserted
 
 
+def _record_zero_row_run(client, report, conn_kwargs, schema, control_table):
+    """Stamp a (client, report) control row as "ran, 0 rows" without advancing
+    the watermark. Best-effort: any error here is logged and swallowed so a load
+    that genuinely had no new rows still returns cleanly."""
+    conn_kwargs = conn_kwargs or ga_config.get_pg_conn_kwargs()
+    if not conn_kwargs:
+        return
+    schema = schema or ga_config.PG_SCHEMA
+    try:
+        from dags.click_cdp_ai_dags.lib import db, pg_state
+
+        def _do(conn):
+            pg_state.ensure_control_table(conn, schema, control_table=control_table)
+            pg_state.update_watermark_in_tx(
+                conn, schema, client, report, watermark_value=None,
+                status="success", control_table=control_table, rows_loaded=0,
+            )
+
+        db.run_tx(conn_kwargs, _do)
+    except Exception as exc:  # noqa: BLE001 - digest bookkeeping must not fail the load
+        _log.warning("%s could not record zero-row run: %s", ctx(client, report), exc)
+
+
 def load_dataframe(
     df,
     table_name,
@@ -237,6 +260,11 @@ def load_dataframe(
     """
     if df is None or len(df) == 0:
         _log.info("%s %s: no rows to load, skipping", ctx(client, table_name), table_name)
+        # Record the zero-row run (without advancing the watermark) so the daily
+        # digest can distinguish "ran, 0 rows" from "did not run at all". Only for
+        # watermark-tracking calls, and best-effort (never fail the load on this).
+        if report is not None and watermark_value is not None:
+            _record_zero_row_run(client, report, conn_kwargs, schema, control_table)
         return 0
 
     conn_kwargs = conn_kwargs or ga_config.get_pg_conn_kwargs()
@@ -273,10 +301,11 @@ def load_dataframe(
         _scoped_delete(conn, schema, table_name, company_id, scope_column, scope_values)
         n = _insert_rows(conn, schema, table_name, columns, frame, batch_size)
         if report and watermark_value is not None:
-            # Advance the watermark atomically with the inserted rows.
+            # Advance the watermark atomically with the inserted rows, and record
+            # the row count so the daily digest can report per-client volumes.
             pg_state.ensure_control_table(conn, schema, control_table=control_table)
             pg_state.update_watermark_in_tx(conn, schema, client, report, watermark_value,
-                                            control_table=control_table)
+                                            control_table=control_table, rows_loaded=n)
         return n
 
     inserted = db.run_tx(conn_kwargs, _do)

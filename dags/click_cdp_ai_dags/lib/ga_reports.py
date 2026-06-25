@@ -46,16 +46,15 @@ def _params(context):
 
 
 def notify_dag_complete(params, is_synced, error=None, records_synced=None):
-    """Tell the Node app the GA sync finished, so it can flip the job + integration
-    status in Postgres. Only meaningful for API/queue-triggered runs that carry a
-    ``job_id`` + ``company_id``; scheduled (all-workspace) runs have neither and are
-    skipped."""
+    """Tell the Node app the sync finished so it can flip status in Postgres.
+    API/queue-triggered runs carry a ``job_id`` + ``company_id`` (one workspace).
+    Scheduled (all-workspace) runs carry neither - we still report them with
+    ``scheduled=true`` so a successful daily run stamps last_synced_date on every
+    connected workspace of this type (and fires the daily-sync notification)."""
     job_id = params.get("job_id")
     company_id = params.get("company_id")
     integration_type = params.get("integration_type", "googleAnalytics")
-    if not job_id or not company_id:
-        _log.warning("No job_id/company_id (scheduled run); skipping dag-complete webhook")
-        return True
+    scheduled = not (job_id and company_id)
 
     endpoint = _cdp_endpoint()
     if not endpoint:
@@ -65,8 +64,9 @@ def notify_dag_complete(params, is_synced, error=None, records_synced=None):
     import requests
     payload = {
         "integration_type": integration_type,
-        "company_id": company_id,
-        "job_id": job_id,
+        "company_id": company_id,   # None for scheduled runs
+        "job_id": job_id,           # None for scheduled runs
+        "scheduled": scheduled,
         "is_synced": bool(is_synced),
         "sync_error": (str(error) if error else None),
         "records_synced": records_synced,
@@ -76,7 +76,7 @@ def notify_dag_complete(params, is_synced, error=None, records_synced=None):
             f"{endpoint.rstrip('/')}/api/data-integrations/webhook/dag-complete",
             json=payload, timeout=30,
         )
-        _log.info(f"[ga] dag-complete webhook -> {r.status_code}")
+        _log.info(f"[ga] dag-complete webhook ({'scheduled' if scheduled else 'job'}) -> {r.status_code}")
     except Exception as e:
         _log.error(f"[ga] dag-complete webhook failed: {e}")
     return True
@@ -94,17 +94,88 @@ def on_dag_start_callback(**context):
 
 
 def on_dag_failure_callback(context):
-    """Airflow on_failure_callback: report the failure to Postgres via the webhook."""
+    """Airflow DAG-level on_failure_callback (fires once, after task retries are
+    exhausted): report the failure to Postgres via the webhook AND post a
+    real-time Teams alert (Tier 1)."""
     params = _params(context)
     exception = context.get("exception", "Unknown error, try again.")
+    _notify_teams_failure(context, params, exception)
     return notify_dag_complete(params, is_synced=False, error=exception)
+
+
+def _notify_teams_failure(context, params, exception):
+    """Best-effort Tier 1 Teams alert. Never raises (callbacks must not fail)."""
+    try:
+        from dags.click_cdp_ai_dags.lib import teams_notify
+        dag_id = task_id = run_id = None
+        ti = context.get("task_instance") or context.get("ti")
+        if ti is not None:
+            dag_id = getattr(ti, "dag_id", None)
+            task_id = getattr(ti, "task_id", None)
+            run_id = getattr(ti, "run_id", None)
+        if dag_id is None:
+            dag = context.get("dag")
+            dag_id = getattr(dag, "dag_id", None)
+        teams_notify.send_failure_alert(
+            dag_id=dag_id,
+            integration_type=params.get("integration_type"),
+            client=params.get("str_client_name"),
+            error=exception,
+            run_id=run_id,
+            task_id=task_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.error(f"[teams] failure alert skipped: {exc}")
+
+
+def _failed_task_ids(context):
+    """Set of task_ids that ended in FAILED for this dag run (empty on error)."""
+    try:
+        from airflow.utils.state import State
+        dag_run = context.get("dag_run")
+        if dag_run is None:
+            return set()
+        return {ti.task_id for ti in dag_run.get_task_instances(state=State.FAILED)}
+    except Exception:
+        return set()
+
+
+def make_orchestrator_failure_callback(child_trigger_task_ids):
+    """DAG-level on_failure_callback for the GA *orchestrator*.
+
+    The orchestrator triggers each child report DAG with ``failed_states=[FAILED]``,
+    so a child failure also fails the orchestrator's trigger task and would fire a
+    SECOND (rollup) Teams alert on top of the child's own (precise) alert. This
+    callback suppresses that duplicate: when every failed task is a child-DAG
+    trigger, the child already alerted, so we skip Teams here. The Node job-status
+    webhook still fires either way (only the orchestrator carries job_id/company_id),
+    and a failure in the orchestrator's OWN tasks (dag_start_monitor / report_success)
+    still alerts.
+    """
+    child_trigger_task_ids = set(child_trigger_task_ids)
+
+    def _callback(context):
+        params = _params(context)
+        exception = context.get("exception", "Unknown error, try again.")
+        # Always report job status to Node (the orchestrator owns job_id/company_id).
+        notify_dag_complete(params, is_synced=False, error=exception)
+        failed = _failed_task_ids(context)
+        if failed and failed <= child_trigger_task_ids:
+            _log.info("[teams] orchestrator failure is downstream child(ren) %s; "
+                      "child alert already sent, skipping duplicate", sorted(failed))
+            return True
+        _notify_teams_failure(context, params, exception)
+        return True
+
+    return _callback
 
 
 def report_success(results=None, **context):
     """Shared "Report" step for every integration DAG: tell the Node app the sync
     completed (dag-complete webhook, ``is_synced=True``). ``results`` is the
     (ignored) upstream task output so this can sit downstream of an expanded task.
-    No-op for scheduled all-workspace runs (no job_id/company_id in conf)."""
+    For scheduled all-workspace runs (no job_id/company_id) it reports with
+    ``scheduled=true`` so last_synced_date is stamped on every connected workspace."""
     return notify_dag_complete(_params(context), is_synced=True)
 
 

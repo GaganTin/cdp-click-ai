@@ -22,6 +22,7 @@ from airflow.decorators import dag, task
 from dags.click_cdp_ai_dags.lib import app_state
 from dags.click_cdp_ai_dags.lib import scheduled as sch
 from dags.click_cdp_ai_dags.lib import commerce_integration
+from dags.click_cdp_ai_dags.lib import ga_reports as tf
 
 os.environ["no_proxy"] = "*"
 
@@ -34,6 +35,7 @@ os.environ["no_proxy"] = "*"
     catchup=False,
     tags=["cdp-click-ai", "commerce", "integration", "utility"],
     owner_links={"capsuite": "https://capsuite.co"},
+    on_failure_callback=tf.on_dag_failure_callback,
 )
 def click_cdp_ai_commerce_landing():
 

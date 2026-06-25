@@ -130,6 +130,7 @@ def ensure_control_table(conn, schema, control_table=None):
                     last_run_at    TIMESTAMPTZ,
                     last_status    TEXT,
                     error_message  TEXT,
+                    rows_loaded    INTEGER,
                     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (capsuite_ref, report)
                 )
@@ -139,6 +140,13 @@ def ensure_control_table(conn, schema, control_table=None):
                 sql.Identifier(control_table),
                 sql.Literal(DEFAULT_DEBUG_MONTHS),
                 sql.Literal(DEFAULT_OVERLAP_DAYS),
+            )
+        )
+        # CREATE TABLE IF NOT EXISTS won't add columns to a pre-existing control
+        # table, so add rows_loaded explicitly for already-deployed environments.
+        cur.execute(
+            sql.SQL("ALTER TABLE {}.{} ADD COLUMN IF NOT EXISTS rows_loaded INTEGER").format(
+                sql.Identifier(schema), sql.Identifier(control_table)
             )
         )
 
@@ -253,9 +261,16 @@ def resolve_start_date(client, report, conn_kwargs=None, schema=None,
 
 
 def update_watermark_in_tx(conn, schema, client, report, watermark_value,
-                           status="success", error=None, control_table=None):
+                           status="success", error=None, control_table=None,
+                           rows_loaded=None):
     """Advance the watermark within an existing transaction (called from the
-    data-load transaction so it commits atomically with the inserted rows)."""
+    data-load transaction so it commits atomically with the inserted rows).
+
+    ``rows_loaded`` records how many rows this run loaded for (client, report) -
+    the daily digest reads it to flag "synced but 0 rows" clients. Passing
+    ``watermark_value=None`` records the run (last_run_at / status / rows_loaded)
+    WITHOUT advancing last_sync_date, which is how an empty (0-row) run is logged
+    so it stays distinguishable from "did not run at all"."""
     control_table = control_table or CONTROL_TABLE
     new_date = parse_watermark(watermark_value)
     with conn.cursor() as cur:
@@ -263,8 +278,8 @@ def update_watermark_in_tx(conn, schema, client, report, watermark_value,
             sql.SQL(
                 """
                 INSERT INTO {schema}.{table}
-                    (capsuite_ref, report, last_sync_date, last_run_at, last_status, error_message, updated_at)
-                VALUES (%s, %s, %s, now(), %s, %s, now())
+                    (capsuite_ref, report, last_sync_date, last_run_at, last_status, error_message, rows_loaded, updated_at)
+                VALUES (%s, %s, %s, now(), %s, %s, %s, now())
                 ON CONFLICT (capsuite_ref, report) DO UPDATE SET
                     last_sync_date = GREATEST(
                         COALESCE({table}.last_sync_date, EXCLUDED.last_sync_date),
@@ -273,12 +288,13 @@ def update_watermark_in_tx(conn, schema, client, report, watermark_value,
                     last_run_at    = EXCLUDED.last_run_at,
                     last_status    = EXCLUDED.last_status,
                     error_message  = EXCLUDED.error_message,
+                    rows_loaded    = EXCLUDED.rows_loaded,
                     updated_at     = now()
                 """
             ).format(
                 schema=sql.Identifier(schema),
                 table=sql.Identifier(control_table),
             ),
-            (client, report, new_date, status, error),
+            (client, report, new_date, status, error, rows_loaded),
         )
-    _log.info("%s watermark -> %s (%s)", ctx(client, report), new_date, status)
+    _log.info("%s watermark -> %s (%s, rows=%s)", ctx(client, report), new_date, status, rows_loaded)
