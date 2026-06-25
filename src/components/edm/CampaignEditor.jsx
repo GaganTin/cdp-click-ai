@@ -298,7 +298,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     name: "New Campaign",
     subject: "",
     preview_text: "",
-    from_name: "Click AI",
+    from_name: "Meritma",
     from_email: "onboarding@resend.dev",
     reply_to: "",
     segment_id: "",

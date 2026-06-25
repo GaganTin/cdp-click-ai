@@ -856,7 +856,7 @@ const importData = {
   "rows": { zh: "列", "zh-cn": "行" },
   "Export failed.": { zh: "匯出失敗。", "zh-cn": "导出失败。" },
   "Import / Export Data": { zh: "匯入／匯出資料", "zh-cn": "导入/导出数据" },
-  "Move data in and out of Click CDP from one place. Every import and export here is also available on its own page.": { zh: "在同一處將資料匯入與匯出 Click CDP。此處的每項匯入與匯出也可在其各自的頁面上使用。", "zh-cn": "在同一处将数据导入与导出 Click CDP。此处的每项导入与导出也可在其各自的页面上使用。" },
+  "Move data in and out of Meritma from one place. Every import and export here is also available on its own page.": { zh: "在同一處將資料匯入與匯出 Meritma。此處的每項匯入與匯出也可在其各自的頁面上使用。", "zh-cn": "在同一处将数据导入与导出 Meritma。此处的每项导入与导出也可在其各自的页面上使用。" },
   "Choose & Export": { zh: "選擇並匯出", "zh-cn": "选择并导出" },
   "Export an Anonymous Segment": { zh: "匯出匿名細分", "zh-cn": "导出匿名细分" },
   "Export a Customer Segment": { zh: "匯出客戶細分", "zh-cn": "导出客户细分" },

@@ -85,7 +85,7 @@ export async function sendPasswordResetEmail(to, token) {
   const link = `${appUrl()}/reset-password?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
-    subject: "Reset your Click CDP password",
+    subject: "Reset your Meritma password",
     html: `<p>We received a request to reset your password.</p>
            <p><a href="${link}">Reset your password</a> - this link is valid for 1 hour.</p>
            <p>If you didn't request this, you can safely ignore this email.</p>`,
@@ -96,8 +96,8 @@ export async function sendVerificationEmail(to, token) {
   const link = `${appUrl()}/verify-email?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
-    subject: "Verify your Click CDP email",
-    html: `<p>Welcome to Click CDP!</p>
+    subject: "Verify your Meritma email",
+    html: `<p>Welcome to Meritma!</p>
            <p><a href="${link}">Verify your email address</a> - this link is valid for 24 hours.</p>`,
   });
 }
@@ -107,8 +107,8 @@ export async function sendVerificationEmail(to, token) {
 export async function sendVerificationCodeEmail(to, code) {
   return sendEmail({
     to,
-    subject: "Your Click CDP verification code",
-    html: `<p>Welcome to Click CDP!</p>
+    subject: "Your Meritma verification code",
+    html: `<p>Welcome to Meritma!</p>
            <p>Your verification code is:</p>
            <p style="font-size:28px;font-weight:700;letter-spacing:8px;margin:12px 0">${code}</p>
            <p>Enter it on the verification page to finish creating your account. This code expires in 15 minutes.</p>

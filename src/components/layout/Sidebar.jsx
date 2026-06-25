@@ -117,14 +117,14 @@ export default function Sidebar() {
       "h-full border-r border-border flex flex-col transition-all duration-300 bg-background",
       collapsed ? "w-16" : "w-60"
     )}>
-      {/* Top: Click CDP branding */}
+      {/* Top: Meritma branding */}
       <div className={cn(
         "h-14 flex items-center border-b border-border px-3 gap-2 flex-shrink-0",
         collapsed && "justify-center"
       )}>
         {!collapsed && (
           <span className="font-heading font-bold text-base tracking-tight flex-1 select-none">
-            Click CDP
+            Meritma
           </span>
         )}
         <button

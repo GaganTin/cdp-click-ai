@@ -600,6 +600,53 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   });
 
+  // Manually tag a page with an attribute value (curate/correct the AI). Creates the
+  // value as an approved curated value if it doesn't exist; respects single-value
+  // attributes by replacing any existing value on that page.
+  router.post("/pages/:pageId/tags", async (req, res) => {
+    const attributeId = req.body?.attribute_id;
+    const value = String(req.body?.value || "").trim();
+    if (!attributeId || !value) return res.status(400).json({ error: "attribute_id and value are required" });
+    try {
+      const { rows: pg } = await pool.query(
+        `SELECT id FROM app.web_pages WHERE id = $1 AND company_id = $2`,
+        [req.params.pageId, req.companyId]
+      );
+      if (!pg.length) return res.status(404).json({ error: "Page not found" });
+      const { rows: attr } = await pool.query(
+        `SELECT id, value_type FROM app.attributes WHERE id = $1 AND company_id = $2`,
+        [attributeId, req.companyId]
+      );
+      if (!attr.length) return res.status(404).json({ error: "Attribute not found" });
+      // Upsert an approved curated value (so it's immediately eligible for targeting).
+      const { rows: val } = await pool.query(
+        `INSERT INTO app.attribute_values (company_id, attribute_id, value, display_label, is_approved, is_exception)
+         VALUES ($1,$2,$3,$4,true,false)
+         ON CONFLICT (attribute_id, lower(value))
+         DO UPDATE SET is_approved = true, is_exception = false, is_blocked = false, merged_into = NULL, updated_date = NOW()
+         RETURNING id`,
+        [req.companyId, attributeId, value, req.body?.display_label || null]
+      );
+      const valueId = val[0].id;
+      // Single value-per-page: a new tag replaces any other value of this attribute.
+      if (attr[0].value_type === "single") {
+        await pool.query(
+          `DELETE FROM app.page_attribute_values
+           WHERE page_id = $1 AND attribute_id = $2 AND company_id = $3 AND attribute_value_id <> $4`,
+          [req.params.pageId, attributeId, req.companyId, valueId]
+        );
+      }
+      await pool.query(
+        `INSERT INTO app.page_attribute_values (company_id, page_id, attribute_id, attribute_value_id)
+         VALUES ($1,$2,$3,$4) ON CONFLICT (page_id, attribute_value_id) DO NOTHING`,
+        [req.companyId, req.params.pageId, attributeId, valueId]
+      );
+      try { await repropagate(pool, req.companyId, [attributeId]); }
+      catch (e) { console.error("[attr] repropagate after manual tag failed:", e.message); }
+      res.status(201).json({ ok: true, value_id: valueId });
+    } catch (err) { fail(res, err); }
+  });
+
   // Remove one AI-assigned value from one page (verify/correct a tag).
   router.delete("/pages/:pageId/tags/:valueId", async (req, res) => {
     try {
@@ -697,6 +744,22 @@ export function createAttributesRouter(pool) {
   // needs_review when the page is new or gained a label since it was last reviewed.
   router.get("/tagged-pages", async (req, res) => {
     try {
+      // Untagged feed: valid, non-excluded pages the AI assigned NO tags to, so the
+      // user can confirm they're correctly untagged (Verify sets last_reviewed_date).
+      if (req.query.filter === "untagged") {
+        const { rows } = await pool.query(
+          `SELECT wp.id, wp.url, wp.title, wp.word_count, wp.last_crawled, wp.last_reviewed_date,
+                  (wp.last_reviewed_date IS NULL) AS needs_review,
+                  '[]'::json AS tags
+           FROM app.web_pages wp
+           WHERE wp.company_id = $1 AND wp.is_excluded = false AND wp.is_valid = true
+             AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id)
+           ORDER BY needs_review DESC, wp.last_crawled DESC NULLS LAST
+           LIMIT 300`,
+          [req.companyId]
+        );
+        return res.json({ pages: rows, summary: { new_pages: 0, new_labels: 0 } });
+      }
       const onlyNew = req.query.filter === "new";
       const params = [req.companyId];
       let having = "";
@@ -754,9 +817,19 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   });
 
-  // Mark all currently-tagged pages reviewed at once.
+  // Mark all pages in the current feed reviewed at once (tagged feed by default,
+  // or the valid untagged pages when reviewing the Untagged tab).
   router.post("/tagged-pages/review-all", async (req, res) => {
     try {
+      if (req.query.filter === "untagged") {
+        await pool.query(
+          `UPDATE app.web_pages SET last_reviewed_date = NOW()
+           WHERE company_id = $1 AND is_excluded = false AND is_valid = true
+             AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = web_pages.id)`,
+          [req.companyId]
+        );
+        return res.json({ ok: true });
+      }
       await pool.query(
         `UPDATE app.web_pages SET last_reviewed_date = NOW()
          WHERE company_id = $1 AND is_excluded = false
@@ -765,6 +838,32 @@ export function createAttributesRouter(pool) {
       );
       await approveFullyReviewedValues(req.companyId);
       res.json({ ok: true });
+    } catch (err) { fail(res, err); }
+  });
+
+  // Review-tab badge: pages needing attention = tagged pages with new/unreviewed
+  // labels + valid untagged pages never reviewed. One number for the whole feed.
+  router.get("/review-count", async (req, res) => {
+    try {
+      const { rows: tagged } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM (
+           SELECT wp.id
+           FROM app.web_pages wp
+           JOIN app.page_attribute_values pav ON pav.page_id = wp.id
+           WHERE wp.company_id = $1 AND wp.is_excluded = false
+           GROUP BY wp.id
+           HAVING wp.last_reviewed_date IS NULL OR MAX(pav.created_date) > wp.last_reviewed_date
+         ) q`,
+        [req.companyId]
+      );
+      const { rows: untagged } = await pool.query(
+        `SELECT COUNT(*)::int AS n FROM app.web_pages wp
+         WHERE wp.company_id = $1 AND wp.is_excluded = false AND wp.is_valid = true
+           AND wp.last_reviewed_date IS NULL
+           AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id)`,
+        [req.companyId]
+      );
+      res.json({ count: (tagged[0]?.n || 0) + (untagged[0]?.n || 0) });
     } catch (err) { fail(res, err); }
   });
 

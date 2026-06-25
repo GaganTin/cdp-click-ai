@@ -32,7 +32,7 @@ export default function VerifyEmail() {
     try {
       await appClient.auth.registerVerify(email, code);
       await checkUserAuth(); // account now exists + auth cookie set → logs in
-      toast.success("Email verified - welcome to Click CDP!");
+      toast.success("Email verified - welcome to Meritma!");
       navigate("/");
     } catch (err) {
       toast.error(err.message);

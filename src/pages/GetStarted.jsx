@@ -10,7 +10,7 @@ const STEPS = [
   {
     icon: Plug,
     title: "Connect your data",
-    desc: "Bring customer and visitor data into Click CDP. Sync it automatically from a connected source like Google Analytics or Shopify, upload it yourself from a file, or do both.",
+    desc: "Bring customer and visitor data into Meritma. Sync it automatically from a connected source like Google Analytics or Shopify, upload it yourself from a file, or do both.",
     links: [
       { to: "/integrations",  icon: Plug,   label: "Integrations" },
       { to: "/import-export", icon: Upload, label: "Manual upload" },
@@ -76,7 +76,7 @@ export default function GetStarted() {
       <div className="px-8 pt-8 pb-0 flex-shrink-0">
         <div className="mb-5">
           <h1 className="font-heading text-3xl font-semibold tracking-tight">Get Started</h1>
-          <p className="text-sm text-muted-foreground mt-1">Your onboarding guide to Click CDP.</p>
+          <p className="text-sm text-muted-foreground mt-1">Your onboarding guide to Meritma.</p>
         </div>
       </div>
 
@@ -89,7 +89,7 @@ export default function GetStarted() {
                 Welcome{firstName ? `, ${firstName}` : ""} 
               </h2>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                Click CDP brings every customer touchpoint into one place - so you can understand
+                Meritma brings every customer touchpoint into one place - so you can understand
                 your audience and reach them with the right message. Follow the steps below to
                 get up and running in minutes.
               </p>

@@ -1,4 +1,4 @@
-# CDP Click AI (Node.js Local App)
+# Meritma (Node.js Local App)
 
 This app is fully decoupled from vendor-managed SDK/runtime and runs locally with:
 - React + Vite frontend

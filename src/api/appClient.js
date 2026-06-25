@@ -496,8 +496,11 @@ export const appClient = {
     valuePages: (valueId) => request(`/attributes/values/${valueId}/pages`),
     review: () => request("/attributes/review"),
     taggedPages: (filter) => request(`/attributes/tagged-pages${filter ? `?filter=${filter}` : ""}`),
+    reviewCount: () => request("/attributes/review-count"),
     reviewPage: (pageId) => request(`/attributes/pages/${pageId}/review`, { method: "POST" }),
-    reviewAllPages: () => request("/attributes/tagged-pages/review-all", { method: "POST" }),
+    reviewAllPages: (filter) => request(`/attributes/tagged-pages/review-all${filter ? `?filter=${filter}` : ""}`, { method: "POST" }),
+    addPageTag: (pageId, attribute_id, value, display_label) =>
+      request(`/attributes/pages/${pageId}/tags`, { method: "POST", body: JSON.stringify({ attribute_id, value, display_label }) }),
     pages: (id) => request(`/attributes/${id}/pages`),
     clone: (id, name) => request(`/attributes/${id}/clone`, { method: "POST", body: JSON.stringify({ name }) }),
     test: (id, body) => request(`/attributes/${id}/test`, { method: "POST", body: JSON.stringify(typeof body === "string" ? { url: body } : (body || {})) }),

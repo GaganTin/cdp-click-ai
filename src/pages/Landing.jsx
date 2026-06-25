@@ -11,7 +11,7 @@ import { Mail, Users,
 function Logo() {
   return (
     <div className="flex items-center gap-2">
-      <span className="font-bold text-lg tracking-tight">Click CDP</span>
+      <span className="font-bold text-lg tracking-tight">Meritma</span>
     </div>
   );
 }
@@ -441,7 +441,7 @@ function Footer() {
         ))}
       </div>
       <div className="max-w-7xl mx-auto mt-8 pt-8 border-t border-border flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>© {new Date().getFullYear()} Click CDP. All rights reserved.</span>
+        <span>© {new Date().getFullYear()} Meritma. All rights reserved.</span>
       </div>
     </footer>
   );

@@ -167,7 +167,7 @@ export default function ChatInput({
         </Button>
       </div>
       <p className="text-[10px] text-muted-foreground text-center mt-2">
-        Click AI Analyst · Connected to your data
+        Meritma Analyst · Connected to your data
       </p>
     </form>
   );

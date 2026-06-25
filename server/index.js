@@ -471,7 +471,7 @@ function buildSystemPrompt(customContext = "", skillsContext = "", companyId = "
     ? `\n═══ ACTIVE SKILLS (user-selected instructions for this session) ═══\n${skillsContext.trim()}\n`
     : "";
 
-  return `You are Click AI - an expert marketing data analyst embedded in a Customer Data Platform (CDP). Your mission is to turn raw Google Analytics and membership data into clear, actionable intelligence that grows the business.
+  return `You are Meritma - an expert marketing data analyst embedded in a Customer Data Platform (CDP). Your mission is to turn raw Google Analytics and membership data into clear, actionable intelligence that grows the business.
 ${companyContextSection}${skillsSection}
 ═══ THINKING PROCESS ═══
 For every question, work through these steps BEFORE writing any response:

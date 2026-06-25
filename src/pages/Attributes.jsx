@@ -1048,7 +1048,6 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> {decodeUrl(pg.url)}
                           </a>
                         </div>
-                        {pg.fetch_method && pg.fetch_method !== "http" && <Badge variant="secondary" className="text-[9px] h-4 px-1.5 flex-shrink-0" title={t("Scraped with a headless browser")}>{pg.fetch_method}</Badge>}
                       </div>
                       <div className="flex flex-wrap gap-1 mt-2">
                         {(pg.values || []).map((v) => (
@@ -1060,6 +1059,8 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             </button>
                           </span>
                         ))}
+                        <AddTag pageId={pg.id} fixedAttr={attr} suggestions={approved.map((v) => v.display_label || v.value)}
+                          onAdded={() => { qc.invalidateQueries({ queryKey: ["attribute-pages", attributeId] }); qc.invalidateQueries({ queryKey: ["attr-review-count"] }); invalidate(); }} />
                       </div>
                     </div>
                       ))}
@@ -1543,24 +1544,81 @@ function PagesPanel() {
 // ── Review sub-tab (verify AI-discovered values across attributes) ──
 // Page-centric review: every tagged page with its values; new pages / new labels
 // are flagged so users can verify (mark reviewed) or correct a wrong tag.
+// Inline "add a tag to this page" control. In the Review tab the user picks which
+// attribute; in an attribute's Tagged-pages tab the attribute is fixed.
+function AddTag({ pageId, attributes = [], fixedAttr, suggestions = [], onAdded }) {
+  const { t } = usePreferences();
+  const [open, setOpen] = useState(false);
+  const [attrId, setAttrId] = useState(fixedAttr?.id || "");
+  const [value, setValue] = useState("");
+  const addMut = useMutation({
+    mutationFn: () => appClient.attributes.addPageTag(pageId, fixedAttr?.id || attrId, value.trim()),
+    onSuccess: () => { setValue(""); if (!fixedAttr) setAttrId(""); setOpen(false); onAdded?.(); },
+    onError: (e) => toast.error(e.message),
+  });
+  const canAdd = (fixedAttr?.id || attrId) && value.trim();
+  const listId = `addtag-vals-${pageId}`;
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/40">
+        <Plus className="w-2.5 h-2.5" /> {t("Tag")}
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 w-full mt-1">
+      {!fixedAttr && (
+        <Select value={attrId} onValueChange={setAttrId}>
+          <SelectTrigger className="h-6 text-[10px] w-28 flex-shrink-0"><SelectValue placeholder={t("Attribute")} /></SelectTrigger>
+          <SelectContent>
+            {attributes.map((a) => <SelectItem key={a.id} value={a.id} className="text-xs">{a.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+      <input list={listId} value={value} autoFocus
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && canAdd) addMut.mutate(); if (e.key === "Escape") setOpen(false); }}
+        placeholder={t("Value…")}
+        className="h-6 text-[10px] px-2 rounded-md border border-input bg-background flex-1 min-w-0" />
+      {suggestions.length > 0 && (
+        <datalist id={listId}>{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+      )}
+      <button disabled={!canAdd || addMut.isPending} onClick={() => addMut.mutate()}
+        className="h-6 px-1.5 rounded-md border border-input text-muted-foreground hover:text-foreground disabled:opacity-40 flex-shrink-0" title={t("Add tag")}>
+        <Check className="w-3 h-3" />
+      </button>
+      <button onClick={() => setOpen(false)}
+        className="h-6 px-1.5 rounded-md text-muted-foreground hover:text-foreground flex-shrink-0" title={t("Cancel")}>
+        <X className="w-3 h-3" />
+      </button>
+    </div>
+  );
+}
+
 function ReviewPanel() {
   const { t } = usePreferences();
   const qc = useQueryClient();
-  const [filter, setFilter] = useState("new"); // new | all
+  const [filter, setFilter] = useState("new"); // new | all | untagged
 
   const { data, isLoading } = useQuery({
     queryKey: ["attr-tagged-pages", filter],
-    queryFn: () => appClient.attributes.taggedPages(filter === "new" ? "new" : null),
+    queryFn: () => appClient.attributes.taggedPages(filter === "all" ? null : filter),
   });
   const pages = data?.pages || [];
   const summary = data?.summary || { new_pages: 0, new_labels: 0 };
 
+  const { data: allAttrs = [] } = useQuery({ queryKey: ["attributes"], queryFn: () => appClient.attributes.list() });
+  const contentAttrs = allAttrs.filter((a) => a.source === "web_content" && a.status !== "archived");
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["attr-tagged-pages"] });
+    qc.invalidateQueries({ queryKey: ["attr-review-count"] });
     qc.invalidateQueries({ queryKey: ["attributes"] });
   };
   const reviewMut = useMutation({ mutationFn: (pageId) => appClient.attributes.reviewPage(pageId), onSuccess: invalidate });
-  const reviewAllMut = useMutation({ mutationFn: () => appClient.attributes.reviewAllPages(), onSuccess: () => { toast.success(t("All pages marked reviewed")); invalidate(); } });
+  const reviewAllMut = useMutation({ mutationFn: () => appClient.attributes.reviewAllPages(filter === "untagged" ? "untagged" : null), onSuccess: () => { toast.success(t("All pages marked reviewed")); invalidate(); } });
   const untagMut = useMutation({ mutationFn: ({ pageId, valueId }) => appClient.attributes.deletePageTag(pageId, valueId), onSuccess: invalidate });
 
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">{t("Loading…")}</p>;
@@ -1570,7 +1628,9 @@ function ReviewPanel() {
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
         <div>
           <p className="text-xs text-muted-foreground max-w-xl">
-            {t("Pages the AI has tagged. Verify a page to confirm its labels; remove any wrong tag with the ✕ - it updates targeting immediately.")}
+            {filter === "untagged"
+              ? t("Valid pages the AI left untagged. Verify a page to confirm it needs no tags, or add one yourself with + Tag.")
+              : t("Pages the AI has tagged. Verify a page to confirm its labels; remove a wrong tag with the ✕ or add one with + Tag - it updates targeting immediately.")}
           </p>
           {(summary.new_pages > 0 || summary.new_labels > 0) && (
             <p className="text-[11px] text-yellow-600 mt-1 flex items-center gap-1">
@@ -1581,7 +1641,7 @@ function ReviewPanel() {
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <div className="flex items-center gap-1">
-            {[["new", t("New to review")], ["all", t("All tagged")]].map(([k, label]) => (
+            {[["new", t("New to review")], ["all", t("All tagged")], ["untagged", t("Untagged")]].map(([k, label]) => (
               <button key={k} onClick={() => setFilter(k)}
                 className={`text-[11px] px-2 py-1 rounded-md border ${filter === k ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}>
                 {label}
@@ -1600,8 +1660,8 @@ function ReviewPanel() {
       {pages.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg p-10 text-center max-w-lg mx-auto mt-6">
           <ListChecks className="w-7 h-7 text-muted-foreground mx-auto mb-2 opacity-40" />
-          <p className="text-sm font-medium mb-1">{filter === "new" ? t("Nothing new to review") : t("No tagged pages yet")}</p>
-          <p className="text-xs text-muted-foreground">{filter === "new" ? t("New pages and labels show up here after a reconstruct.") : t("Run Reconstruct to tag your crawled pages.")}</p>
+          <p className="text-sm font-medium mb-1">{filter === "new" ? t("Nothing new to review") : filter === "untagged" ? t("No untagged pages") : t("No tagged pages yet")}</p>
+          <p className="text-xs text-muted-foreground">{filter === "new" ? t("New pages and labels show up here after a reconstruct.") : filter === "untagged" ? t("Every valid page has at least one tag.") : t("Run Reconstruct to tag your crawled pages.")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -1639,6 +1699,7 @@ function ReviewPanel() {
                       className="opacity-0 group-hover/tag:opacity-100 hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
                   </span>
                 ))}
+                <AddTag pageId={pg.id} attributes={contentAttrs} onAdded={invalidate} />
               </div>
             </div>
           ))}
@@ -2766,6 +2827,8 @@ export default function Attributes() {
     if (prevJobActive.current && !active) {
       qc.invalidateQueries({ queryKey: ["crawl-settings"] });
       qc.invalidateQueries({ queryKey: ["web-pages"] });
+      qc.invalidateQueries({ queryKey: ["attr-review-count"] });
+      qc.invalidateQueries({ queryKey: ["attr-tagged-pages"] });
     }
     prevJobActive.current = active;
   }, [globalJob, qc]);
@@ -2815,9 +2878,14 @@ export default function Attributes() {
 
   const isContent = activeTab === "web_content";
   const tabAttrs = attributes.filter((a) => a.source === activeTab);
-  const reviewCount = attributes
-    .filter((a) => a.source === "web_content")
-    .reduce((n, a) => n + Number(a.pending_count || 0), 0);
+  // Pages needing review across the whole feed (tagged + untagged), matching the
+  // Review tab's own counts rather than pending values per attribute.
+  const { data: reviewCountData } = useQuery({
+    queryKey: ["attr-review-count"],
+    queryFn: () => appClient.attributes.reviewCount(),
+    enabled: isContent,
+  });
+  const reviewCount = reviewCountData?.count || 0;
   const showHeaderActions = isContent && contentSub === "attributes" && !selectedAttrId;
   const gaConnected = !!crawlSettings?.ga_connected;
   const gaSynced = !!crawlSettings?.ga_synced;

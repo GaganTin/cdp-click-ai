@@ -338,7 +338,7 @@ export default function ImportData() {
         <div className="mb-5">
           <h1 className="font-heading text-3xl font-semibold tracking-tight">{t("Import / Export Data")}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {t("Move data in and out of Click CDP from one place. Every import and export here is also available on its own page.")}
+            {t("Move data in and out of Meritma from one place. Every import and export here is also available on its own page.")}
           </p>
         </div>
 

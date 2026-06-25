@@ -74,11 +74,11 @@ export function MicrosoftButton({ action = "Continue" }) {
   );
 }
 
-// Branded logo - matches the landing page wordmark ("Click CDP")
+// Branded logo - matches the landing page wordmark ("Meritma")
 export function Logo({ className = "" }) {
   return (
     <Link to="/" className={`inline-flex items-center gap-2 ${className}`}>
-      <span className="font-bold text-lg tracking-tight">Click CDP</span>
+      <span className="font-bold text-lg tracking-tight">Meritma</span>
     </Link>
   );
 }
@@ -126,7 +126,7 @@ export function AuthLayout({ children, title, subtitle, illustrationContent }) {
           )}
         </div>
         <div className="relative z-10 text-xs text-primary-foreground/50">
-          © {new Date().getFullYear()} Click CDP
+          © {new Date().getFullYear()} Meritma
         </div>
       </div>
 
