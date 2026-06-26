@@ -118,8 +118,30 @@ def click_cdp_ai_integration_ga_reports():
         trigger_rule='all_success',
     )
 
+    # After a successful GA sync, (re)build the Profiles page off the fresh landing
+    # data and stitch anonymous visitors to known customers. A manual "Sync Data"
+    # run (carries str_client_name) rebuilds that workspace's AP profiles over the
+    # last 90 days (mode=full); the daily schedule refreshes only visitors active in
+    # the last 7 days (mode=incremental). Fire-and-forget: the profile build has its
+    # own failure handling and must not gate the GA sync's reported status.
+    task_build_profiles = TriggerDagRunOperator(
+        task_id='run_profile_mapping',
+        trigger_dag_id='click_cdp_ai_build_profile_mapping',
+        trigger_run_id="{{ run_id }}__run_profile_mapping",
+        conf={
+            "str_client_name": "{{ (dag_run.conf.get('str_client_name') or '') if dag_run.conf else '' }}",
+            "company_id": "{{ (dag_run.conf.get('company_id') or '') if dag_run.conf else '' }}",
+            "dag_run_id": "{{ (dag_run.conf.get('dag_run_id') or '') if dag_run.conf else '' }}",
+            "mode": "{{ 'full' if (dag_run.conf and dag_run.conf.get('str_client_name')) else 'incremental' }}",
+        },
+        wait_for_completion=False,
+        reset_dag_run=False,
+        trigger_rule='all_success',
+    )
+
     task_dag_start >> [task_path_funnel, task_utm, task_content, task_purchase]
     [task_path_funnel, task_utm, task_content, task_purchase] >> task_report_success
+    task_report_success >> task_build_profiles
 
 
 click_cdp_ai_integration_ga_reports()

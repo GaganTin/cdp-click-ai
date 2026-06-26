@@ -35,6 +35,8 @@ CREATE TABLE ga_landing.path_exploration (
 CREATE INDEX gal_pe_company_apid_idx ON ga_landing.path_exploration(company_id, capsuite_apid);
 CREATE INDEX gal_pe_company_date_idx ON ga_landing.path_exploration(company_id, date);
 CREATE INDEX gal_pe_company_event_idx ON ga_landing.path_exploration(company_id, event_name);
+-- profile-mapping: capsuite_uid lookup (logged-in visitor -> known member)
+CREATE INDEX gal_pe_company_uid_idx ON ga_landing.path_exploration(company_id, capsuite_uid);
 
 -- ── Same, with engagement duration (dwell-time analysis) ────────────────────
 CREATE TABLE ga_landing.path_exploration_duration (
@@ -353,6 +355,8 @@ CREATE TABLE ga_landing.purchase_list (
   PRIMARY KEY (company_id, id)
 );
 CREATE INDEX gal_pl_company_date_idx ON ga_landing.purchase_list(company_id, date);
+-- profile-mapping: trxn_id lookup (GA purchase -> commerce/manual order -> buyer)
+CREATE INDEX gal_pl_company_trxn_idx ON ga_landing.purchase_list(company_id, trxn_id);
 
 -- ── Sync control / incremental watermark (one row per workspace × report) ────
 --  The DAGs read this BEFORE each fetch to decide the start date, and advance

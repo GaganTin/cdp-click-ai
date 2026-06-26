@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
+import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
 import { Button } from "@/components/ui/button";
@@ -539,6 +539,7 @@ export default function Segments() {
   const [sortBy, setSortBy] = useStickyState("created", "seg.sortBy");
   const [sortDir, setSortDir] = useStickyState("desc", "seg.sortDir");
   const [groupBy, setGroupBy] = useStickyState("status", "seg.groupBy");
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const filterRef = useRef(null);
   const queryClient = useQueryClient();
 
@@ -592,6 +593,10 @@ export default function Segments() {
     none: [{ key: "all", label: t("All"), filter: () => true }],
   };
   const gridGroups = (GROUP_DIMS[groupBy] || GROUP_DIMS.status).filter(g => sortedSegments.some(g.filter));
+  const grouped = groupBy !== "none";
+  const allCollapsed = grouped && gridGroups.length > 0 && gridGroups.every(g => collapsedGroups.has(g.key));
+  const toggleAllGroups = () => setCollapsedGroups(allCollapsed ? new Set() : new Set(gridGroups.map(g => g.key)));
+  const toggleGroup = (k) => setCollapsedGroups(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const SEG_SORT_OPTS  = [["created", t("Created")], ["name", t("Name")], ["size", t("Estimated size")], ["updated", t("Last updated")]];
   const SEG_GROUP_OPTS = [["status", t("Status")], ["refresh", t("Daily refresh")], ["none", t("None")]];
 
@@ -762,6 +767,12 @@ export default function Segments() {
                 </div>
               )}
             </div>
+            {grouped && gridGroups.length > 1 && (
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={toggleAllGroups}>
+                {allCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+                {allCollapsed ? t("Expand all") : t("Collapse all")}
+              </Button>
+            )}
           </div>
           {hasActiveFilters && (
             <div className="flex flex-wrap gap-1.5 mt-2">
@@ -800,7 +811,13 @@ export default function Segments() {
             if (!items.length) return null;
             return (
               <div key={group.key}>
-                {groupBy !== "none" && <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{group.label} · {items.length}</p>}
+                {grouped && (
+                  <button onClick={() => toggleGroup(group.key)} className="flex items-center gap-1.5 mb-3 group/h">
+                    {collapsedGroups.has(group.key) ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover/h:text-foreground">{group.label} · {items.length}</span>
+                  </button>
+                )}
+                {!(grouped && collapsedGroups.has(group.key)) && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {items.map(seg => (
                     <div key={seg.id} className={`border border-border rounded-lg p-5 transition-shadow ${seg.status === "archived" ? "opacity-60" : "hover:shadow-sm"}`}>
@@ -876,6 +893,7 @@ export default function Segments() {
                     </div>
                   ))}
                 </div>
+                )}
               </div>
             );
           })}

@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, Link as LinkIcon, BarChart2,
   Lock, Search, Filter, X,
   ArrowUp, ArrowDown, ArrowUpDown, Info, Upload,
+  ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
@@ -19,13 +21,36 @@ import UTMForm, { buildUTMUrl } from "../components/campaigns/UTMForm";
 import UTMAnalyticsPanel, { GAUtmLinksSection } from "../components/campaigns/UTMAnalyticsPanel";
 import UTMImportDialog from "../components/import/UTMImportDialog";
 
+// Portal-rendered tooltip so it escapes the table's overflow-auto clipping (the
+// in-flow absolute version got cut off / overlapped by adjacent header cells).
 function ColInfo({ text }) {
+  const iconRef = useRef(null);
+  const [coords, setCoords] = useState(null);
+
+  const show = () => {
+    const r = iconRef.current?.getBoundingClientRect();
+    if (r) setCoords({ left: r.left + r.width / 2, top: r.top });
+  };
+  const hide = () => setCoords(null);
+
   return (
-    <span className="relative group ml-0.5 inline-flex items-center cursor-default" onClick={e => e.stopPropagation()}>
-      <Info className="w-3 h-3 opacity-40 group-hover:opacity-80 transition-opacity" />
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50 w-56 p-2.5 text-[11px] leading-relaxed bg-popover border border-border rounded-lg shadow-lg text-foreground font-normal text-left whitespace-normal">
-        {text}
-      </span>
+    <span
+      ref={iconRef}
+      className="ml-0.5 inline-flex items-center cursor-default"
+      onClick={e => e.stopPropagation()}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+    >
+      <Info className="w-3 h-3 opacity-40 hover:opacity-80 transition-opacity" />
+      {coords && createPortal(
+        <span
+          style={{ position: "fixed", left: coords.left, top: coords.top - 8, transform: "translate(-50%, -100%)" }}
+          className="pointer-events-none z-[100] w-56 p-2.5 text-[11px] leading-relaxed bg-popover border border-border rounded-lg shadow-lg text-foreground font-normal normal-case tracking-normal text-left whitespace-normal"
+        >
+          {text}
+        </span>,
+        document.body
+      )}
     </span>
   );
 }
@@ -61,22 +86,34 @@ export default function Campaigns() {
 
   // Group by status (toggle); when off, show one flat sorted table.
   const [groupByStatus, setGroupByStatus] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
 
-  // Column sort (persisted so the user's choice survives a refresh)
+  // Column sort. The "Sort by" dropdown sets a global default (persisted); clicking a
+  // column header sorts ONLY that status table, so re-ordering one group leaves the
+  // others untouched. Per-group overrides live in groupSort, keyed by group.key.
   const [sortKey, setSortKey] = useStickyState("created_date", "utm.sortKey");
   const [sortDir, setSortDir] = useStickyState("desc", "utm.sortDir");
-  const handleSort = (key) => {
-    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(key); setSortDir("asc"); }
+  const [groupSort, setGroupSort] = useState({}); // groupKey -> { key, dir }
+  const effSort = (gk) => groupSort[gk] || { key: sortKey, dir: sortDir };
+  // Changing the global "Sort by" reapplies to every table (clears per-group overrides).
+  const setGlobalSortKey = (k) => { setSortKey(k); setGroupSort({}); };
+  const setGlobalSortDir = (updater) => { setSortDir(updater); setGroupSort({}); };
+  const handleSort = (gk, key) => {
+    setGroupSort(prev => {
+      const cur = prev[gk] || { key: sortKey, dir: sortDir };
+      const next = cur.key === key ? { key, dir: cur.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" };
+      return { ...prev, [gk]: next };
+    });
   };
-  const sortItems = (items) => {
-    if (!sortKey) return items;
+  const sortItems = (gk, items) => {
+    const { key, dir } = effSort(gk);
+    if (!key) return items;
     return [...items].sort((a, b) => {
-      let av = a[sortKey], bv = b[sortKey];
+      let av = a[key], bv = b[key];
       if (av == null && bv == null) return 0;
       if (av == null) return 1; if (bv == null) return - 1;
       const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
-      return sortDir === "asc" ? cmp : - cmp;
+      return dir === "asc" ? cmp : - cmp;
     });
   };
 
@@ -230,6 +267,12 @@ export default function Campaigns() {
     return true;
   });
 
+  // ── Group collapse helpers ───────────────────────────────────────────────────
+  const activeGroups = groupByStatus ? GROUPS.filter(g => filteredCampaigns.some(g.filter)) : [];
+  const allGroupsCollapsed = activeGroups.length > 0 && activeGroups.every(g => collapsedGroups.has(g.key));
+  const toggleAllGroups = () => setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set(activeGroups.map(g => g.key)));
+  const toggleGroupCollapse = (k) => setCollapsedGroups(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+
   // ── Selection helpers ────────────────────────────────────────────────────────
   const toggleRow = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
@@ -347,13 +390,13 @@ export default function Campaigns() {
                         <div className="flex items-center gap-2">
                           <select
                             value={["created_date", "name", "status"].includes(sortKey) ? sortKey : "created_date"}
-                            onChange={e => setSortKey(e.target.value)}
+                            onChange={e => setGlobalSortKey(e.target.value)}
                             className="flex-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
                             <option value="created_date">{t("Date")}</option>
                             <option value="name">{t("Name")}</option>
                             <option value="status">{t("Status")}</option>
                           </select>
-                          <button type="button" onClick={() => setSortDir(d => d === "asc" ? "desc" : "asc")}
+                          <button type="button" onClick={() => setGlobalSortDir(d => d === "asc" ? "desc" : "asc")}
                             className="h-8 px-2.5 flex items-center gap-1 border border-input rounded-md text-xs text-muted-foreground hover:text-foreground">
                             {sortDir === "asc" ? <><ArrowUp className="w-3.5 h-3.5" /> {t("Asc")}</> : <><ArrowDown className="w-3.5 h-3.5" /> {t("Desc")}</>}
                           </button>
@@ -464,8 +507,17 @@ export default function Campaigns() {
                 <p className="text-xs text-muted-foreground">{campaigns.length === 0 ? t("Create your first UTM tracking link.") : t("Try adjusting your search or filter.")}</p>
               </div>
             ) : (
-              (groupByStatus ? GROUPS : [{ key: "all", label: "All", filter: () => true }]).map(group => {
-                const items = sortItems(filteredCampaigns.filter(group.filter));
+              <>
+              {groupByStatus && activeGroups.length > 1 && (
+                <div className="flex justify-end">
+                  <button onClick={toggleAllGroups} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                    {allGroupsCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+                    {allGroupsCollapsed ? t("Expand all") : t("Collapse all")}
+                  </button>
+                </div>
+              )}
+              {(groupByStatus ? GROUPS : [{ key: "all", label: "All", filter: () => true }]).map(group => {
+                const items = sortItems(group.key, filteredCampaigns.filter(group.filter));
                 if (!items.length) return null;
                 const groupIds = items.map(c => c.id);
                 const groupAllSelected = groupIds.every(id => selected.has(id));
@@ -477,10 +529,12 @@ export default function Campaigns() {
                 return (
                   <div key={group.key}>
                     {groupByStatus && (
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                        {t(group.label)} · {items.length}
-                      </p>
+                      <button onClick={() => toggleGroupCollapse(group.key)} className="flex items-center gap-1.5 mb-2 group/h">
+                        {collapsedGroups.has(group.key) ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover/h:text-foreground">{t(group.label)} · {items.length}</span>
+                      </button>
                     )}
+                    {!(groupByStatus && collapsedGroups.has(group.key)) && (
                     <div className={`border border-border rounded-lg overflow-auto ${group.key === "archived" ? "opacity-60" : ""}`}>
                       <table className="w-full text-xs">
                         <thead className="bg-secondary/50">
@@ -508,14 +562,14 @@ export default function Campaigns() {
                             ].map(col => (
                               <th
                                 key={col.key}
-                                onClick={() => handleSort(col.key)}
+                                onClick={() => handleSort(group.key, col.key)}
                                 className={`px-3 py-2.5 font-semibold text-muted-foreground whitespace-nowrap cursor-pointer select-none hover:text-foreground transition-colors ${col.align === "right" ? "text-right" : "text-left"}`}
                               >
                                 <span className={`inline-flex items-center gap-1 ${col.align === "right" ? "justify-end" : ""}`}>
                                   {col.label}
                                   {col.info && <ColInfo text={col.info} />}
-                                  {sortKey === col.key
-                                    ? (sortDir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                                  {effSort(group.key).key === col.key
+                                    ? (effSort(group.key).dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
                                     : <ArrowUpDown className="w-3 h-3 opacity-30" />}
                                 </span>
                               </th>
@@ -541,9 +595,7 @@ export default function Campaigns() {
                                   </div>
                                 </td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">
-                                  {c.status === "draft"
-                                    ? <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-500/10 text-yellow-700 border border-yellow-500/40 capitalize">{t("draft")}</span>
-                                    : <span className="text-muted-foreground capitalize">{c.status || "-"}</span>}
+                                  <span className="text-muted-foreground capitalize">{c.status || "-"}</span>
                                 </td>
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{c.utm_source || "-"}</td>
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{c.utm_medium || "-"}</td>
@@ -564,9 +616,11 @@ export default function Campaigns() {
                         </tbody>
                       </table>
                     </div>
+                    )}
                   </div>
                 );
-              })
+              })}
+              </>
             )}
 
             {/* GA distinct UTM links */}

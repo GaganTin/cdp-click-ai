@@ -142,10 +142,12 @@ const TESTABLE = new Set(["googleAnalytics", "googleSearchConsole", "shopify"]);
 // Types that support Airflow-driven data sync
 const SYNCABLE = new Set(["googleAnalytics", "googleSearchConsole", "shopify"]);
 
-// ``refreshProfiles`` (optional) is index.js's profile rebuild - called after a
-// successful commerce sync so newly synced members appear on the Profiles page
-// without waiting for a manual refresh.
-export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
+// ``refreshCommerceProfiles`` (optional) is index.js's COMMERCE-only profile
+// refresh - called after a successful commerce sync so newly synced members appear
+// on the Profiles page without waiting for a manual refresh. It ingests commerce
+// members + re-maps + rolls up, but skips the heavy GA anonymous-profile rebuild
+// (a store sync doesn't change GA data; that stays owned by the mapping DAG).
+export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {}) {
   const router = Router();
 
   const ok  = (res, data, status = 200) => res.status(status).json(data);
@@ -1018,8 +1020,8 @@ export function createIntegrationsRouter(pool, { refreshProfiles } = {}) {
       // the Profiles page immediately. Fire-and-forget: a profile-build hiccup
       // must not make Airflow retry the webhook.
       const COMMERCE_PLATFORM_TYPES = new Set(["shopify", "shopline", "odoo"]);
-      if (is_synced && COMMERCE_PLATFORM_TYPES.has(integration_type) && typeof refreshProfiles === "function") {
-        refreshProfiles(pool, company_id).catch((e) =>
+      if (is_synced && COMMERCE_PLATFORM_TYPES.has(integration_type) && typeof refreshCommerceProfiles === "function") {
+        refreshCommerceProfiles(pool, company_id).catch((e) =>
           console.error(`[Integrations] profile refresh after ${integration_type} sync failed:`, e.message)
         );
       }

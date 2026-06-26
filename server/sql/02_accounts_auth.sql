@@ -129,6 +129,9 @@ CREATE TABLE app.users (
   -- platform-owner flag: sits ABOVE per-workspace roles. true = full access to
   -- the Studio admin console (/api/admin/*) and every client account.
   is_platform_admin    BOOLEAN     NOT NULL DEFAULT false,
+  -- email-OTP two-factor: when true, password sign-in requires a second factor
+  -- (a 6-digit code emailed via app.mfa_challenges). Opt-in from Settings.
+  mfa_enabled          BOOLEAN     NOT NULL DEFAULT false,
   last_login_at        TIMESTAMPTZ,
   -- set on password change/reset; tokens issued before this are rejected by
   -- authenticate (so a password change signs out all other sessions).
@@ -172,6 +175,28 @@ CREATE TABLE app.email_verifications (
   expires_at    TIMESTAMPTZ NOT NULL,              -- code TTL (15 min)
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── MFA challenges (email-OTP second factor) ────────────────────────────────
+--  Short-lived 6-digit codes for two-factor auth. purpose distinguishes:
+--    'login'  - issued after a correct password when mfa_enabled; the challenge
+--               id (an unguessable UUID) is handed to the client and completed
+--               via POST /api/auth/login/mfa. No session exists until then.
+--    'enable' - issued from Settings to confirm the user can receive codes
+--               before mfa_enabled is flipped on (POST /api/auth/mfa/enable).
+--  The raw code is never stored (sha256 only). Codes expire (10 min) and the
+--  attempt counter caps brute-force guessing. Rows are deleted on use/expiry.
+CREATE TABLE app.mfa_challenges (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  purpose     TEXT        NOT NULL DEFAULT 'login'
+                CHECK (purpose IN ('login','enable')),
+  code_hash   TEXT        NOT NULL,                -- sha256 of the 6-digit code
+  attempts    INTEGER     NOT NULL DEFAULT 0,      -- wrong-code guesses (capped at 5)
+  expires_at  TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,                         -- set when the code is accepted
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX mfa_challenges_user_idx ON app.mfa_challenges(user_id);
 
 -- ── Companies (= workspaces) ────────────────────────────────────────────────
 CREATE TABLE app.companies (

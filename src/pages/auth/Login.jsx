@@ -17,6 +17,9 @@ const ERROR_MESSAGES = {
   server_error: "Something went wrong. Please try again.",
 };
 
+// Codes that mean the login challenge is gone - send the user back to sign in.
+const MFA_FATAL_CODES = new Set(["invalid_challenge", "expired", "too_many_attempts"]);
+
 export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -24,6 +27,9 @@ export default function Login() {
   const [form, setForm] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState(false);
+  // When set, the password was correct but the account has 2FA on - we collect
+  // the emailed code before completing sign-in. { id, sent }
+  const [mfa, setMfa] = useState(null);
 
   // Show any OAuth error from the URL
   useEffect(() => {
@@ -33,15 +39,26 @@ export default function Login() {
 
   const handle = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
 
+  const finishLogin = async () => {
+    await checkUserAuth();
+    // Expand the sidebar on this first post-login view (one-time).
+    sessionStorage.setItem("expandSidebarOnce", "1");
+    navigate("/");
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await appClient.auth.login(form.email, form.password);
-      await checkUserAuth();
-      // Expand the sidebar on this first post-login view (one-time).
-      sessionStorage.setItem("expandSidebarOnce", "1");
-      navigate("/");
+      const res = await appClient.auth.login(form.email, form.password);
+      // 2FA-enabled account: the password is only the first factor.
+      if (res?.mfa_required) {
+        setMfa({ id: res.challenge_id, sent: res.sent });
+        if (res.sent) toast.success(`We sent a 6-digit code to ${form.email}.`);
+        else toast.error(res.error ? `Couldn't send your code: ${res.error}` : "Couldn't send your code. Try resending it.");
+        return;
+      }
+      await finishLogin();
     } catch (err) {
       // No account for this email → send them to sign-up with it pre-filled.
       if (err.status === 404 || err.payload?.code === "no_account") {
@@ -54,6 +71,10 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  if (mfa) {
+    return <MfaStep email={form.email} challenge={mfa} setChallenge={setMfa} onSuccess={finishLogin} />;
+  }
 
   return (
     <AuthLayout title="Welcome back" subtitle="Sign in to your workspace">
@@ -120,6 +141,103 @@ export default function Login() {
         <Link to="/register" className="text-foreground font-semibold hover:underline">
           Create one free
         </Link>
+      </p>
+    </AuthLayout>
+  );
+}
+
+// Second-factor step: collect the 6-digit code emailed after a correct password.
+function MfaStep({ email, challenge, setChallenge, onSuccess }) {
+  const [code, setCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (code.length !== 6) {
+      toast.error("Enter the 6-digit code");
+      return;
+    }
+    setLoading(true);
+    try {
+      await appClient.auth.loginVerifyMfa(challenge.id, code);
+      toast.success("Welcome back!");
+      await onSuccess();
+    } catch (err) {
+      toast.error(err.message);
+      if (MFA_FATAL_CODES.has(err.payload?.code)) setChallenge(null); // back to password form
+      else setCode("");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resend = async () => {
+    setResending(true);
+    try {
+      const r = await appClient.auth.loginResendMfa(challenge.id);
+      if (r?.sent) toast.success("A new code is on its way.");
+      else toast.error(r?.error ? `Couldn't send the code: ${r.error}` : "Couldn't send a new code. Try again shortly.");
+    } catch (err) {
+      toast.error(err.message);
+      if (MFA_FATAL_CODES.has(err.payload?.code)) setChallenge(null);
+    } finally {
+      setResending(false);
+    }
+  };
+
+  return (
+    <AuthLayout
+      title="Two-factor authentication"
+      subtitle={email ? `Enter the 6-digit code we sent to ${email}` : "Enter your sign-in code"}
+    >
+      <form onSubmit={submit} className="space-y-4">
+        <div>
+          <label htmlFor="mfa-code" className="block text-sm font-medium mb-1.5">Verification code</label>
+          <input
+            id="mfa-code"
+            name="code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            aria-label="6-digit verification code"
+            maxLength={6}
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            className="w-full px-3 py-3 border border-border rounded-md bg-background text-center text-2xl font-semibold tracking-[0.5em] focus:outline-none focus:ring-2 focus:ring-ring placeholder:tracking-normal placeholder:text-base placeholder:text-muted-foreground/50"
+            placeholder="000000"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading || code.length !== 6}
+          className="w-full py-2.5 px-4 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        >
+          {loading ? "Verifying…" : "Verify & sign in"}
+        </button>
+      </form>
+
+      <p className="text-center text-sm text-muted-foreground mt-6">
+        Didn&apos;t get a code?{" "}
+        <button
+          type="button"
+          onClick={resend}
+          disabled={resending}
+          className="text-foreground font-semibold hover:underline disabled:opacity-50"
+        >
+          {resending ? "Sending…" : "Resend code"}
+        </button>
+      </p>
+      <p className="text-center text-sm text-muted-foreground mt-2">
+        <button
+          type="button"
+          onClick={() => setChallenge(null)}
+          className="text-foreground font-semibold hover:underline"
+        >
+          Back to sign in
+        </button>
       </p>
     </AuthLayout>
   );

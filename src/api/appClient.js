@@ -70,6 +70,15 @@ export const appClient = {
     me: () => request("/auth/me"),
     login: (email, password) =>
       request("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+    // Two-factor sign-in: complete the challenge returned by login({mfa_required}).
+    loginVerifyMfa: (challenge_id, code) =>
+      request("/auth/login/mfa", { method: "POST", body: JSON.stringify({ challenge_id, code }) }),
+    loginResendMfa: (challenge_id) =>
+      request("/auth/login/mfa/resend", { method: "POST", body: JSON.stringify({ challenge_id }) }),
+    // Two-factor management (Settings → Security).
+    mfaSetup: () => request("/auth/mfa/setup", { method: "POST" }),
+    mfaEnable: (code) => request("/auth/mfa/enable", { method: "POST", body: JSON.stringify({ code }) }),
+    mfaDisable: (password) => request("/auth/mfa/disable", { method: "POST", body: JSON.stringify({ password }) }),
     register: (data) =>
       request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
     // Code-based sign-up: start (email a code) → verify (create account) → resend.
@@ -330,7 +339,6 @@ export const appClient = {
       return request(`/profiles/anonymous${q ? `?${q}` : ""}`);
     },
     async anonymousFilters() { return request("/profiles/anonymous-filters"); },
-    async refresh() { return request("/profiles/refresh", { method: "POST" }); },
     downloadTemplate() {
       const headers = [
         "member_id", "primary_email", "primary_phone",
@@ -397,6 +405,9 @@ export const appClient = {
       const q = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ""))).toString();
       return request(`/profiles/analytics${q ? `?${q}` : ""}`);
     },
+    async funnel() { return request("/profiles/funnel"); },
+    async mergeCandidates(status = "pending") { return request(`/profiles/merge-candidates?status=${encodeURIComponent(status)}`); },
+    async dismissMergeCandidate(id) { return request(`/profiles/merge-candidates/${encodeURIComponent(id)}/dismiss`, { method: "POST" }); },
   },
   edm: {
     listCampaigns: () => request("/edm/campaigns"),

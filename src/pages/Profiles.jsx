@@ -9,6 +9,7 @@ import {
   TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users,
   Upload, Trash2,
   ShoppingBag, Hash, BarChart2, ArrowUp, ArrowDown,
+  ChevronsDownUp, ChevronsUpDown, GitMerge, ArrowRight,
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import ProfilesAnalyticsPanel from "@/components/profiles/ProfilesAnalyticsPanel";
@@ -60,6 +61,102 @@ function daysAgoLabel(val, t = (s) => s) {
     if (n === 1) return t("yesterday");
     return `${n} ${t("days ago")}`;
   } catch { return null; }
+}
+
+// Web-activity recency band from a last-seen date: Active ≤7d, Cooling ≤30d,
+// Dormant beyond (within the 90d window the profile is built over).
+function recencyBand(val, t = (s) => s) {
+  if (!val) return null;
+  try {
+    const d = parseISO(typeof val === "string" && /^\d{8}$/.test(val)
+      ? val.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3") : val);
+    if (!isValid(d)) return null;
+    const n = differenceInCalendarDays(new Date(), d);
+    if (n <= 7)  return { label: t("Active"),  cls: "bg-emerald-100 text-emerald-700" };
+    if (n <= 30) return { label: t("Cooling"), cls: "bg-amber-100 text-amber-700" };
+    return { label: t("Dormant"), cls: "bg-secondary text-muted-foreground" };
+  } catch { return null; }
+}
+
+function RecencyBadge({ value, t }) {
+  const b = recencyBand(value, t);
+  if (!b) return null;
+  return <span className={`text-[10px] h-4 px-1.5 rounded-full inline-flex items-center font-medium ${b.cls}`}>{b.label}</span>;
+}
+
+// Compact identification funnel: Visitors → Engaged → Identified → Customers → Buyers.
+function IdentificationFunnel() {
+  const { t } = usePreferences();
+  const { data } = useQuery({ queryKey: ["profiles-funnel"], queryFn: () => appClient.profiles.funnel() });
+  if (!data) return null;
+  const steps = [
+    { label: t("Visitors"),   value: data.visitors,   icon: Ghost },
+    { label: t("Engaged"),    value: data.engaged,    icon: Activity },
+    { label: t("Identified"), value: data.identified, icon: UserCheck },
+    { label: t("Customers"),  value: data.customers,  icon: Users },
+    { label: t("Buyers"),     value: data.buyers,     icon: ShoppingBag },
+  ];
+  const max = Math.max(...steps.map(s => Number(s.value) || 0), 1);
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5">
+      {steps.map((s, i) => {
+        const Icon = s.icon;
+        const val = Number(s.value) || 0;
+        const prev = i > 0 ? (Number(steps[i - 1].value) || 0) : null;
+        const pct = prev != null && prev > 0 ? Math.round((val / prev) * 100) : null;
+        return (
+          <div key={s.label} className="rounded-lg border border-border bg-card p-3">
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Icon className="w-3.5 h-3.5" /> {s.label}</div>
+            <p className="text-xl font-semibold mt-1">{val.toLocaleString()}</p>
+            <div className="h-1 rounded-full bg-secondary mt-2 overflow-hidden">
+              <div className="h-full bg-foreground/70" style={{ width: `${Math.round((val / max) * 100)}%` }} />
+            </div>
+            {pct != null && <p className="text-[10px] text-muted-foreground mt-1">{pct}% {t("of previous")}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Review queue for likely-duplicate profiles (same email/phone, different ids).
+function MergeCandidatesDialog({ open, onOpenChange }) {
+  const { t } = usePreferences();
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["merge-candidates"], queryFn: () => appClient.profiles.mergeCandidates("pending"), enabled: open });
+  const dismiss = useMutation({
+    mutationFn: (id) => appClient.profiles.dismissMergeCandidate(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["merge-candidates"] }); qc.invalidateQueries({ queryKey: ["merge-candidates-count"] }); toast.success(t("Dismissed")); },
+    onError: (e) => toast.error(e.message || t("Failed")),
+  });
+  const list = data?.candidates || [];
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle>{t("Possible duplicate profiles")}</DialogTitle></DialogHeader>
+        <p className="text-xs text-muted-foreground -mt-2">{t("Profiles that share an email or phone but came in under different IDs. Dismiss the ones that aren't real duplicates.")}</p>
+        <div className="max-h-[60vh] overflow-y-auto space-y-2 mt-2">
+          {isLoading ? <p className="text-sm text-muted-foreground py-8 text-center">{t("Loading…")}</p>
+            : list.length === 0 ? <p className="text-sm text-muted-foreground py-8 text-center">{t("No duplicates to review.")}</p>
+            : list.map(c => (
+              <div key={c.id} className="border border-border rounded-lg p-3 text-xs">
+                <div className="flex items-center gap-2 mb-2">
+                  <Badge variant="secondary" className="text-[10px]">{c.match_type}</Badge>
+                  <span className="text-muted-foreground truncate">{c.match_value}</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="bg-secondary/40 rounded px-2 py-1.5"><p className="font-medium truncate">{c.name_a}</p><p className="text-muted-foreground font-mono text-[10px] truncate">{c.member_id_a} · {c.source_a}</p></div>
+                  <div className="bg-secondary/40 rounded px-2 py-1.5"><p className="font-medium truncate">{c.name_b}</p><p className="text-muted-foreground font-mono text-[10px] truncate">{c.member_id_b} · {c.source_b}</p></div>
+                </div>
+                <div className="flex justify-end mt-2">
+                  <button onClick={() => dismiss.mutate(c.id)} disabled={dismiss.isPending} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Not a duplicate")}</button>
+                </div>
+              </div>
+            ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function StatBox({ label, value }) {
@@ -394,6 +491,7 @@ function CustomerCard({ profile, onDelete }) {
                   <ShoppingBag className="w-2.5 h-2.5" /> {orderCount} {orderCount !== 1 ? t("orders") : t("order")}
                 </Badge>
               )}
+              {hasGa && <RecencyBadge value={profile.ga_last_seen} t={t} />}
               {profile.is_opt_in_email && (
                 <Badge variant="outline" className="text-[10px] h-4 px-1.5">{t("Email opt-in")}</Badge>
               )}
@@ -556,6 +654,23 @@ function CustomerCard({ profile, onDelete }) {
               </div>
               <div className="text-[11px] space-y-0.5 text-muted-foreground">
                 {firstOrder && <p>{t("First order:")} <strong className="text-foreground">{firstOrder}</strong>{lastOrder && firstOrder !== lastOrder && <> · {t("Last order:")} <strong className="text-foreground">{lastOrder}</strong></>}</p>}
+                {(() => {
+                  // Anonymous → first purchase: days from first web visit to first order.
+                  if (!profile.ga_first_seen || !profile.first_order_date) return null;
+                  const a = parseISO(typeof profile.ga_first_seen === "string" && /^\d{8}$/.test(profile.ga_first_seen) ? profile.ga_first_seen.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3") : profile.ga_first_seen);
+                  const b = parseISO(profile.first_order_date);
+                  if (!isValid(a) || !isValid(b)) return null;
+                  const days = differenceInCalendarDays(b, a);
+                  if (days < 0) return null;
+                  return (
+                    <p className="flex items-center gap-1 flex-wrap">
+                      {t("First seen")} <strong className="text-foreground">{gaFirstSeen}</strong>
+                      <ArrowRight className="w-3 h-3" />
+                      {t("first purchase")} <strong className="text-foreground">{firstOrder}</strong>
+                      <span className="text-muted-foreground">· {days === 0 ? t("same day") : `${days} ${t("days")}`}</span>
+                    </p>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -647,6 +762,9 @@ function AnonymousCard({ profile }) {
   const firstSeen = safeDate(profile.first_seen);
   const lastSeen = safeDate(profile.last_seen);
   const shortId = profile.visitor_id?.slice(0, 14) + (profile.visitor_id?.length > 14 ? "…" : "");
+  const isResolved = !!profile.resolved_member_id;
+  const resolvedLabel = profile.resolved_name || profile.resolved_member_id;
+  const resolvedSince = safeDate(profile.resolved_at);
 
   return (
     <div className="border border-border rounded-lg bg-card hover:shadow-sm transition-shadow">
@@ -658,6 +776,11 @@ function AnonymousCard({ profile }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm font-semibold font-mono">{shortId}</h3>
+              {isResolved && (
+                <Badge className="text-[10px] h-4 px-1.5 gap-0.5 bg-emerald-600 text-white hover:bg-emerald-600" title={t("Linked to a known customer")}>
+                  <UserCheck className="w-2.5 h-2.5" /> {t("Identified")}
+                </Badge>
+              )}
               {hasFormComplete && (
                 <Badge className="text-[10px] h-4 px-1.5 gap-0.5 bg-foreground text-background">
                   <Star className="w-2.5 h-2.5" /> {t("High intent")}
@@ -668,8 +791,16 @@ function AnonymousCard({ profile }) {
                   <MessageCircle className="w-2.5 h-2.5" /> {t("WhatsApp")}
                 </Badge>
               )}
+              <RecencyBadge value={profile.last_seen} t={t} />
             </div>
             <p className="text-xs text-muted-foreground mt-0.5 truncate">{profile.top_source_medium || t("Unknown source")}</p>
+            {isResolved && (
+              <p className="text-[11px] text-emerald-700 mt-0.5 truncate flex items-center gap-1" title={resolvedLabel}>
+                <UserCheck className="w-3 h-3 flex-shrink-0" />
+                {t("Linked to")} <strong className="font-medium">{resolvedLabel}</strong>
+                {resolvedSince && <span className="text-muted-foreground">· {resolvedSince}</span>}
+              </p>
+            )}
           </div>
           <button
             onClick={() => setExpanded(e => !e)}
@@ -882,7 +1013,8 @@ export default function Profiles() {
     opt_in_email: "", opt_in_sms: "", is_subscriber: "", is_imported: "",
     has_transactions: "", min_orders: "", min_spend: "", ordered_within: "",
   });
-  const [anonFilters, setAnonFilters] = useState({ source: [], medium: [], has_form_complete: "" });
+  const [anonFilters, setAnonFilters] = useState({ source: [], medium: [], has_form_complete: "", is_resolved: "" });
+  const [mergeOpen, setMergeOpen] = useState(false);
   // Sort (server-side) + group (current page) per tab; persisted across refreshes.
   const [custSort, setCustSort] = useStickyState("join_date", "prof.custSort");
   const [custDir, setCustDir] = useStickyState("desc", "prof.custDir");
@@ -890,6 +1022,7 @@ export default function Profiles() {
   const [anonSort, setAnonSort] = useStickyState("events", "prof.anonSort");
   const [anonDir, setAnonDir] = useStickyState("desc", "prof.anonDir");
   const [anonGroup, setAnonGroup] = useStickyState("none", "prof.anonGroup");
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   // Applied-attribute filters, keyed by attribute id → selected value id (AND across attributes).
   const [attrFilters, setAttrFilters] = useState({});
   // Import dialog (UI lives in the shared ProfileImportDialog)
@@ -960,6 +1093,9 @@ export default function Profiles() {
   const { data: custCount } = useQuery({ queryKey: ["profiles-customers-count"], queryFn: () => appClient.profiles.listCustomers({ page: 1, limit: 1 }) });
   const { data: anonCount } = useQuery({ queryKey: ["profiles-anonymous-count"], queryFn: () => appClient.profiles.listAnonymous({ page: 1, limit: 1 }) });
   const tabCounts = { customer: custCount?.total, anonymous: anonCount?.total };
+  // Pending duplicate-profile candidates (powers the "Duplicates (N)" button).
+  const { data: mergeCount } = useQuery({ queryKey: ["merge-candidates-count"], queryFn: () => appClient.profiles.mergeCandidates("pending") });
+  const dupCount = mergeCount?.candidates?.length || 0;
 
   const isCustomer = activeTab === "customer";
 
@@ -1024,6 +1160,9 @@ export default function Profiles() {
     }
     return [...map.entries()].map(([label, items]) => ({ label, items }));
   })();
+  const allGroupsCollapsed = !!groupedProfiles && groupedProfiles.length > 0 && groupedProfiles.every(g => collapsedGroups.has(g.label));
+  const toggleAllGroups = () => setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set((groupedProfiles || []).map(g => g.label)));
+  const toggleGroupCollapse = (k) => setCollapsedGroups(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const renderCard = (p) => isCustomer
     ? <CustomerCard key={p.member_id} profile={p} onDelete={deleteProfileMutation.mutate} />
     : <AnonymousCard key={p.visitor_id} profile={p} />;
@@ -1074,6 +1213,11 @@ export default function Profiles() {
           </div>
           {activeTab === "customer" && (
             <div className="flex items-center gap-2">
+              {dupCount > 0 && (
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setMergeOpen(true)}>
+                  <GitMerge className="w-3.5 h-3.5" /> {t("Duplicates")} <span className="text-[10px] text-muted-foreground">{dupCount}</span>
+                </Button>
+              )}
               <Button size="sm" className="h-9 gap-1.5"
                 onClick={() => setImportOpen(true)}>
                 <Upload className="w-3.5 h-3.5" /> {t("Import Profiles")}
@@ -1106,6 +1250,8 @@ export default function Profiles() {
       <div className="flex-1 overflow-auto">
         {activeTab === "analytics" ? <ProfilesAnalyticsPanel /> : (
         <div className="px-8 py-6">
+        {/* Identification funnel: Visitors → Engaged → Identified → Customers → Buyers */}
+        <IdentificationFunnel />
         {/* Search + filters */}
         <div className="mb-4">
           <div className="flex items-center gap-3">
@@ -1134,7 +1280,7 @@ export default function Profiles() {
                       <button
                         onClick={() => {
                           setCustFilters({ reg_channel: [], education_level: [], age_group: [], gender: [], nationality: [], preferred_language: [], employment_status: [], income_level: [], member_type: [], preferred_channel: [], has_ga: "", min_ga_sessions: "", has_seminars: "", has_attributes: "", opt_in_email: "", opt_in_sms: "", is_subscriber: "", is_imported: "", has_transactions: "", min_orders: "", min_spend: "", ordered_within: "" });
-                          setAnonFilters({ source: [], medium: [], has_form_complete: "" });
+                          setAnonFilters({ source: [], medium: [], has_form_complete: "", is_resolved: "" });
                           setAttrFilters({});
                         }}
                         className="text-[11px] text-muted-foreground hover:text-foreground"
@@ -1290,6 +1436,15 @@ export default function Profiles() {
                             <option value="true">{t("Completed a form (high intent)")}</option>
                           </select>
                         </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-1">{t("Identity")}</p>
+                          <select value={anonFilters.is_resolved} onChange={e => setAnonFilter("is_resolved", e.target.value)}
+                            className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                            <option value="">{t("All visitors")}</option>
+                            <option value="true">{t("Identified (linked to a customer)")}</option>
+                            <option value="false">{t("Still anonymous")}</option>
+                          </select>
+                        </div>
                       </div>
                       </div>
                       {attrFilterSection}
@@ -1349,7 +1504,7 @@ export default function Profiles() {
                     has_transactions: t("Purchases"), min_orders: t("Min orders"), min_spend: t("Min spend"),
                     ordered_within: t("Ordered within (days)"),
                   }} onRemove={(k, v) => setCustFilter(k, Array.isArray(custFilters[k]) ? custFilters[k].filter(x => x !== v) : "")} />
-                : <ActiveFilters inline filters={anonFilters} labels={{ source: t("Source"), medium: t("Medium"), has_form_complete: t("Form completed") }} onRemove={(k, v) => setAnonFilter(k, Array.isArray(anonFilters[k]) ? anonFilters[k].filter(x => x !== v) : "")} />
+                : <ActiveFilters inline filters={anonFilters} labels={{ source: t("Source"), medium: t("Medium"), has_form_complete: t("Form completed"), is_resolved: t("Identity") }} onRemove={(k, v) => setAnonFilter(k, Array.isArray(anonFilters[k]) ? anonFilters[k].filter(x => x !== v) : "")} />
               }
               {Object.entries(attrFilters).filter(([, v]) => v).map(([aid, vid]) => (
                 <span key={aid} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
@@ -1362,6 +1517,21 @@ export default function Profiles() {
             </div>
           )}
         </div>
+
+        {/* Identified count chip (anonymous tab) */}
+        {!isCustomer && anonData?.anonymous_total > 0 && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={() => setAnonFilter("is_resolved", anonFilters.is_resolved === "true" ? "" : "true")}
+              className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border transition-colors ${anonFilters.is_resolved === "true" ? "border-emerald-600 bg-emerald-50 text-emerald-700" : "border-border text-muted-foreground hover:text-foreground"}`}
+            >
+              <UserCheck className="w-3 h-3" />
+              <strong className="font-semibold">{(anonData.identified_total || 0).toLocaleString()}</strong>
+              {t("of")} {anonData.anonymous_total.toLocaleString()} {t("visitors identified")}
+            </button>
+          </div>
+        )}
 
         {/* Grid */}
         {isLoading ? (
@@ -1380,10 +1550,23 @@ export default function Profiles() {
           </div>
         ) : groupedProfiles ? (
           <div className="space-y-6">
+            {groupedProfiles.length > 1 && (
+              <div className="flex justify-end -mb-2">
+                <button onClick={toggleAllGroups} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                  {allGroupsCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+                  {allGroupsCollapsed ? t("Expand all") : t("Collapse all")}
+                </button>
+              </div>
+            )}
             {groupedProfiles.map(g => (
               <div key={g.label}>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">{g.label} · {g.items.length}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{g.items.map(renderCard)}</div>
+                <button onClick={() => toggleGroupCollapse(g.label)} className="flex items-center gap-1.5 mb-3 group/h">
+                  {collapsedGroups.has(g.label) ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground group-hover/h:text-foreground">{g.label} · {g.items.length}</span>
+                </button>
+                {!collapsedGroups.has(g.label) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{g.items.map(renderCard)}</div>
+                )}
               </div>
             ))}
           </div>
@@ -1416,6 +1599,8 @@ export default function Profiles() {
 
       {/* Import Profiles dialog (shared component, also used on the Import Data page) */}
       <ProfileImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+
+      <MergeCandidatesDialog open={mergeOpen} onOpenChange={setMergeOpen} />
 
       {/* Save as Segment dialog */}
       <Dialog open={saveSegmentOpen} onOpenChange={setSaveSegmentOpen}>

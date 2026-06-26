@@ -42,6 +42,11 @@ const dataDir = path.join(__dirname, "data");
 const uploadsDir = path.join(__dirname, "uploads");
 
 const app = express();
+// Behind a reverse proxy in production (Render, etc.): trust X-Forwarded-* so
+// req.ip is the real client IP (per-IP auth rate limiting buckets correctly
+// instead of lumping every user under the proxy IP) and req.protocol reflects
+// the original https scheme (secure-cookie detection).
+app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 3001);
 const pgConn = process.env.POSTGRESQL_CONN || process.env.DATABASE_URL || "";
 
@@ -325,115 +330,170 @@ async function syncCommerceProfiles(pg, cid) {
   `, [cid]);
 }
 
-// Recomputes the derived layers of the unified profiles for one company (or all
-// companies when companyId is omitted): first ingest the synced commerce members
-// (commerce.customer -> app.customer_profiles, see syncCommerceProfiles), then
-// (re)derive the GA aggregates by walking the identity map (anonymous_id) into
-// ga_landing.path_exploration, and rebuild the unresolved-visitor list
-// app.anonymous_profiles. Fully company-scoped.
-async function refreshProfiles(pg, companyId = null) {
-  let companyIds = [];
-  if (companyId) {
-    companyIds = [companyId];
-  } else {
-    const { rows } = await pg.query("SELECT id FROM app.companies WHERE is_active = true");
-    companyIds = rows.map(r => r.id);
-  }
+// ── Profile derivation steps ─────────────────────────────────────────────────
+// The commerce-driven derived layers, as composable per-company steps used by
+// refreshCommerceProfiles below (after a store sync). Each is idempotent and
+// company-scoped, and mirrors the build_profile_mapping DAG. The heavy GA-driven
+// anonymous-profile rebuild is NOT here - it's owned solely by that DAG.
 
-  for (const cid of companyIds) {
-    // 0. Pull the latest synced commerce members into the golden record.
-    await syncCommerceProfiles(pg, cid);
+// Resolve the company set: the one given, or every active workspace.
+async function _resolveProfileCompanyIds(pg, companyId) {
+  if (companyId) return [companyId];
+  const { rows } = await pg.query("SELECT id FROM app.companies WHERE is_active = true");
+  return rows.map(r => r.id);
+}
 
-    // 1. Layer GA activity onto known customers via the anonymous_id identity links.
-    await pg.query(`
-      WITH ga_stats AS (
-        SELECT
-          pi.member_id,
-          COUNT(DISTINCT pe.capsuite_apid)                                                   AS ga_sessions,
-          COUNT(*)                                                                            AS ga_total_events,
-          SUM(CASE WHEN pe.event_name = 'page_view'                                 THEN 1 ELSE 0 END) AS ga_page_views,
-          SUM(CASE WHEN pe.event_name = 'first_visit'                               THEN 1 ELSE 0 END) AS ga_first_visits,
-          SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')          THEN 1 ELSE 0 END) AS ga_form_starts,
-          SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS ga_form_completes,
-          SUM(CASE WHEN pe.event_name = 'scroll'                                    THEN 1 ELSE 0 END) AS ga_scroll_events,
-          SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')    THEN 1 ELSE 0 END) AS ga_whatsapp_clicks,
-          SUM(CASE WHEN pe.event_name = 'file_download'                            THEN 1 ELSE 0 END) AS ga_file_downloads,
-          MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                  AS ga_first_seen,
-          MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                  AS ga_last_seen,
-          MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                            AS ga_top_source_medium,
-          MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                            AS ga_top_campaign,
-          ARRAY_AGG(DISTINCT pe.capsuite_apid)         FILTER (WHERE pe.capsuite_apid IS NOT NULL) AS ga_visitor_ids,
-          ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS ga_source_mediums,
-          ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS ga_campaigns,
-          ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)               AS ga_events_list,
-          ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS ga_pages_visited
-        FROM app.profile_identities pi
-        JOIN ga_landing.path_exploration pe
-          ON pe.company_id = pi.company_id AND pe.capsuite_apid = pi.identity_value
-        WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id'
-        GROUP BY pi.member_id
-      )
-      UPDATE app.customer_profiles cp SET
-        ga_sessions = g.ga_sessions, ga_total_events = g.ga_total_events, ga_page_views = g.ga_page_views,
-        ga_first_visits = g.ga_first_visits, ga_form_starts = g.ga_form_starts, ga_form_completes = g.ga_form_completes,
-        ga_scroll_events = g.ga_scroll_events, ga_whatsapp_clicks = g.ga_whatsapp_clicks, ga_file_downloads = g.ga_file_downloads,
-        ga_first_seen = g.ga_first_seen, ga_last_seen = g.ga_last_seen,
-        ga_top_source_medium = g.ga_top_source_medium, ga_top_campaign = g.ga_top_campaign,
-        ga_visitor_ids = COALESCE(g.ga_visitor_ids, '{}'), ga_source_mediums = COALESCE(g.ga_source_mediums, '{}'),
-        ga_campaigns = COALESCE(g.ga_campaigns, '{}'), ga_events_list = COALESCE(g.ga_events_list, '{}'),
-        ga_pages_visited = COALESCE(g.ga_pages_visited, '{}'),
-        last_refreshed = NOW()
-      FROM ga_stats g
-      WHERE cp.company_id = $1 AND cp.member_id = g.member_id
-    `, [cid]);
+// NOTE: rebuilding app.anonymous_profiles from GA (the heavy DELETE + 90d INSERT
+// over all of path_exploration) is owned exclusively by the build_profile_mapping
+// DAG. Node only does the commerce-driven steps below, which don't touch GA data.
 
-    // 2. Rebuild the unresolved anonymous-visitor list for this company.
-    await pg.query("DELETE FROM app.anonymous_profiles WHERE company_id = $1", [cid]);
-    await pg.query(`
-      INSERT INTO app.anonymous_profiles (
-        company_id, visitor_id, first_seen, last_seen, total_events, page_views, sessions,
-        first_visits, form_starts, form_completes, scroll_events, whatsapp_clicks, file_downloads,
-        click_events, user_engagement, top_source_medium, top_campaign,
-        source_mediums, campaigns, events, pages_visited, last_refreshed
-      )
-      SELECT
-        $1                                                                                                     AS company_id,
-        pe.capsuite_apid                                                                                       AS visitor_id,
-        MIN(TO_DATE(pe.date, 'YYYYMMDD'))                                                                      AS first_seen,
-        MAX(TO_DATE(pe.date, 'YYYYMMDD'))                                                                      AS last_seen,
-        COUNT(*)                                                                                               AS total_events,
-        SUM(CASE WHEN pe.event_name = 'page_view'                                         THEN 1 ELSE 0 END)  AS page_views,
-        SUM(CASE WHEN pe.event_name = 'session_start'                                     THEN 1 ELSE 0 END)  AS sessions,
-        SUM(CASE WHEN pe.event_name = 'first_visit'                                       THEN 1 ELSE 0 END)  AS first_visits,
-        SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')                  THEN 1 ELSE 0 END)  AS form_starts,
-        SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS form_completes,
-        SUM(CASE WHEN pe.event_name = 'scroll'                                            THEN 1 ELSE 0 END)  AS scroll_events,
-        SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')            THEN 1 ELSE 0 END)  AS whatsapp_clicks,
-        SUM(CASE WHEN pe.event_name = 'file_download'                                    THEN 1 ELSE 0 END)  AS file_downloads,
-        SUM(CASE WHEN pe.event_name IN ('click','click_button')                           THEN 1 ELSE 0 END)  AS click_events,
-        SUM(CASE WHEN pe.event_name = 'user_engagement'                                  THEN 1 ELSE 0 END)  AS user_engagement,
-        MODE() WITHIN GROUP (ORDER BY pe.session_source_medium)                                               AS top_source_medium,
-        MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name)                                               AS top_campaign,
-        ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS source_mediums,
-        ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS campaigns,
-        ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL)                 AS events,
-        ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS pages_visited,
-        NOW()                                                                                                 AS last_refreshed
+// Step 1: stitch anonymous_id identity links (purchase / capsuite_uid / email).
+// One member can own many apids; ON CONFLICT keeps one member per apid. Worth
+// re-running after a commerce sync: a new member can now match an existing visitor.
+async function mapAnonymousIdentities(pg, cid) {
+  await pg.query(`
+    WITH candidates AS (
+      SELECT pl.capsuite_apid AS apid, o.customer_id AS member_id, 1 AS prio
+      FROM ga_landing.purchase_list pl
+      JOIN commerce."order" o
+        ON o.company_id = $1
+       AND ( o.order_ref = pl.trxn_id OR o.source_id = pl.trxn_id
+          OR regexp_replace(COALESCE(o.order_ref, ''), '^#', '') = pl.trxn_id )
+      WHERE pl.company_id = $1 AND o.customer_id IS NOT NULL
+        AND pl.capsuite_apid IS NOT NULL AND pl.capsuite_apid NOT IN ('', '(not set)') AND LENGTH(pl.capsuite_apid) > 6
+        AND pl.trxn_id IS NOT NULL AND pl.trxn_id NOT IN ('', '(not set)')
+      UNION ALL
+      SELECT pl.capsuite_apid, s.member_id, 1
+      FROM ga_landing.purchase_list pl
+      JOIN manual.sale s ON s.company_id = $1 AND ( s.trxn_ref = pl.trxn_id OR s.trxn_id = pl.trxn_id )
+      WHERE pl.company_id = $1 AND s.member_id IS NOT NULL
+        AND pl.capsuite_apid IS NOT NULL AND pl.capsuite_apid NOT IN ('', '(not set)') AND LENGTH(pl.capsuite_apid) > 6
+        AND pl.trxn_id IS NOT NULL AND pl.trxn_id NOT IN ('', '(not set)')
+      UNION ALL
+      SELECT pe.capsuite_apid, pi.member_id, 2
       FROM ga_landing.path_exploration pe
+      JOIN app.profile_identities pi
+        ON pi.company_id = $1 AND pi.identity_type = 'member_id'
+       AND ( pi.identity_value = pe.capsuite_uid OR pi.source_id = pe.capsuite_uid )
       WHERE pe.company_id = $1
-        AND pe.capsuite_apid IS NOT NULL
-        AND pe.capsuite_apid != ''
-        AND pe.capsuite_apid != '(not set)'
-        AND LENGTH(pe.capsuite_apid) > 6
-        AND NOT EXISTS (
-          SELECT 1 FROM app.profile_identities pi
-          WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id'
-            AND pi.identity_value = pe.capsuite_apid
-        )
-      GROUP BY pe.capsuite_apid
-    `, [cid]);
+        AND pe.capsuite_uid IS NOT NULL AND pe.capsuite_uid NOT IN ('', '(not set)', 'NA')
+        AND pe.capsuite_apid IS NOT NULL AND pe.capsuite_apid NOT IN ('', '(not set)') AND LENGTH(pe.capsuite_apid) > 6
+        AND pe.date >= TO_CHAR((CURRENT_DATE - INTERVAL '90 days'), 'YYYYMMDD')
+      UNION ALL
+      SELECT pe.capsuite_apid, pi.member_id, 3
+      FROM ga_landing.path_exploration pe
+      JOIN app.profile_identities pi
+        ON pi.company_id = $1 AND pi.identity_type = 'email'
+       AND LOWER(pi.identity_value) = LOWER(pe.capsuite_identifier)
+      WHERE pe.company_id = $1 AND pe.capsuite_identifier LIKE '%@%'
+        AND pe.capsuite_apid IS NOT NULL AND pe.capsuite_apid NOT IN ('', '(not set)') AND LENGTH(pe.capsuite_apid) > 6
+        AND pe.date >= TO_CHAR((CURRENT_DATE - INTERVAL '90 days'), 'YYYYMMDD')
+      UNION ALL
+      SELECT pe.capsuite_apid, pi.member_id, 3
+      FROM ga_landing.path_exploration pe
+      JOIN app.profile_identities pi
+        ON pi.company_id = $1 AND pi.identity_type = 'email'
+       AND LOWER(pi.identity_value) = LOWER(pe.capsuite_uid)
+      WHERE pe.company_id = $1 AND pe.capsuite_uid LIKE '%@%'
+        AND pe.capsuite_apid IS NOT NULL AND pe.capsuite_apid NOT IN ('', '(not set)') AND LENGTH(pe.capsuite_apid) > 6
+        AND pe.date >= TO_CHAR((CURRENT_DATE - INTERVAL '90 days'), 'YYYYMMDD')
+    ),
+    ranked AS (
+      SELECT DISTINCT ON (apid) apid, member_id, prio
+      FROM candidates
+      WHERE member_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM app.customer_profiles cp WHERE cp.company_id = $1 AND cp.member_id = candidates.member_id)
+      ORDER BY apid, prio, member_id
+    )
+    INSERT INTO app.profile_identities
+      (company_id, member_id, source, source_id, identity_type, identity_value, is_primary, metadata)
+    SELECT $1, member_id, 'ga', apid, 'anonymous_id', apid, false, jsonb_build_object('match_method', prio)
+    FROM ranked
+    ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING
+  `, [cid]);
+}
+
+// Step 2: copy the resolved member onto the AP rows (after mapping).
+async function stampResolvedAnonymous(pg, cid) {
+  await pg.query(`
+    UPDATE app.anonymous_profiles ap
+    SET resolved_member_id = pi.member_id, resolved_at = pi.first_seen
+    FROM app.profile_identities pi
+    WHERE ap.company_id = $1 AND pi.company_id = $1
+      AND pi.identity_type = 'anonymous_id' AND pi.identity_value = ap.visitor_id
+      AND ap.resolved_member_id IS DISTINCT FROM pi.member_id
+  `, [cid]);
+}
+
+// Step 3: roll a member's LAST-90-DAY web behaviour onto the golden record. The
+// anonymous_id list (ga_visitor_ids) is kept LIFETIME; the metrics are 90d only
+// (a member whose web activity aged out keeps the ids, zeroes the metrics).
+async function rollupCustomerGa(pg, cid) {
+  await pg.query(`
+    WITH linked AS (
+      SELECT member_id, ARRAY_AGG(DISTINCT identity_value) AS visitor_ids
+      FROM app.profile_identities
+      WHERE company_id = $1 AND identity_type = 'anonymous_id'
+      GROUP BY member_id
+    ),
+    ga_stats AS (
+      SELECT
+        pi.member_id,
+        COUNT(DISTINCT pe.capsuite_apid) AS ga_sessions,
+        COUNT(*) AS ga_total_events,
+        SUM(CASE WHEN pe.event_name = 'page_view'                                 THEN 1 ELSE 0 END) AS ga_page_views,
+        SUM(CASE WHEN pe.event_name = 'first_visit'                               THEN 1 ELSE 0 END) AS ga_first_visits,
+        SUM(CASE WHEN pe.event_name IN ('Event_Form_Start','form_start')          THEN 1 ELSE 0 END) AS ga_form_starts,
+        SUM(CASE WHEN pe.event_name IN ('Event_Form_Complete','form_submit','Contact_Us_Form_Complete') THEN 1 ELSE 0 END) AS ga_form_completes,
+        SUM(CASE WHEN pe.event_name = 'scroll'                                    THEN 1 ELSE 0 END) AS ga_scroll_events,
+        SUM(CASE WHEN pe.event_name IN ('Whatsapp_Click','GTM_Whatsapp_Click')    THEN 1 ELSE 0 END) AS ga_whatsapp_clicks,
+        SUM(CASE WHEN pe.event_name = 'file_download'                            THEN 1 ELSE 0 END) AS ga_file_downloads,
+        MIN(TO_DATE(pe.date, 'YYYYMMDD')) AS ga_first_seen,
+        MAX(TO_DATE(pe.date, 'YYYYMMDD')) AS ga_last_seen,
+        MODE() WITHIN GROUP (ORDER BY pe.session_source_medium) AS ga_top_source_medium,
+        MODE() WITHIN GROUP (ORDER BY pe.session_campaign_name) AS ga_top_campaign,
+        ARRAY_AGG(DISTINCT pe.session_source_medium) FILTER (WHERE pe.session_source_medium IS NOT NULL AND pe.session_source_medium NOT IN ('','(not set)')) AS ga_source_mediums,
+        ARRAY_AGG(DISTINCT pe.session_campaign_name) FILTER (WHERE pe.session_campaign_name IS NOT NULL AND pe.session_campaign_name NOT IN ('','(not set)')) AS ga_campaigns,
+        ARRAY_AGG(DISTINCT pe.event_name)            FILTER (WHERE pe.event_name IS NOT NULL) AS ga_events_list,
+        ARRAY_AGG(DISTINCT pe.page_location)         FILTER (WHERE pe.page_location IS NOT NULL AND pe.page_location != '') AS ga_pages_visited
+      FROM app.profile_identities pi
+      JOIN ga_landing.path_exploration pe
+        ON pe.company_id = pi.company_id AND pe.capsuite_apid = pi.identity_value
+       AND pe.date >= TO_CHAR((CURRENT_DATE - INTERVAL '90 days'), 'YYYYMMDD')
+      WHERE pi.company_id = $1 AND pi.identity_type = 'anonymous_id'
+      GROUP BY pi.member_id
+    )
+    UPDATE app.customer_profiles cp SET
+      ga_sessions = COALESCE(g.ga_sessions, 0), ga_total_events = COALESCE(g.ga_total_events, 0), ga_page_views = COALESCE(g.ga_page_views, 0),
+      ga_first_visits = COALESCE(g.ga_first_visits, 0), ga_form_starts = COALESCE(g.ga_form_starts, 0), ga_form_completes = COALESCE(g.ga_form_completes, 0),
+      ga_scroll_events = COALESCE(g.ga_scroll_events, 0), ga_whatsapp_clicks = COALESCE(g.ga_whatsapp_clicks, 0), ga_file_downloads = COALESCE(g.ga_file_downloads, 0),
+      ga_first_seen = g.ga_first_seen, ga_last_seen = g.ga_last_seen,
+      ga_top_source_medium = g.ga_top_source_medium, ga_top_campaign = g.ga_top_campaign,
+      ga_visitor_ids = COALESCE(l.visitor_ids, '{}'),
+      ga_source_mediums = COALESCE(g.ga_source_mediums, '{}'), ga_campaigns = COALESCE(g.ga_campaigns, '{}'),
+      ga_events_list = COALESCE(g.ga_events_list, '{}'), ga_pages_visited = COALESCE(g.ga_pages_visited, '{}'),
+      last_refreshed = NOW()
+    FROM linked l
+    LEFT JOIN ga_stats g ON g.member_id = l.member_id
+    WHERE cp.company_id = $1 AND cp.member_id = l.member_id
+  `, [cid]);
+}
+
+// COMMERCE refresh: a store sync changes commerce data, NOT GA, so this ingests the
+// new members, re-runs identity mapping (a new member can now match an existing
+// visitor by purchase/email), re-stamps resolved AP rows, and refreshes the customer
+// roll-up - but SKIPS the heavy anonymous-profile rebuild (GA is unchanged). Called
+// after a commerce dag-complete webhook. The GA-driven anonymous list stays owned by
+// the build_profile_mapping DAG / the full refresh.
+async function refreshCommerceProfiles(pg, companyId = null) {
+  const companyIds = await _resolveProfileCompanyIds(pg, companyId);
+  for (const cid of companyIds) {
+    await syncCommerceProfiles(pg, cid);
+    await mapAnonymousIdentities(pg, cid);
+    await stampResolvedAnonymous(pg, cid);
+    await rollupCustomerGa(pg, cid);
   }
-  console.log(`Profiles refreshed for ${companyIds.length} company(ies).`);
+  console.log(`Profiles refreshed (commerce) for ${companyIds.length} company(ies).`);
 }
 
 // ── Read-only Postgres query (GA data, used by AI tool) ───────────────────────
@@ -1708,23 +1768,6 @@ Be plain, specific, and business-focused. Reference actual numbers from the data
   }
 });
 
-// ── Profiles: refresh trigger ─────────────────────────────────────────────────
-app.post("/api/profiles/refresh", authenticate, async (req, res) => {
-  if (!pool) return res.status(503).json({ error: "Database not configured" });
-  const companyId = await companyGuard(req, res);
-  if (!companyId) return;
-  try {
-    await refreshProfiles(pool, companyId);
-    const [c, a] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM app.customer_profiles WHERE company_id = $1", [companyId]),
-      pool.query("SELECT COUNT(*) FROM app.anonymous_profiles WHERE company_id = $1", [companyId]),
-    ]);
-    res.json({ ok: true, customers: parseInt(c.rows[0].count), anonymous: parseInt(a.rows[0].count) });
-  } catch (err) {
-    res.status(500).json({ error: String(err.message || err) });
-  }
-});
-
 // ── Profiles: Customers (reads from app.customer_profiles) ────────────────────
 app.get("/api/profiles/customers", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
@@ -1891,10 +1934,13 @@ app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
   const companyId = await companyGuard(req, res);
   if (!companyId) return;
   try {
-    const { search = "", page = "1", limit = "20", source_medium, source, medium, has_form_complete, attribute_value_ids, attr_groups, sort, dir } = req.query;
+    const { search = "", page = "1", limit = "20", source_medium, source, medium, has_form_complete, is_resolved, attribute_value_ids, attr_groups, sort, dir } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     const params = [companyId];
     const conditions = ["company_id = $1"];
+    // Identity filter: identified (mapped to a customer) vs still-anonymous.
+    if (is_resolved === "true")  conditions.push("resolved_member_id IS NOT NULL");
+    if (is_resolved === "false") conditions.push("resolved_member_id IS NULL");
 
     if (search)       { params.push(`%${search.toLowerCase()}%`); conditions.push(`LOWER(visitor_id) LIKE $${params.length}`); }
     // source_mediums is an array of "source / medium" strings.
@@ -1926,11 +1972,27 @@ app.get("/api/profiles/anonymous", authenticate, async (req, res) => {
     const orderDir = String(dir).toLowerCase() === "asc" ? "ASC" : "DESC";
     params.push(parseInt(limit), offset);
 
-    const [result, countResult] = await Promise.all([
-      pool.query(`SELECT * FROM app.anonymous_profiles ${where} ORDER BY ${orderCol} ${orderDir} NULLS LAST LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
+    // resolved_name: friendly label for the linked member (NULL when unresolved),
+    // resolved via a correlated subselect so the WHERE/filters above stay untouched.
+    const resolvedNameExpr = `(
+      SELECT COALESCE(NULLIF(cp.display_name,''), NULLIF(cp.eng_full_name,''), NULLIF(cp.primary_email,''), anonymous_profiles.resolved_member_id)
+      FROM app.customer_profiles cp
+      WHERE cp.company_id = anonymous_profiles.company_id
+        AND cp.member_id = anonymous_profiles.resolved_member_id
+    ) AS resolved_name`;
+    const [result, countResult, totalsResult] = await Promise.all([
+      pool.query(`SELECT *, ${resolvedNameExpr} FROM app.anonymous_profiles ${where} ORDER BY ${orderCol} ${orderDir} NULLS LAST LIMIT $${params.length - 1} OFFSET $${params.length}`, params),
       pool.query(`SELECT COUNT(*) FROM app.anonymous_profiles ${where}`, params.slice(0, params.length - 2)),
+      // Company-wide totals (unfiltered) so the UI can show "X of Y identified".
+      pool.query(`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE resolved_member_id IS NOT NULL)::int AS identified FROM app.anonymous_profiles WHERE company_id = $1`, [companyId]),
     ]);
-    res.json({ profiles: result.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
+    res.json({
+      profiles: result.rows,
+      total: parseInt(countResult.rows[0].count),
+      anonymous_total: totalsResult.rows[0].total,
+      identified_total: totalsResult.rows[0].identified,
+      page: parseInt(page), limit: parseInt(limit),
+    });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -1953,6 +2015,73 @@ app.get("/api/profiles/anonymous-filters", authenticate, async (req, res) => {
       mediums: med.rows.map(x => x.m).filter(m => m && m !== '(not set)'),
       campaigns: camp.rows.map(x => x.c).filter(Boolean),
     });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: identification funnel (Visitors → Engaged → Identified → Customers) ─
+app.get("/api/profiles/funnel", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const [anon, cust] = await Promise.all([
+      pool.query(`
+        SELECT
+          COUNT(*)::int                                                                              AS visitors,
+          COUNT(*) FILTER (WHERE user_engagement > 0 OR form_starts > 0 OR scroll_events > 0 OR page_views > 1)::int AS engaged,
+          COUNT(*) FILTER (WHERE resolved_member_id IS NOT NULL)::int                                AS identified
+        FROM app.anonymous_profiles WHERE company_id = $1`, [companyId]),
+      pool.query(`
+        SELECT
+          COUNT(*)::int                                            AS customers,
+          COUNT(*) FILTER (WHERE order_count > 0)::int             AS buyers
+        FROM app.customer_profiles WHERE company_id = $1`, [companyId]),
+    ]);
+    res.json({ ...anon.rows[0], ...cust.rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: duplicate / merge candidates (review queue) ─────────────────────
+app.get("/api/profiles/merge-candidates", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const status = ["pending", "merged", "dismissed"].includes(req.query.status) ? req.query.status : "pending";
+    const { rows } = await pool.query(`
+      SELECT mc.id, mc.member_id_a, mc.source_a, mc.member_id_b, mc.source_b,
+             mc.match_type, mc.match_value, mc.confidence, mc.status, mc.created_date,
+             (SELECT COALESCE(NULLIF(a.display_name,''), NULLIF(a.eng_full_name,''), a.primary_email, mc.member_id_a)
+                FROM app.customer_profiles a WHERE a.company_id = mc.company_id AND a.member_id = mc.member_id_a) AS name_a,
+             (SELECT COALESCE(NULLIF(b.display_name,''), NULLIF(b.eng_full_name,''), b.primary_email, mc.member_id_b)
+                FROM app.customer_profiles b WHERE b.company_id = mc.company_id AND b.member_id = mc.member_id_b) AS name_b
+      FROM app.profile_merge_candidates mc
+      WHERE mc.company_id = $1 AND mc.status = $2
+      ORDER BY mc.created_date DESC
+      LIMIT 200`, [companyId, status]);
+    res.json({ candidates: rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// Dismiss a false-positive duplicate (keeps both profiles separate).
+app.post("/api/profiles/merge-candidates/:id/dismiss", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { rowCount } = await pool.query(`
+      UPDATE app.profile_merge_candidates
+      SET status = 'dismissed', resolved_by = $3, resolved_at = NOW(), updated_date = NOW()
+      WHERE id = $1 AND company_id = $2 AND status = 'pending'`,
+      [req.params.id, companyId, req.user?.id || null]);
+    if (!rowCount) return res.status(404).json({ error: "Candidate not found or already resolved" });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -2862,7 +2991,7 @@ if (pool) {
 
 // ── Data Integration routes ───────────────────────────────────────────────────
 if (pool) {
-  app.use("/api/data-integrations", createIntegrationsRouter(pool, { refreshProfiles }));
+  app.use("/api/data-integrations", createIntegrationsRouter(pool, { refreshCommerceProfiles }));
 }
 
 // ── Popup routes ──────────────────────────────────────────────────────────────
@@ -3260,21 +3389,15 @@ async function start() {
     console.log("  Attributes: Nightly test-link rollup cron scheduled (2:45 AM daily)");
   }
 
-  // ── Nightly profile rebuild (1:15 AM) ──────────────────────────────────────
-  // Folds the previous day's scheduled commerce sync (the daily Shopify landing
-  // DAG) into the unified profiles for every active workspace. Manual "Sync
-  // Data" runs don't wait for this - the dag-complete webhook refreshes the
-  // workspace immediately.
-  if (pool) {
-    cron.schedule("15 1 * * *", async () => {
-      try {
-        await refreshProfiles(pool);
-      } catch (e) {
-        console.error("[Profile refresh] Fatal error:", e.message);
-      }
-    });
-    console.log("  Profiles: Nightly rebuild cron scheduled (1:15 AM daily)");
-  }
+  // ── No nightly profile cron (intentionally) ────────────────────────────────
+  // Profile data is rebuilt event-driven, never on a timer: the GA orchestrator
+  // triggers build_profile_mapping (incremental) after every daily GA sync (which
+  // also recomputes ALL customer roll-ups + prunes aged-out visitors), the commerce
+  // webhook calls refreshCommerceProfiles() after a store sync, and popup
+  // email-collection links visitors in real time. Between those events the GA tables
+  // are static, so
+  // a nightly rebuild would only re-do identical work. A manual "Sync Data" run does
+  // a full 90d rebuild on demand if a from-scratch refresh is ever wanted.
 
   // ── Integration sync queue worker ─────────────────────────────────────────
   if (pool) {

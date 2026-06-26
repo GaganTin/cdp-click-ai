@@ -13,7 +13,7 @@ import {
   CheckCircle2, Clock, Users, Ghost, Layout,
   BarChart2, Upload, Eye, Filter,
   Link2, Copy, Info, LayoutGrid, AlertTriangle,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronsDownUp, ChevronsUpDown,
   ArrowUp, ArrowDown, ArrowUpDown,
 } from "lucide-react";
 import TemplateBuilder, { generateHtml, DEFAULT_CONTAINER } from "@/components/popup/TemplateBuilder";
@@ -1943,6 +1943,8 @@ export default function PopUp() {
   const [showFilters, setShowFilters] = useState(false);
   const [popupView, setPopupView] = useState("grid"); // "grid" | "calendar"
   const [groupByStatus, setGroupByStatus] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
+  const toggleGroupCollapse = (k) => setCollapsedGroups(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const [sortBy, setSortBy] = useStickyState("date", "popup.sortBy");   // "date" | "name" | "status"
   const [sortDir, setSortDir] = useStickyState("desc", "popup.sortDir");
   const [filters, setFilters] = useState({ status: [], interaction_type: [], is_default: "" });
@@ -2211,13 +2213,27 @@ export default function PopUp() {
               const sortGet = { date: p => p.created_date || "", name: p => (p.name || "").toLowerCase(), status: p => p.status || "" }[sortBy];
               const sortedAsc = sortGet ? [...filtered].sort((a, b) => { const av = sortGet(a), bv = sortGet(b); return av < bv ? -1 : av > bv ? 1 : 0; }) : filtered;
               const sorted = sortDir === "asc" ? sortedAsc : [...sortedAsc].reverse();
-              return displayGroups.map(group => (
+              const allGroupsCollapsed = groupByStatus && GROUPS.length > 0 && GROUPS.every(g => collapsedGroups.has(g.key));
+              const toggleAllGroups = () => setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set(GROUPS.map(g => g.key)));
+              return (
+                <>
+                {groupByStatus && GROUPS.length > 1 && (
+                  <div className="flex justify-end mb-3">
+                    <button onClick={toggleAllGroups} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                      {allGroupsCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+                      {allGroupsCollapsed ? t("Expand all") : t("Collapse all")}
+                    </button>
+                  </div>
+                )}
+                {displayGroups.map(group => (
                 <div key={group.key} className="mb-8">
                   {groupByStatus && (
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-                      {t(group.label)}
-                    </p>
+                    <button onClick={() => toggleGroupCollapse(group.key)} className="flex items-center gap-1.5 mb-3 group/h">
+                      {collapsedGroups.has(group.key) ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide group-hover/h:text-foreground">{t(group.label)}</span>
+                    </button>
                   )}
+                  {!(groupByStatus && collapsedGroups.has(group.key)) && (
                   <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
                     {sorted.filter(group.filter).map(p => (
                       <PopupCard
@@ -2232,8 +2248,11 @@ export default function PopUp() {
                       />
                     ))}
                   </div>
+                  )}
                 </div>
-              ));
+                ))}
+                </>
+              );
             })()}
           </div>
         )}

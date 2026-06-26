@@ -29,37 +29,57 @@ export default function SegmentsAnalyticsPanel() {
     queryFn: () => appClient.entities.Segment.list("-created_date"),
   });
 
-  // Period + compare selections persist across refresh (localStorage). The date
-  // range filters the KPI tiles by segment CREATION date; charts/table stay all-time.
+  // Period + compare selections persist across refresh (localStorage). A date range
+  // scopes the WHOLE panel - KPI tiles, charts AND table - to segments CREATED in the
+  // window (everything here is segment metadata, so creation date is the natural axis).
   const [dateFrom, setDateFrom] = useStickyState("", "segmentsAnalytics.dateFrom");
   const [dateTo, setDateTo]     = useStickyState("", "segmentsAnalytics.dateTo");
   const [compare, setCompare]   = useStickyState(false, "segmentsAnalytics.compare");
   const [cmpFrom, setCmpFrom]   = useStickyState("", "segmentsAnalytics.cmpFrom");
   const [cmpTo, setCmpTo]       = useStickyState("", "segmentsAnalytics.cmpTo");
 
+  const inRange = (s, f, t) => {
+    if (!s.created_date) return false;
+    const d = new Date(s.created_date);
+    if (f && d < new Date(f)) return false;
+    if (t && d > new Date(t + "T23:59:59")) return false;
+    return true;
+  };
+  const hasRange = !!(dateFrom || dateTo);
+  // No range → all segments (current state); range set → only those created in the window.
+  const periodSegs = useMemo(
+    () => (hasRange ? segments.filter((s) => inRange(s, dateFrom, dateTo)) : segments),
+    [segments, hasRange, dateFrom, dateTo]
+  );
+  const prevSegs = useMemo(
+    () => (compare ? segments.filter((s) => inRange(s, cmpFrom, cmpTo)) : []),
+    [segments, compare, cmpFrom, cmpTo]
+  );
+
   const a = useMemo(() => {
-    const counts = (pred) => segments.filter(pred).length;
+    const src = periodSegs;
+    const counts = (pred) => src.filter(pred).length;
     const byStatus = ["active", "draft", "archived"].map((s) => ({
       name: s[0].toUpperCase() + s.slice(1), value: counts((x) => STATUS_OF(x) === s),
     }));
     const byType = Object.entries(
-      segments.reduce((m, s) => { const t = s.segment_type || "customer"; m[t] = (m[t] || 0) + 1; return m; }, {})
+      src.reduce((m, s) => { const t = s.segment_type || "customer"; m[t] = (m[t] || 0) + 1; return m; }, {})
     ).map(([k, v]) => ({ name: TYPE_LABEL[k] || k, value: v }));
     const usage = [
       { name: "In use (locked)", value: counts((s) => s.is_used) },
       { name: "Not in use", value: counts((s) => !s.is_used) },
     ];
-    const sized = segments.filter((s) => Number(s.estimated_size) > 0);
+    const sized = src.filter((s) => Number(s.estimated_size) > 0);
     const sizeDist = [...sized]
       .sort((x, y) => Number(y.estimated_size) - Number(x.estimated_size))
       .slice(0, 12)
       .map((s) => ({ name: s.name, value: Number(s.estimated_size) }));
-    const refreshSegs = segments.filter((s) => s.daily_refresh);
+    const refreshSegs = src.filter((s) => s.daily_refresh);
     const freshnessMap = refreshSegs.reduce((m, s) => {
       const b = freshnessBucket(s.last_refreshed); m[b] = (m[b] || 0) + 1; return m;
     }, {});
     const freshness = FRESH_ORDER.filter((b) => freshnessMap[b]).map((b) => ({ name: b, value: freshnessMap[b] }));
-    const createdMap = segments.reduce((m, s) => {
+    const createdMap = src.reduce((m, s) => {
       if (!s.created_date) return m;
       const key = format(new Date(s.created_date), "yyyy-MM");
       m[key] = (m[key] || 0) + 1; return m;
@@ -67,7 +87,7 @@ export default function SegmentsAnalyticsPanel() {
     const createdOverTime = Object.entries(createdMap).sort(([x], [y]) => x.localeCompare(y)).map(([name, value]) => ({ name, value }));
     const totalReach = sized.reduce((s, x) => s + Number(x.estimated_size), 0);
     return {
-      total: segments.length,
+      total: src.length,
       active: counts((s) => STATUS_OF(s) === "active"),
       draft: counts((s) => STATUS_OF(s) === "draft"),
       archived: counts((s) => STATUS_OF(s) === "archived"),
@@ -77,7 +97,7 @@ export default function SegmentsAnalyticsPanel() {
       avgSize: sized.length ? Math.round(totalReach / sized.length) : 0,
       byStatus, byType, usage, sizeDist, freshness, createdOverTime,
     };
-  }, [segments]);
+  }, [periodSegs]);
 
   if (isLoading) {
     return <div className="px-8 py-6"><AnalyticsLoading /></div>;
@@ -108,23 +128,12 @@ export default function SegmentsAnalyticsPanel() {
       avgSize: sized.length ? Math.round(reach / sized.length) : 0,
     };
   };
-  const inRange = (s, f, t) => {
-    if (!s.created_date) return false;
-    const d = new Date(s.created_date);
-    if (f && d < new Date(f)) return false;
-    if (t && d > new Date(t + "T23:59:59")) return false;
-    return true;
-  };
-  const hasRange = !!(dateFrom || dateTo);
-  // No range → all-time KPIs (current state); range set → segments created in window.
-  const periodSegs = hasRange ? segments.filter((s) => inRange(s, dateFrom, dateTo)) : segments;
-  const prevSegs   = compare ? segments.filter((s) => inRange(s, cmpFrom, cmpTo)) : [];
   const kpi  = kpiOf(periodSegs);
   const pkpi = kpiOf(prevSegs);
 
   return (
     <div className="px-8 py-6 space-y-6">
-      {/* Date period + compare bar (filters the KPI tiles by creation date) */}
+      {/* Date period + compare bar - scopes the whole panel to segments created in range */}
       <DateRangeBar
         from={dateFrom} to={dateTo}
         onChange={({ from, to }) => { setDateFrom(from); setDateTo(to); }}
@@ -193,7 +202,7 @@ export default function SegmentsAnalyticsPanel() {
       </div>
 
       {/* Table */}
-      <ChartCard title="All segments" subtitle={`${segments.length} total`}>
+      <ChartCard title="All segments" subtitle={`${periodSegs.length}${hasRange ? " created in range" : " total"}`}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -208,7 +217,7 @@ export default function SegmentsAnalyticsPanel() {
               </tr>
             </thead>
             <tbody>
-              {[...segments]
+              {[...periodSegs]
                 .sort((x, y) => Number(y.estimated_size || 0) - Number(x.estimated_size || 0))
                 .map((s) => (
                   <tr key={s.id} className="border-b border-border/60 last:border-0">

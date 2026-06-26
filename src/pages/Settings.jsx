@@ -305,6 +305,7 @@ function SecurityTab() {
   };
 
   return (
+    <div className="space-y-10">
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
       <Section title={t("Security")} description={t("Update your password to keep your account secure.")}>
         <form onSubmit={save} className="space-y-4">
@@ -387,6 +388,172 @@ function SecurityTab() {
           <p className="text-xs text-muted-foreground">
             {t("After changing your password, you may be signed out of other active sessions.")}
           </p>
+        </div>
+      </SideCard>
+    </div>
+
+    <TwoFactorCard />
+    </div>
+  );
+}
+
+// ── Two-factor authentication (email OTP) ─────────────────────────────────────
+//  Opt-in. Enabling sends a confirmation code to the account email; disabling
+//  asks for the current password (left blank for OAuth-only accounts).
+function TwoFactorCard() {
+  const { t } = usePreferences();
+  const { user, refreshUser } = useAuth();
+  const enabled = !!user?.mfa_enabled;
+  const [mode, setMode] = useState(null); // null | 'enabling' | 'disabling'
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const startEnable = async () => {
+    setBusy(true);
+    try {
+      const r = await appClient.auth.mfaSetup();
+      setMode("enabling");
+      setCode("");
+      if (r?.sent) toast.success(t("We emailed you a confirmation code."));
+      else toast.error(r?.error ? `${t("Couldn't send the code:")} ${r.error}` : t("Couldn't send the code. Try again."));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmEnable = async (e) => {
+    e.preventDefault();
+    if (code.length !== 6) { toast.error(t("Enter the 6-digit code")); return; }
+    setBusy(true);
+    try {
+      await appClient.auth.mfaEnable(code);
+      await refreshUser();
+      setMode(null); setCode("");
+      toast.success(t("Two-factor authentication is on."));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmDisable = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await appClient.auth.mfaDisable(password);
+      await refreshUser();
+      setMode(null); setPassword("");
+      toast.success(t("Two-factor authentication is off."));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
+      <Section
+        title={t("Two-factor authentication")}
+        description={t("Require a code sent to your email each time you sign in with a password.")}
+      >
+        <div className="flex items-center gap-3 rounded-md border border-border p-4">
+          <Shield className={`w-5 h-5 ${enabled ? "text-foreground" : "text-muted-foreground"}`} />
+          <div className="flex-1">
+            <p className="text-sm font-medium">
+              {enabled ? t("Two-factor is on") : t("Two-factor is off")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {enabled
+                ? t("You'll be asked for an emailed code when signing in.")
+                : t("Add an extra layer of security to your account.")}
+            </p>
+          </div>
+          {!mode && (
+            enabled ? (
+              <Button type="button" size="sm" variant="outline" onClick={() => { setMode("disabling"); setPassword(""); }}>
+                {t("Turn off")}
+              </Button>
+            ) : (
+              <Button type="button" size="sm" onClick={startEnable} disabled={busy}>
+                {busy ? t("Sending…") : t("Enable")}
+              </Button>
+            )
+          )}
+        </div>
+
+        {mode === "enabling" && (
+          <form onSubmit={confirmEnable} className="space-y-3 rounded-md border border-border p-4">
+            <Field label={t("Enter the 6-digit code we emailed you")}>
+              <Input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                aria-label={t("6-digit confirmation code")}
+                maxLength={6}
+                autoFocus
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                placeholder="000000"
+              />
+            </Field>
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm" disabled={busy || code.length !== 6}>
+                {busy ? t("Verifying…") : t("Confirm & turn on")}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={startEnable} disabled={busy}>
+                {t("Resend code")}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => { setMode(null); setCode(""); }}>
+                {t("Cancel")}
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {mode === "disabling" && (
+          <form onSubmit={confirmDisable} className="space-y-3 rounded-md border border-border p-4">
+            <Field
+              label={t("Confirm your password to turn off two-factor")}
+              hint={t("Signed in with Google or Microsoft? Leave this blank.")}
+            >
+              <Input
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </Field>
+            <div className="flex items-center gap-2">
+              <Button type="submit" size="sm" variant="destructive" disabled={busy}>
+                {busy ? t("Turning off…") : t("Turn off two-factor")}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => { setMode(null); setPassword(""); }}>
+                {t("Cancel")}
+              </Button>
+            </div>
+          </form>
+        )}
+      </Section>
+
+      <SideCard>
+        <div>
+          <p className="text-sm font-medium mb-2">{t("How it works")}</p>
+          <ul className="space-y-1.5 text-xs text-muted-foreground">
+            {[
+              t("We email a 6-digit code at sign-in"),
+              t("Codes expire after 10 minutes"),
+              t("Applies to password sign-in"),
+            ].map(req => (
+              <li key={req} className="flex items-start gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                {req}
+              </li>
+            ))}
+          </ul>
         </div>
       </SideCard>
     </div>

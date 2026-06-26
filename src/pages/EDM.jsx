@@ -16,6 +16,7 @@ import {
   ShieldOff, Search, Filter, Layout, Upload, Info,
   ArrowUp, ArrowDown, ArrowUpDown, Eye, Copy,
   FileText, FileDown, X, Calendar, LayoutGrid, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronsDownUp, ChevronsUpDown,
   Users, MousePointerClick,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -382,6 +383,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   const [showFilters, setShowFilters] = useState(false);
   const [view, setView] = useState("grid"); // "grid" | "calendar"
   const [groupByStatus, setGroupByStatus] = useState(true);
+  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   const [sortBy, setSortBy] = useStickyState("date", "edm.sortBy");   // "date" | "name" | "status"
   const [sortDir, setSortDir] = useStickyState("desc", "edm.sortDir");
   const [filters, setFilters] = useState({ status: [], segment_name: [], from_name: [], from_email: [] });
@@ -446,6 +448,9 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   // Apply the chosen sort, then group (or show one flat list when grouping is off).
   const sorted = sortRecords(filtered, sortBy, sortDir);
   const displayGroups = groupByStatus ? GROUPS : [{ key: "all", label: t("All"), filter: () => true }];
+  const allGroupsCollapsed = groupByStatus && GROUPS.length > 0 && GROUPS.every(g => collapsedGroups.has(g.key));
+  const toggleAllGroups = () => setCollapsedGroups(allGroupsCollapsed ? new Set() : new Set(GROUPS.map(g => g.key)));
+  const toggleGroupCollapse = (k) => setCollapsedGroups(p => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
 
   return (
@@ -589,13 +594,24 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
         <EmailCalendar campaigns={filtered} onEdit={onEdit} onStats={onStats} />
       )}
 
+      {view === "grid" && groupByStatus && GROUPS.length > 1 && (
+        <div className="flex justify-end mb-3">
+          <button onClick={toggleAllGroups} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+            {allGroupsCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+            {allGroupsCollapsed ? t("Expand all") : t("Collapse all")}
+          </button>
+        </div>
+      )}
+
       {view === "grid" && displayGroups.map(group => (
         <div key={group.key} className="mb-8">
           {groupByStatus && (
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-              {group.label}
-            </p>
+            <button onClick={() => toggleGroupCollapse(group.key)} className="flex items-center gap-1.5 mb-3 group/h">
+              {collapsedGroups.has(group.key) ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide group-hover/h:text-foreground">{group.label}</span>
+            </button>
           )}
+          {!(groupByStatus && collapsedGroups.has(group.key)) && (
           <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
             {sorted.filter(group.filter).map(c => (
               <EmailCard
@@ -609,6 +625,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
               />
             ))}
           </div>
+          )}
         </div>
       ))}
     </div>

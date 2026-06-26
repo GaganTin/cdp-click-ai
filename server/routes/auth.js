@@ -2,7 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { createToken, setAuthCookie, clearAuthCookie, authenticate } from "../middleware/auth.js";
-import { sendPasswordResetEmail, sendVerificationEmail, sendVerificationCodeEmail } from "../services/email.js";
+import { sendPasswordResetEmail, sendVerificationEmail, sendVerificationCodeEmail, sendLoginCodeEmail } from "../services/email.js";
 import { registerCompanyWithInteractionService } from "../lib/interactionService.js";
 import { slugify, uniqueSlug } from "../lib/slug.js";
 
@@ -189,6 +189,30 @@ async function loginOrProvisionOAuthUser(pool, { email, full_name, avatar_url = 
   registerCompanyWithInteractionService(pool, company.id, company.name).catch(() => {});
 
   return user.id;
+}
+
+// Load a login identity together with its active workspaces, shaped exactly like
+// the POST /login success payload. Shared by password login and MFA verify so the
+// client gets an identical user object no matter which path completed sign-in.
+async function fetchUserWithCompanies(pool, userId) {
+  const { rows } = await pool.query(
+    `SELECT u.*,
+       COALESCE(
+         json_agg(
+           json_build_object('id', c.id, 'name', c.name, 'slug', c.slug,
+             'plan', c.plan, 'logo_url', c.logo_url, 'role', cm.role)
+           ORDER BY cm.joined_at
+         ) FILTER (WHERE c.id IS NOT NULL),
+         '[]'
+       ) AS companies
+     FROM app.users u
+     LEFT JOIN app.company_members cm ON cm.user_id = u.id AND cm.status = 'active'
+     LEFT JOIN app.companies c ON c.id = cm.company_id AND c.is_active = true
+     WHERE u.id = $1 AND u.is_active = true
+     GROUP BY u.id`,
+    [userId]
+  );
+  return rows[0] || null;
 }
 
 export function createAuthRouter(pool) {
@@ -490,6 +514,30 @@ export function createAuthRouter(pool) {
         return res.status(401).json({ error: "Invalid email or password" });
       }
 
+      // Two-factor: when the user has email MFA enabled, the password is only the
+      // FIRST factor. Don't issue a session yet - park a challenge, email a code,
+      // and make the client complete POST /login/mfa. The challenge id is an
+      // unguessable UUID and is the only thing tying the two requests together.
+      if (user.mfa_enabled) {
+        const code = genCode();
+        const { rows: [challenge] } = await pool.query(
+          `INSERT INTO app.mfa_challenges (user_id, purpose, code_hash, expires_at)
+           VALUES ($1, 'login', $2, NOW() + INTERVAL '10 minutes')
+           RETURNING id`,
+          [user.id, sha256(code)]
+        );
+        let sent = false, error = null;
+        try {
+          const r = await sendLoginCodeEmail(user.email, code);
+          sent = !r?.simulated;
+          if (r?.simulated) console.warn(`[auth] login MFA code for ${user.email} simulated (RESEND_API_KEY unset): ${code}`);
+        } catch (e) {
+          console.error("[auth] login MFA code email FAILED for", user.email, "-", e.message);
+          error = e.message;
+        }
+        return res.json({ mfa_required: true, challenge_id: challenge.id, sent, error });
+      }
+
       await pool.query(
         "UPDATE app.users SET last_login_at = NOW() WHERE id = $1",
         [user.id]
@@ -506,6 +554,107 @@ export function createAuthRouter(pool) {
 
       const { password_hash, email_verify_token, ...safeUser } = user;
       res.json({ user: safeUser, token });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/login/mfa - complete a two-factor sign-in (second factor)
+  // Body: { challenge_id, code }. On success issues the session cookie + returns
+  // the same user payload as a non-MFA login.
+  router.post("/login/mfa", rateLimit({ max: 10 }), async (req, res) => {
+    const { challenge_id, code } = req.body;
+    if (!challenge_id || !code) {
+      return res.status(400).json({ error: "challenge_id and code are required" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `SELECT * FROM app.mfa_challenges
+          WHERE id = $1 AND purpose = 'login' AND consumed_at IS NULL FOR UPDATE`,
+        [challenge_id]
+      );
+      if (!rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "This sign-in request is no longer valid. Please sign in again.", code: "invalid_challenge" });
+      }
+      const ch = rows[0];
+
+      if (new Date(ch.expires_at) < new Date()) {
+        await client.query("DELETE FROM app.mfa_challenges WHERE id = $1", [challenge_id]);
+        await client.query("COMMIT");
+        return res.status(400).json({ error: "Your code has expired. Please sign in again.", code: "expired" });
+      }
+      if (ch.attempts >= 5) {
+        await client.query("DELETE FROM app.mfa_challenges WHERE id = $1", [challenge_id]);
+        await client.query("COMMIT");
+        return res.status(429).json({ error: "Too many incorrect attempts. Please sign in again.", code: "too_many_attempts" });
+      }
+      if (sha256(code) !== ch.code_hash) {
+        await client.query("UPDATE app.mfa_challenges SET attempts = attempts + 1 WHERE id = $1", [challenge_id]);
+        await client.query("COMMIT");
+        const left = 5 - (ch.attempts + 1);
+        return res.status(400).json({ error: `Incorrect code.${left > 0 ? ` ${left} attempt${left === 1 ? "" : "s"} left.` : ""}`, code: "invalid_code" });
+      }
+
+      // Correct - consume the challenge and complete sign-in.
+      await client.query("UPDATE app.mfa_challenges SET consumed_at = NOW() WHERE id = $1", [challenge_id]);
+      await client.query("UPDATE app.users SET last_login_at = NOW() WHERE id = $1", [ch.user_id]);
+      await client.query(
+        `INSERT INTO app.audit_log (user_id, action, resource_type, resource_id, ip_address, user_agent)
+         VALUES ($1, 'login_mfa', 'user', $2, $3, $4)`,
+        [ch.user_id, ch.user_id, req.ip, req.headers["user-agent"]]
+      );
+      await client.query("COMMIT");
+
+      const user = await fetchUserWithCompanies(pool, ch.user_id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      const token = createToken({ id: user.id, email: user.email });
+      setAuthCookie(res, token);
+      const { password_hash, email_verify_token, ...safeUser } = user;
+      res.json({ user: safeUser, token });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/auth/login/mfa/resend - re-send the sign-in code for a pending
+  // challenge (regenerates the code and resets the attempt counter).
+  router.post("/login/mfa/resend", rateLimit({ max: 5 }), async (req, res) => {
+    const { challenge_id } = req.body;
+    if (!challenge_id) return res.status(400).json({ error: "challenge_id is required" });
+    try {
+      const { rows } = await pool.query(
+        `SELECT c.id, u.email FROM app.mfa_challenges c
+           JOIN app.users u ON u.id = c.user_id
+          WHERE c.id = $1 AND c.purpose = 'login' AND c.consumed_at IS NULL`,
+        [challenge_id]
+      );
+      if (!rows.length) {
+        return res.status(400).json({ error: "This sign-in request is no longer valid. Please sign in again.", code: "invalid_challenge" });
+      }
+      const code = genCode();
+      await pool.query(
+        `UPDATE app.mfa_challenges
+            SET code_hash = $1, attempts = 0, expires_at = NOW() + INTERVAL '10 minutes'
+          WHERE id = $2`,
+        [sha256(code), challenge_id]
+      );
+      let sent = false, error = null;
+      try {
+        const r = await sendLoginCodeEmail(rows[0].email, code);
+        sent = !r?.simulated;
+        if (r?.simulated) console.warn(`[auth] resend login MFA code for ${rows[0].email} simulated: ${code}`);
+      } catch (e) {
+        console.error("[auth] resend login MFA code FAILED for", rows[0].email, "-", e.message);
+        error = e.message;
+      }
+      res.json({ ok: true, sent, error });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -528,7 +677,7 @@ export function createAuthRouter(pool) {
       const { rows } = await pool.query(
         `SELECT u.id, u.email, u.full_name, u.avatar_url,
                 u.is_email_verified, u.last_login_at, u.created_date,
-                u.account_id, u.is_platform_admin,
+                u.account_id, u.is_platform_admin, u.mfa_enabled,
                 a.plan AS account_plan, a.plan_expires_at AS account_plan_expires_at,
                 a.plan_upgraded_at AS account_plan_upgraded_at,
                 (a.owner_user_id = u.id) AS is_account_owner,
@@ -619,6 +768,127 @@ export function createAuthRouter(pool) {
       setAuthCookie(res, createToken({ id: req.user.id, email: req.user.email }));
 
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Two-factor (email OTP) management ────────────────────────────────────────
+  // Opt-in: a user turns 2FA on from Settings → Security. Turning it on requires
+  // confirming a code emailed to them (proves they can receive codes); turning it
+  // off requires the current password (when one is set).
+
+  // POST /api/auth/mfa/setup - email a confirmation code to start enabling 2FA
+  router.post("/mfa/setup", authenticate, rateLimit({ max: 5 }), async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        "SELECT email, mfa_enabled FROM app.users WHERE id = $1",
+        [req.user.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: "User not found" });
+      if (rows[0].mfa_enabled) return res.status(400).json({ error: "Two-factor is already enabled", code: "already_enabled" });
+
+      // One pending 'enable' challenge per user: clear any prior attempt first.
+      await pool.query("DELETE FROM app.mfa_challenges WHERE user_id = $1 AND purpose = 'enable'", [req.user.id]);
+      const code = genCode();
+      await pool.query(
+        `INSERT INTO app.mfa_challenges (user_id, purpose, code_hash, expires_at)
+         VALUES ($1, 'enable', $2, NOW() + INTERVAL '10 minutes')`,
+        [req.user.id, sha256(code)]
+      );
+      let sent = false, error = null;
+      try {
+        const r = await sendLoginCodeEmail(rows[0].email, code, { purpose: "enable" });
+        sent = !r?.simulated;
+        if (r?.simulated) console.warn(`[auth] MFA enable code for ${rows[0].email} simulated: ${code}`);
+      } catch (e) {
+        console.error("[auth] MFA enable code email FAILED for", rows[0].email, "-", e.message);
+        error = e.message;
+      }
+      res.json({ ok: true, sent, error });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/mfa/enable - confirm the code and turn 2FA on
+  router.post("/mfa/enable", authenticate, rateLimit({ max: 10 }), async (req, res) => {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `SELECT * FROM app.mfa_challenges
+          WHERE user_id = $1 AND purpose = 'enable' AND consumed_at IS NULL FOR UPDATE`,
+        [req.user.id]
+      );
+      if (!rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "No pending setup. Start again from Settings.", code: "no_pending" });
+      }
+      const ch = rows[0];
+      if (new Date(ch.expires_at) < new Date()) {
+        await client.query("DELETE FROM app.mfa_challenges WHERE id = $1", [ch.id]);
+        await client.query("COMMIT");
+        return res.status(400).json({ error: "Your code has expired. Start again.", code: "expired" });
+      }
+      if (ch.attempts >= 5) {
+        await client.query("DELETE FROM app.mfa_challenges WHERE id = $1", [ch.id]);
+        await client.query("COMMIT");
+        return res.status(429).json({ error: "Too many incorrect attempts. Start again.", code: "too_many_attempts" });
+      }
+      if (sha256(code) !== ch.code_hash) {
+        await client.query("UPDATE app.mfa_challenges SET attempts = attempts + 1 WHERE id = $1", [ch.id]);
+        await client.query("COMMIT");
+        const left = 5 - (ch.attempts + 1);
+        return res.status(400).json({ error: `Incorrect code.${left > 0 ? ` ${left} attempt${left === 1 ? "" : "s"} left.` : ""}`, code: "invalid_code" });
+      }
+
+      await client.query("UPDATE app.users SET mfa_enabled = true WHERE id = $1", [req.user.id]);
+      await client.query("DELETE FROM app.mfa_challenges WHERE user_id = $1 AND purpose = 'enable'", [req.user.id]);
+      await client.query(
+        `INSERT INTO app.audit_log (user_id, action, resource_type, resource_id, ip_address)
+         VALUES ($1, 'mfa_enabled', 'user', $2, $3)`,
+        [req.user.id, req.user.id, req.ip]
+      );
+      await client.query("COMMIT");
+      res.json({ ok: true, mfa_enabled: true });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      res.status(500).json({ error: err.message });
+    } finally {
+      client.release();
+    }
+  });
+
+  // POST /api/auth/mfa/disable - turn 2FA off (requires current password if set)
+  router.post("/mfa/disable", authenticate, rateLimit({ max: 10 }), async (req, res) => {
+    const { password } = req.body;
+    try {
+      const { rows } = await pool.query(
+        "SELECT password_hash, mfa_enabled FROM app.users WHERE id = $1",
+        [req.user.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: "User not found" });
+      if (!rows[0].mfa_enabled) return res.json({ ok: true, mfa_enabled: false });
+
+      // When the account has a password, require it to disable 2FA. OAuth-only
+      // accounts (no password) can disable while authenticated.
+      if (rows[0].password_hash) {
+        if (!password) return res.status(400).json({ error: "Current password is required", code: "password_required" });
+        const valid = await bcrypt.compare(password, rows[0].password_hash);
+        if (!valid) return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      await pool.query("UPDATE app.users SET mfa_enabled = false WHERE id = $1", [req.user.id]);
+      await pool.query("DELETE FROM app.mfa_challenges WHERE user_id = $1", [req.user.id]);
+      await pool.query(
+        `INSERT INTO app.audit_log (user_id, action, resource_type, resource_id, ip_address)
+         VALUES ($1, 'mfa_disabled', 'user', $2, $3)`,
+        [req.user.id, req.user.id, req.ip]
+      );
+      res.json({ ok: true, mfa_enabled: false });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -777,16 +1047,31 @@ export function createAuthRouter(pool) {
   });
 
   // ── Google OAuth 2.0 ─────────────────────────────────────────────────────────
+  // Accept BOTH our native env names and the NextAuth-style names (AUTH_GOOGLE_ID /
+  // AUTH_AZURE_AD_*) so a single .env works regardless of which convention is used.
 
-  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-  const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "http://localhost:3001/api/auth/google/callback";
-  const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+  const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.AUTH_GOOGLE_ID;
+  const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || process.env.AUTH_GOOGLE_SECRET;
+
+  // The post-login app URL and the OAuth callback URL are derived at REQUEST time
+  // so the same build works on localhost and on the production domain (meritma.com)
+  // with no per-env redirect-uri config. Explicit *_REDIRECT_URI / FRONTEND_URL
+  // env vars still override when set.
+  const frontendUrl = () =>
+    (process.env.FRONTEND_URL || process.env.APP_BASE_URL || process.env.NEXTAUTH_URL || "http://localhost:5173")
+      .replace(/\/$/, "");
+  const callbackUrl = (req, provider) => {
+    const explicit = process.env[`${provider.toUpperCase()}_REDIRECT_URI`];
+    if (explicit) return explicit;
+    const base = (process.env.APP_BASE_URL || process.env.NEXTAUTH_URL || `${req.protocol}://${req.get("host")}`)
+      .replace(/\/$/, "");
+    return `${base}/api/auth/${provider}/callback`;
+  };
 
   // GET /api/auth/google - redirect to consent screen
   router.get("/google", (req, res) => {
     if (!GOOGLE_CLIENT_ID) {
-      return res.redirect(`${FRONTEND_URL}/login?error=google_not_configured`);
+      return res.redirect(`${frontendUrl()}/login?error=google_not_configured`);
     }
     const state = crypto.randomBytes(16).toString("hex");
     res.cookie("oauth_state", state, {
@@ -795,7 +1080,7 @@ export function createAuthRouter(pool) {
     });
     const params = new URLSearchParams({
       client_id: GOOGLE_CLIENT_ID,
-      redirect_uri: GOOGLE_REDIRECT_URI,
+      redirect_uri: callbackUrl(req, "google"),
       response_type: "code",
       scope: "openid email profile",
       access_type: "offline",
@@ -809,11 +1094,11 @@ export function createAuthRouter(pool) {
   router.get("/google/callback", async (req, res) => {
     const { code, state, error: oauthError } = req.query;
     if (oauthError || !code) {
-      return res.redirect(`${FRONTEND_URL}/login?error=google_cancelled`);
+      return res.redirect(`${frontendUrl()}/login?error=google_cancelled`);
     }
     // CSRF: the state must match the cookie set when the flow started.
     if (!state || state !== req.cookies?.oauth_state) {
-      return res.redirect(`${FRONTEND_URL}/login?error=oauth_state`);
+      return res.redirect(`${frontendUrl()}/login?error=oauth_state`);
     }
     res.clearCookie("oauth_state");
 
@@ -825,13 +1110,13 @@ export function createAuthRouter(pool) {
           code,
           client_id: GOOGLE_CLIENT_ID,
           client_secret: GOOGLE_CLIENT_SECRET,
-          redirect_uri: GOOGLE_REDIRECT_URI,
+          redirect_uri: callbackUrl(req, "google"),
           grant_type: "authorization_code",
         }),
       });
       const tokens = await tokenRes.json();
       if (tokens.error) {
-        return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed`);
+        return res.redirect(`${frontendUrl()}/login?error=oauth_failed`);
       }
 
       const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
@@ -839,7 +1124,7 @@ export function createAuthRouter(pool) {
       });
       const gUser = await profileRes.json();
       if (!gUser.email) {
-        return res.redirect(`${FRONTEND_URL}/login?error=google_no_email`);
+        return res.redirect(`${frontendUrl()}/login?error=google_no_email`);
       }
 
       const userId = await loginOrProvisionOAuthUser(pool, {
@@ -852,10 +1137,10 @@ export function createAuthRouter(pool) {
 
       const jwtToken = createToken({ id: userId, email: gUser.email });
       setAuthCookie(res, jwtToken);
-      res.redirect(`${FRONTEND_URL}/`);
+      res.redirect(`${frontendUrl()}/`);
     } catch (err) {
       console.error("Google OAuth error:", err.message);
-      res.redirect(`${FRONTEND_URL}/login?error=server_error`);
+      res.redirect(`${frontendUrl()}/login?error=server_error`);
     }
   });
 
@@ -866,17 +1151,17 @@ export function createAuthRouter(pool) {
 
   // ── Microsoft OAuth 2.0 ──────────────────────────────────────────────────────
 
-  const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID;
-  const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET;
-  const MICROSOFT_REDIRECT_URI = process.env.MICROSOFT_REDIRECT_URI || "http://localhost:3001/api/auth/microsoft/callback";
-  // "common" allows both work/school (Azure AD) and personal Microsoft accounts
-  const MICROSOFT_TENANT = process.env.MICROSOFT_TENANT || "common";
+  const MICROSOFT_CLIENT_ID = process.env.MICROSOFT_CLIENT_ID || process.env.AUTH_AZURE_AD_CLIENT_ID;
+  const MICROSOFT_CLIENT_SECRET = process.env.MICROSOFT_CLIENT_SECRET || process.env.AUTH_AZURE_AD_CLIENT_SECRET;
+  // A specific tenant id locks sign-in to that org. "common" allows both
+  // work/school (Azure AD) and personal Microsoft accounts.
+  const MICROSOFT_TENANT = process.env.MICROSOFT_TENANT || process.env.AUTH_AZURE_AD_TENANT_ID || "common";
   const MS_AUTHORITY = `https://login.microsoftonline.com/${MICROSOFT_TENANT}/oauth2/v2.0`;
 
   // GET /api/auth/microsoft - redirect to consent screen
   router.get("/microsoft", (req, res) => {
     if (!MICROSOFT_CLIENT_ID) {
-      return res.redirect(`${FRONTEND_URL}/login?error=microsoft_not_configured`);
+      return res.redirect(`${frontendUrl()}/login?error=microsoft_not_configured`);
     }
     const state = crypto.randomBytes(16).toString("hex");
     res.cookie("oauth_state", state, {
@@ -885,7 +1170,7 @@ export function createAuthRouter(pool) {
     });
     const params = new URLSearchParams({
       client_id: MICROSOFT_CLIENT_ID,
-      redirect_uri: MICROSOFT_REDIRECT_URI,
+      redirect_uri: callbackUrl(req, "microsoft"),
       response_type: "code",
       response_mode: "query",
       scope: "openid email profile User.Read",
@@ -899,10 +1184,10 @@ export function createAuthRouter(pool) {
   router.get("/microsoft/callback", async (req, res) => {
     const { code, state, error: oauthError } = req.query;
     if (oauthError || !code) {
-      return res.redirect(`${FRONTEND_URL}/login?error=microsoft_cancelled`);
+      return res.redirect(`${frontendUrl()}/login?error=microsoft_cancelled`);
     }
     if (!state || state !== req.cookies?.oauth_state) {
-      return res.redirect(`${FRONTEND_URL}/login?error=oauth_state`);
+      return res.redirect(`${frontendUrl()}/login?error=oauth_state`);
     }
     res.clearCookie("oauth_state");
 
@@ -914,14 +1199,14 @@ export function createAuthRouter(pool) {
           code,
           client_id: MICROSOFT_CLIENT_ID,
           client_secret: MICROSOFT_CLIENT_SECRET,
-          redirect_uri: MICROSOFT_REDIRECT_URI,
+          redirect_uri: callbackUrl(req, "microsoft"),
           grant_type: "authorization_code",
           scope: "openid email profile User.Read",
         }),
       });
       const tokens = await tokenRes.json();
       if (tokens.error) {
-        return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed`);
+        return res.redirect(`${frontendUrl()}/login?error=oauth_failed`);
       }
 
       const profileRes = await fetch("https://graph.microsoft.com/v1.0/me", {
@@ -930,7 +1215,7 @@ export function createAuthRouter(pool) {
       const msUser = await profileRes.json();
       const email = msUser.mail || msUser.userPrincipalName;
       if (!email) {
-        return res.redirect(`${FRONTEND_URL}/login?error=microsoft_no_email`);
+        return res.redirect(`${frontendUrl()}/login?error=microsoft_no_email`);
       }
 
       const userId = await loginOrProvisionOAuthUser(pool, {
@@ -942,10 +1227,10 @@ export function createAuthRouter(pool) {
 
       const jwtToken = createToken({ id: userId, email });
       setAuthCookie(res, jwtToken);
-      res.redirect(`${FRONTEND_URL}/`);
+      res.redirect(`${frontendUrl()}/`);
     } catch (err) {
       console.error("Microsoft OAuth error:", err.message);
-      res.redirect(`${FRONTEND_URL}/login?error=server_error`);
+      res.redirect(`${frontendUrl()}/login?error=server_error`);
     }
   });
 

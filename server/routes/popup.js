@@ -5,6 +5,28 @@ import { getInteractionServiceCompanyId } from "../lib/interactionService.js";
 
 const INTERACTION_SERVICE_URL = process.env.INTERACTION_SERVICE_URL || "http://localhost:8080";
 
+// Real-time identification: when a popup email becomes/links a member and we know
+// the visitor's anonymous id, write the anonymous_id identity link immediately and
+// flag the anonymous profile - no waiting for the next GA sync + mapping DAG.
+// Idempotent (the unique identity index dedups); one member can own many apids.
+async function linkVisitorToMember(pool, companyId, memberId, visitorId, sourceId) {
+  const vid = String(visitorId || "").trim();
+  if (!memberId || !vid || vid === "(not set)" || vid.length <= 6) return;
+  await pool.query(
+    `INSERT INTO app.profile_identities
+       (company_id, member_id, source, source_id, identity_type, identity_value, is_primary, metadata)
+     VALUES ($1, $2, 'popup', $3, 'anonymous_id', $4, false, jsonb_build_object('match_method', 'popup'))
+     ON CONFLICT (company_id, identity_type, LOWER(identity_value)) DO NOTHING`,
+    [companyId, memberId, sourceId || null, vid]
+  );
+  await pool.query(
+    `UPDATE app.anonymous_profiles
+     SET resolved_member_id = $2, resolved_at = NOW()
+     WHERE company_id = $1 AND visitor_id = $3 AND resolved_member_id IS DISTINCT FROM $2`,
+    [companyId, memberId, vid]
+  );
+}
+
 // Resolve a segment's filter_criteria into SQL WHERE parts (parameterized)
 function buildSegmentWhere(filterCriteria, segmentType) {
   const parts = [];
@@ -686,6 +708,9 @@ export function createPopupRouter(pool) {
           [existing.member_id, JSON.stringify(lineage), id]
         );
 
+        // Real-time stitch: this visitor is now a known member.
+        await linkVisitorToMember(pool, cid, existing.member_id, emailRecord.visitor_id, emailRecord.popup_ref);
+
         return res.json({
           action:     "linked",
           profile_id: existing.member_id,
@@ -726,6 +751,9 @@ export function createPopupRouter(pool) {
          WHERE id = $3`,
         [newMemberId || null, JSON.stringify(lineage), id]
       );
+
+      // Real-time stitch: link this new lead to its anonymous visitor id.
+      await linkVisitorToMember(pool, cid, newMemberId, emailRecord.visitor_id, emailRecord.popup_ref);
 
       return res.json({
         action:     "created",

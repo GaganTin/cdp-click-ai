@@ -79,12 +79,31 @@ export async function sendBatch(recipients, campaignPayload, batchSize = 50, del
 // ── Transactional auth emails ───────────────────────────────────────────────
 // Reuse the same Resend transport (simulated when RESEND_API_KEY is unset).
 // Resolved at call time for the same dotenv-timing reason as the sender above.
-const appUrl = () => (process.env.APP_BASE_URL || process.env.CDP_ENDPOINT || "http://localhost:5173").replace(/\/$/, "");
+const appUrl = () => (process.env.APP_BASE_URL || process.env.NEXTAUTH_URL || process.env.CDP_ENDPOINT || "http://localhost:5173").replace(/\/$/, "");
+
+// Transactional auth mail should come from the VERIFIED domain (meritma.com),
+// NOT the EDM campaign sender (which may be a shared resend.dev address). Falls
+// back to the EDM sender so dev keeps working if AUTH_FROM_EMAIL is unset.
+const authFromEmail = () => process.env.AUTH_FROM_EMAIL || defaultFromEmail();
+const authFromName  = () => process.env.AUTH_FROM_NAME  || defaultFromName() || "Meritma";
+const authSender = () => ({ fromEmail: authFromEmail(), fromName: authFromName() });
+
+// A reusable 6-digit-code email body so every code email (sign-up, login MFA)
+// looks identical.
+function codeEmailHtml({ heading, intro, code, ttl }) {
+  return `<p>${heading}</p>
+          ${intro ? `<p>${intro}</p>` : ""}
+          <p>Your code is:</p>
+          <p style="font-size:28px;font-weight:700;letter-spacing:8px;margin:12px 0">${code}</p>
+          <p>This code expires in ${ttl}.</p>
+          <p>If you didn't request this, you can safely ignore this email.</p>`;
+}
 
 export async function sendPasswordResetEmail(to, token) {
   const link = `${appUrl()}/reset-password?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
+    ...authSender(),
     subject: "Reset your Meritma password",
     html: `<p>We received a request to reset your password.</p>
            <p><a href="${link}">Reset your password</a> - this link is valid for 1 hour.</p>
@@ -96,6 +115,7 @@ export async function sendVerificationEmail(to, token) {
   const link = `${appUrl()}/verify-email?token=${encodeURIComponent(token)}`;
   return sendEmail({
     to,
+    ...authSender(),
     subject: "Verify your Meritma email",
     html: `<p>Welcome to Meritma!</p>
            <p><a href="${link}">Verify your email address</a> - this link is valid for 24 hours.</p>`,
@@ -107,12 +127,33 @@ export async function sendVerificationEmail(to, token) {
 export async function sendVerificationCodeEmail(to, code) {
   return sendEmail({
     to,
+    ...authSender(),
     subject: "Your Meritma verification code",
-    html: `<p>Welcome to Meritma!</p>
-           <p>Your verification code is:</p>
-           <p style="font-size:28px;font-weight:700;letter-spacing:8px;margin:12px 0">${code}</p>
-           <p>Enter it on the verification page to finish creating your account. This code expires in 15 minutes.</p>
-           <p>If you didn't request this, you can safely ignore this email.</p>`,
+    html: codeEmailHtml({
+      heading: "Welcome to Meritma!",
+      intro: "Enter this code on the verification page to finish creating your account.",
+      code,
+      ttl: "15 minutes",
+    }),
+  });
+}
+
+// Two-factor login: a 6-digit code emailed during sign-in when the user has MFA
+// enabled, OR when confirming they can receive codes while turning MFA on.
+export async function sendLoginCodeEmail(to, code, { purpose = "login" } = {}) {
+  const enabling = purpose === "enable";
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: enabling ? "Confirm two-factor authentication" : "Your Meritma sign-in code",
+    html: codeEmailHtml({
+      heading: enabling ? "Turn on two-factor authentication" : "Sign-in verification",
+      intro: enabling
+        ? "Enter this code to confirm and turn on two-factor authentication."
+        : "Enter this code to finish signing in to your account.",
+      code,
+      ttl: "10 minutes",
+    }),
   });
 }
 
