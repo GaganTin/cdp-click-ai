@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { authenticate, requirePlatformAdmin, createToken, setAuthCookie } from "../middleware/auth.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.js";
 import { clearPricingCache } from "../lib/aiUsage.js";
+import { blockEmails } from "../lib/blockedEmails.js";
 
 // ============================================================================
 //  Platform-owner ("Studio") API. Everything here is PLATFORM-scoped, not
@@ -283,10 +284,16 @@ export function createAdminRouter(pool) {
       if (own[0]?.account_id === req.params.id) {
         return res.status(400).json({ error: "You can't delete your own account" });
       }
+      // Block every email in the account before the cascade removes the users, so
+      // a deleted account can never be re-created (incl. via OAuth re-provision).
+      const { rows: emailRows } = await pool.query(
+        "SELECT email FROM app.users WHERE account_id = $1", [req.params.id]
+      );
       const { rows } = await pool.query(
         "DELETE FROM app.accounts WHERE id = $1 RETURNING id, name, slug", [req.params.id]
       );
       if (!rows.length) return res.status(404).json({ error: "Account not found" });
+      await blockEmails(pool, emailRows.map((r) => r.email), { accountId: rows[0].id });
       await audit(null, req.user.id, "delete", "account", rows[0].id,
         { name: rows[0].name, slug: rows[0].slug });
       res.json({ ok: true, deleted: rows[0] });
@@ -559,6 +566,48 @@ export function createAdminRouter(pool) {
   router.delete("/owner-invites/:email", async (req, res) => {
     try {
       await pool.query("DELETE FROM app.platform_owner_invites WHERE email = LOWER($1)", [req.params.email]);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Blocked emails ────────────────────────────────────────────────────────
+  // Emails locked out of sign-up/sign-in (auto-added when an account is deleted).
+  // Platform owners can block/unblock directly from Studio.
+  router.get("/blocked-emails", async (_req, res) => {
+    try {
+      const { rows } = await pool.query(
+        "SELECT email, reason, account_id, blocked_at FROM app.blocked_emails ORDER BY blocked_at DESC"
+      );
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post("/blocked-emails", async (req, res) => {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim() : "";
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "A valid email is required" });
+    }
+    try {
+      const [blocked] = await blockEmails(pool, [email], { reason: "admin_blocked" });
+      await audit(null, req.user.id, "block", "email", blocked, { email: blocked });
+      res.status(201).json({ ok: true, email: blocked });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.delete("/blocked-emails/:email", async (req, res) => {
+    const email = String(req.params.email).trim().toLowerCase();
+    try {
+      const { rowCount } = await pool.query(
+        "DELETE FROM app.blocked_emails WHERE email = $1", [email]
+      );
+      if (!rowCount) return res.status(404).json({ error: "Email is not blocked" });
+      await audit(null, req.user.id, "unblock", "email", email, { email });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });

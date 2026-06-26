@@ -4,64 +4,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { parseChartConfig } from "@/lib/utils";
 import { CHART_SIZES, normalizeSize, sizeMeta } from "@/lib/chartSizes";
+import { useDashboardLayout } from "@/lib/useDashboardLayout";
 import MiniChart from "./MiniChart";
-
-const TABS_KEY = "dashboard_tabs_v1";
 
 // Pixel heights for this (narrow) preview panel; the column span comes from the
 // shared size model so "S"/"L" behave the same as on the full Dashboard.
 const PREVIEW_HEIGHTS = { small: "h-48", large: "h-72" };
 
-function loadState() {
-  try { return JSON.parse(localStorage.getItem(TABS_KEY) || "null"); } catch { return null; }
-}
-function saveState(state) {
-  try { localStorage.setItem(TABS_KEY, JSON.stringify(state)); } catch {}
-}
-
 export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedCharts = [], onEditRequest }) {
-  const [tabs, setTabs] = useState(() => {
-    const s = loadState();
-    return s?.tabs?.length ? s.tabs : [{ id: "main", name: "Overview" }];
-  });
-  const [tabAssignments, setTabAssignments] = useState(() => {
-    const s = loadState();
-    return s?.tabAssignments || { main: null };
-  });
-  const [chartSizes, setChartSizes] = useState(() => {
-    const s = loadState();
-    return s?.chartSizes || {};
-  });
-  const [activeTab, setActiveTab] = useState(() => {
-    const s = loadState();
-    return s?.tabs?.[0]?.id || "main";
-  });
+  // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
+  // are shared with the Dashboard page — nothing is persisted in localStorage.
+  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
+
+  const [activeTab, setActiveTab] = useState("main");
   const [editingTab, setEditingTab] = useState(null);
   const [editingName, setEditingName] = useState("");
 
-  // Persist to shared localStorage (same key as Dashboard.jsx)
+  // Keep the active tab valid once the persisted tabs load.
   useEffect(() => {
-    saveState({ tabs, tabAssignments, chartSizes });
-  }, [tabs, tabAssignments, chartSizes]);
+    if (tabs.length && !tabs.some(t => t.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
-  // When a new chart is pinned, add it to the active tab's assignment
+  // When a new chart is pinned, add it only to the currently active tab.
   const lastPinnedRef = useRef(null);
   useEffect(() => {
     if (!pinnedChart || pinnedChart === lastPinnedRef.current) return;
     lastPinnedRef.current = pinnedChart;
     const chartId = pinnedChart.id;
     setTabAssignments(prev => {
-      const current = prev[activeTab];
-      if (current === null) return prev; // "all" tab - already shown
+      const current = prev[activeTab] || [];
       if (current.includes(chartId)) return prev;
       return { ...prev, [activeTab]: [...current, chartId] };
     });
   }, [pinnedChart, activeTab]);
 
-  const activeAssignment = tabAssignments[activeTab];
-  const activeCharts = activeAssignment === null
-    ? pinnedCharts
-    : pinnedCharts.filter(c => (activeAssignment || []).includes(c.id));
+  const activeCharts = pinnedCharts.filter(c => (tabAssignments[activeTab] || []).includes(c.id));
 
   const addTab = () => {
     const id = `tab-${Date.now()}`;
@@ -86,11 +65,10 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
   };
 
   const removeChartFromTab = (chartId) => {
-    setTabAssignments(prev => {
-      const current = prev[activeTab];
-      if (current === null) return prev;
-      return { ...prev, [activeTab]: current.filter(id => id !== chartId) };
-    });
+    setTabAssignments(prev => ({
+      ...prev,
+      [activeTab]: (prev[activeTab] || []).filter(id => id !== chartId),
+    }));
   };
 
   const setChartSize = (chartId, size) => {
@@ -99,11 +77,11 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
 
   const moveChartToTab = (chartId, toTabId) => {
     setTabAssignments(prev => {
-      const from = prev[activeTab];
+      const from = prev[activeTab] || [];
       const to = prev[toTabId] || [];
       return {
         ...prev,
-        [activeTab]: from === null ? null : from.filter(id => id !== chartId),
+        [activeTab]: from.filter(id => id !== chartId),
         [toTabId]: to.includes(chartId) ? to : [...to, chartId],
       };
     });

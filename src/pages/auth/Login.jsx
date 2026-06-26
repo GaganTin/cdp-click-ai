@@ -15,6 +15,7 @@ const ERROR_MESSAGES = {
   microsoft_not_configured: "Microsoft sign-in is not available right now.",
   microsoft_no_email: "Couldn't retrieve your email from Microsoft. Please try again.",
   server_error: "Something went wrong. Please try again.",
+  account_deleted: "This account has been deleted and its email can no longer be used to sign in. Please use a different email.",
 };
 
 // Codes that mean the login challenge is gone - send the user back to sign in.

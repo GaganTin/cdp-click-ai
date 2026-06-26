@@ -5,6 +5,7 @@ import { createToken, setAuthCookie, clearAuthCookie, authenticate } from "../mi
 import { sendPasswordResetEmail, sendVerificationEmail, sendVerificationCodeEmail, sendLoginCodeEmail } from "../services/email.js";
 import { registerCompanyWithInteractionService } from "../lib/interactionService.js";
 import { slugify, uniqueSlug } from "../lib/slug.js";
+import { isEmailBlocked, BlockedEmailError } from "../lib/blockedEmails.js";
 
 // Simple in-memory per-IP rate limiter for sensitive auth endpoints (brute-force /
 // enumeration protection). Resets on restart; for multi-instance use a shared store.
@@ -24,6 +25,18 @@ function rateLimit({ windowMs = 15 * 60 * 1000, max = 10 } = {}) {
 const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 // 6-digit numeric code, zero-padded (cryptographically random).
 const genCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+
+// Password policy (enforced everywhere a password is set or changed: register,
+// reset, change). Returns an error string, or null when the password is valid.
+// Keep this in sync with the client-side hint in src/lib/password.js.
+function passwordError(pw) {
+  const s = String(pw ?? "");
+  if (s.length < 8)              return "Password must be at least 8 characters";
+  if (!/[A-Z]/.test(s))          return "Password must include at least one capital letter";
+  if (!/[0-9]/.test(s))          return "Password must include at least one number";
+  if (!/[^A-Za-z0-9]/.test(s))   return "Password must include at least one symbol";
+  return null;
+}
 
 // app.companies.capsuite_ref is GLOBALLY unique and is the key the external ETL
 // uses to map a workspace → company_id. Generate a readable, underscore-cased
@@ -141,6 +154,12 @@ async function provisionUserWithCompany(client, {
 // preferences + interaction-service registration - so every sign-up path is
 // identical. Returns the user id.
 async function loginOrProvisionOAuthUser(pool, { email, full_name, avatar_url = null, provider, ip = null }) {
+  // A deleted-account email can never come back in - even though the OAuth
+  // provider still has consent and would otherwise silently re-provision it.
+  if (await isEmailBlocked(pool, email)) {
+    throw new BlockedEmailError();
+  }
+
   const { rows: existing } = await pool.query(
     "SELECT id FROM app.users WHERE LOWER(email) = LOWER($1)",
     [email]
@@ -224,8 +243,10 @@ export function createAuthRouter(pool) {
     if (!email || !password || !full_name || !company_name) {
       return res.status(400).json({ error: "email, password, full_name, company_name are required" });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
+    const pwErr = passwordError(password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+    if (await isEmailBlocked(pool, email)) {
+      return res.status(403).json({ error: new BlockedEmailError().message, code: "account_deleted" });
     }
 
     const client = await pool.connect();
@@ -308,10 +329,12 @@ export function createAuthRouter(pool) {
     if (!email || !password || !full_name || !company_name) {
       return res.status(400).json({ error: "email, password, full_name, company_name are required" });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
-    }
+    const pwErr = passwordError(password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
     try {
+      if (await isEmailBlocked(pool, email)) {
+        return res.status(403).json({ error: new BlockedEmailError().message, code: "account_deleted" });
+      }
       // Reject if a real account already exists (the pending table is separate).
       const { rows: existing } = await pool.query(
         "SELECT id FROM app.users WHERE LOWER(email) = LOWER($1)",
@@ -360,6 +383,9 @@ export function createAuthRouter(pool) {
     const { email, code } = req.body;
     if (!email || !code) return res.status(400).json({ error: "email and code are required" });
     const lower = String(email).toLowerCase();
+    if (await isEmailBlocked(pool, lower)) {
+      return res.status(403).json({ error: new BlockedEmailError().message, code: "account_deleted" });
+    }
 
     const client = await pool.connect();
     try {
@@ -476,6 +502,9 @@ export function createAuthRouter(pool) {
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: "email and password are required" });
+    }
+    if (await isEmailBlocked(pool, email)) {
+      return res.status(403).json({ error: new BlockedEmailError().message, code: "account_deleted" });
     }
 
     try {
@@ -736,9 +765,8 @@ export function createAuthRouter(pool) {
     if (!current_password || !new_password) {
       return res.status(400).json({ error: "current_password and new_password are required" });
     }
-    if (new_password.length < 8) {
-      return res.status(400).json({ error: "New password must be at least 8 characters" });
-    }
+    const pwErr = passwordError(new_password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
 
     try {
       const { rows } = await pool.query(
@@ -1020,9 +1048,8 @@ export function createAuthRouter(pool) {
     if (!token || !new_password) {
       return res.status(400).json({ error: "token and new_password are required" });
     }
-    if (new_password.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
-    }
+    const pwErr = passwordError(new_password);
+    if (pwErr) return res.status(400).json({ error: pwErr });
 
     try {
       const token_hash = crypto.createHash("sha256").update(token).digest("hex");
@@ -1145,6 +1172,9 @@ export function createAuthRouter(pool) {
       setAuthCookie(res, jwtToken);
       res.redirect(`${frontendUrl()}/`);
     } catch (err) {
+      if (err.code === "account_deleted") {
+        return res.redirect(`${frontendUrl()}/login?error=account_deleted`);
+      }
       console.error("Google OAuth error:", err.message);
       res.redirect(`${frontendUrl()}/login?error=server_error`);
     }
@@ -1235,6 +1265,9 @@ export function createAuthRouter(pool) {
       setAuthCookie(res, jwtToken);
       res.redirect(`${frontendUrl()}/`);
     } catch (err) {
+      if (err.code === "account_deleted") {
+        return res.redirect(`${frontendUrl()}/login?error=account_deleted`);
+      }
       console.error("Microsoft OAuth error:", err.message);
       res.redirect(`${frontendUrl()}/login?error=server_error`);
     }

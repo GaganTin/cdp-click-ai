@@ -199,6 +199,20 @@ async function initDb() {
   } catch (e) {
     console.error("app.companies not found - apply server/sql/* first:", e.message);
   }
+
+  // Blocklist of emails from deleted accounts (no FK so it survives the account
+  // cascade). Ensured here so the protection works without a manual migration.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app.blocked_emails (
+        email      TEXT        PRIMARY KEY,
+        reason     TEXT        NOT NULL DEFAULT 'account_deleted',
+        account_id UUID,
+        blocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+  } catch (e) {
+    console.error("could not ensure app.blocked_emails:", e.message);
+  }
 }
 
 // Ingests the synced commerce members (commerce.customer - Shopify today,

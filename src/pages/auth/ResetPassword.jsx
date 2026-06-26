@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { appClient } from "@/api/appClient";
 import { toast } from "sonner";
 import { Eye, EyeOff, CheckCircle } from "lucide-react";
+import { passwordError, PASSWORD_HINT } from "@/lib/password";
 
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -20,8 +21,9 @@ export default function ResetPassword() {
       toast.error("Passwords do not match");
       return;
     }
-    if (form.new_password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    const pwErr = passwordError(form.new_password);
+    if (pwErr) {
+      toast.error(pwErr);
       return;
     }
     if (!token) {
@@ -86,7 +88,7 @@ export default function ResetPassword() {
                 value={form.new_password}
                 onChange={e => setForm(f => ({ ...f, new_password: e.target.value }))}
                 className="w-full px-3 py-2 pr-10 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Min 8 characters"
+                placeholder="Create a strong password"
               />
               <button
                 type="button"
@@ -96,6 +98,7 @@ export default function ResetPassword() {
                 {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">{PASSWORD_HINT}</p>
           </div>
 
           <div>

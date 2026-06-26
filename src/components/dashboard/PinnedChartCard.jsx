@@ -78,7 +78,7 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
           )}
           <Button
             variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            title="Remove chart" onClick={() => onRemove?.(chart)}
+            title="Remove from this tab" onClick={() => onRemove?.(chart)}
           >
             <X className="w-3.5 h-3.5" />
           </Button>

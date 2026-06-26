@@ -6,11 +6,12 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
 } from "recharts";
-import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import TableToolbar from "@/components/ui/TableToolbar";
+import { KpiTile } from "@/components/analytics/AnalyticsKit";
 
 const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#ccc", "#e0e0e0"];
 
@@ -245,21 +246,6 @@ function ChartEditDialog({ chart, onSave, onClose }) {
   );
 }
 
-// ── Delta badge ───────────────────────────────────────────────────────────────
-// Up-arrow + green for a positive change ('+'), down-arrow + red for a negative
-// change ('-'), based purely on the direction of the change.
-function Delta({ curr, prev }) {
-  if (prev == null || curr == null || Number(prev) === 0) return null;
-  const pct = ((Number(curr) - Number(prev)) / Math.abs(Number(prev))) * 100;
-  const positive = pct >= 0;
-  return (
-    <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium ${positive ? "text-green-600" : "text-red-500"}`}>
-      {positive ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-      {positive ? "+" : "-"}{Math.abs(pct).toFixed(1)}%
-    </span>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 export default function UTMAnalyticsPanel() {
   const now = new Date();
@@ -382,11 +368,11 @@ export default function UTMAnalyticsPanel() {
   const fmtPct = (v) => v != null ? `${(Number(v) * 100).toFixed(1)}%` : "-";
 
   const KPI_DEFS = [
-    { label: "Sessions",       cur: curKpis?.total_sessions,      prev: prevKpis?.total_sessions,      fmt: fmt    },
-    { label: "Active Users",   cur: curKpis?.total_users,         prev: prevKpis?.total_users,         fmt: fmt    },
-    { label: "New Users",      cur: curKpis?.total_new_users,     prev: prevKpis?.total_new_users,     fmt: fmt    },
-    { label: "Avg Bounce",     cur: curKpis?.avg_bounce_rate,     prev: prevKpis?.avg_bounce_rate,     fmt: fmtPct },
-    { label: "Avg Engagement", cur: curKpis?.avg_engagement_rate, prev: prevKpis?.avg_engagement_rate, fmt: fmtPct },
+    { label: "Sessions",       cur: curKpis?.total_sessions,      prev: prevKpis?.total_sessions,      fmt: fmt,    icon: Activity, isRate: false },
+    { label: "Active Users",   cur: curKpis?.total_users,         prev: prevKpis?.total_users,         fmt: fmt,    icon: Users,    isRate: false },
+    { label: "New Users",      cur: curKpis?.total_new_users,     prev: prevKpis?.total_new_users,     fmt: fmt,    icon: UserPlus, isRate: false },
+    { label: "Avg Bounce",     cur: curKpis?.avg_bounce_rate,     prev: prevKpis?.avg_bounce_rate,     fmt: fmtPct, icon: LogOut,   isRate: true  },
+    { label: "Avg Engagement", cur: curKpis?.avg_engagement_rate, prev: prevKpis?.avg_engagement_rate, fmt: fmtPct, icon: Zap,      isRate: true  },
   ];
 
   return (
@@ -501,22 +487,21 @@ export default function UTMAnalyticsPanel() {
         </div>
       )}
 
-      {/* ── KPI cards ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-5 gap-4">
+      {/* ── KPI cards (shared AnalyticsKit) ────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
         {KPI_DEFS.map(kpi => (
-          <div key={kpi.label} className="border border-border rounded-lg p-4 text-center">
-            {loading
-              ? <div className="h-8 w-20 bg-secondary animate-pulse rounded mx-auto mb-2" />
-              : <p className="text-2xl font-semibold font-heading">{kpi.fmt(kpi.cur)}</p>
-            }
-            <p className="text-xs text-muted-foreground mt-1">{kpi.label}</p>
-            {compare && !loading && kpi.prev != null && (
-              <div className="mt-1.5 flex flex-col items-center gap-0.5">
-                <p className="text-[10px] text-muted-foreground">prev: {kpi.fmt(kpi.prev)}</p>
-                <Delta curr={kpi.cur} prev={kpi.prev} />
-              </div>
-            )}
-          </div>
+          <KpiTile
+            key={kpi.label}
+            label={kpi.label}
+            icon={kpi.icon}
+            isRate={kpi.isRate}
+            value={loading
+              ? <span className="inline-block h-7 w-16 bg-secondary animate-pulse rounded align-middle" />
+              : kpi.fmt(kpi.cur)}
+            curr={compare && !loading ? kpi.cur : undefined}
+            prev={compare && !loading ? kpi.prev : undefined}
+            prevDisplay={kpi.fmt(kpi.prev)}
+          />
         ))}
       </div>
 

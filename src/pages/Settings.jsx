@@ -6,6 +6,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePlan } from "@/lib/usePlan";
+import { passwordError, PASSWORD_HINT } from "@/lib/password";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -295,7 +296,8 @@ function SecurityTab() {
   const save = async (e) => {
     e.preventDefault();
     if (form.new_password !== form.confirm) { toast.error(t("New passwords do not match")); return; }
-    if (form.new_password.length < 8) { toast.error(t("Password must be at least 8 characters")); return; }
+    const pwErr = passwordError(form.new_password);
+    if (pwErr) { toast.error(t(pwErr)); return; }
     setSaving(true);
     try {
       await appClient.auth.changePassword(form.current_password, form.new_password);
@@ -341,7 +343,7 @@ function SecurityTab() {
               </button>
             </div>
           </Field>
-          <Field label={t("New password")} hint={t("At least 8 characters.")}>
+          <Field label={t("New password")} hint={t(PASSWORD_HINT)}>
             <div className="relative">
               <Input
                 type={showNew ? "text" : "password"}
@@ -390,9 +392,9 @@ function SecurityTab() {
           <ul className="space-y-1.5 text-xs text-muted-foreground">
             {[
               t("At least 8 characters long"),
-              t("Mix of uppercase and lowercase letters"),
-              t("Include numbers or symbols"),
-              t("Avoid personal information"),
+              t("At least one capital letter"),
+              t("At least one number"),
+              t("At least one symbol"),
             ].map(req => (
               <li key={req} className="flex items-start gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
@@ -479,27 +481,17 @@ function TwoFactorCard() {
   // OAuth-only account: explain that 2FA lives with their provider; no toggle.
   if (oauthOnly) {
     return (
-      <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-        <Section
-          title={t("Two-factor authentication")}
-          description={t("Sign-in security for this account is managed by your identity provider.")}
-        >
-          <div className="flex items-start gap-3 rounded-md border border-border p-4">
-            <Shield className="w-5 h-5 text-muted-foreground mt-0.5 flex-shrink-0" />
-            <p className="text-sm text-muted-foreground">
-              {t("You sign in with Google or Microsoft. Two-factor authentication is managed in your Google or Microsoft account settings.")}
-            </p>
-          </div>
-        </Section>
-        <SideCard>
-          <div>
-            <p className="text-sm font-medium mb-2">{t("Why is this here?")}</p>
-            <p className="text-xs text-muted-foreground">
-              {t("Email-based two-factor only applies to password sign-in. Your provider already protects your account with its own 2FA.")}
-            </p>
-          </div>
-        </SideCard>
-      </div>
+      <Section
+        title={t("Two-factor authentication")}
+        description={t("Sign-in security for this account is managed by your identity provider.")}
+      >
+        <div className="flex items-start gap-3 rounded-md border border-border p-4">
+          <Shield className="w-5 h-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+          <p className="text-sm text-muted-foreground">
+            {t("You sign in with Google or Microsoft. Two-factor authentication is managed in your Google or Microsoft account settings.")}
+          </p>
+        </div>
+      </Section>
     );
   }
 

@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   LayoutGrid, CreditCard, ShieldCheck, Search, Building2, Users,
-  TrendingUp, Clock, AlertTriangle, Download, Activity, LifeBuoy, DollarSign, Megaphone,
+  TrendingUp, Clock, AlertTriangle, Download, Activity, LifeBuoy, DollarSign, Megaphone, Ban,
 } from "lucide-react";
 import { fmtDate, fmtRelative, downloadCsv, trialLabel, trialDaysLeft, PlanBadge, StatusPill, fmtCost } from "@/components/studio/helpers.jsx";
 import AccountDetailDrawer from "@/components/studio/AccountDetailDrawer.jsx";
 import PlansTab from "@/components/studio/PlansTab.jsx";
 import OwnersTab from "@/components/studio/OwnersTab.jsx";
+import BlockedEmailsTab from "@/components/studio/BlockedEmailsTab.jsx";
 import AuditTab from "@/components/studio/AuditTab.jsx";
 import SupportTab from "@/components/studio/SupportTab.jsx";
 import AnnouncementsTab from "@/components/studio/AnnouncementsTab.jsx";
@@ -22,6 +23,7 @@ const TABS = [
   { id: "plans",         label: "Plans",         icon: CreditCard },
   { id: "announcements", label: "Announcements", icon: Megaphone },
   { id: "owners",        label: "Owners",        icon: ShieldCheck },
+  { id: "blocked",       label: "Blocked",       icon: Ban },
   { id: "support",       label: "Support",       icon: LifeBuoy },
   { id: "activity",      label: "Activity",      icon: Activity },
 ];
@@ -246,6 +248,7 @@ export default function Studio() {
         {activeTab === "plans"    && <PlansTab />}
         {activeTab === "announcements" && <AnnouncementsTab />}
         {activeTab === "owners"   && <OwnersTab currentUserId={user?.id} />}
+        {activeTab === "blocked"  && <BlockedEmailsTab />}
         {activeTab === "support"  && <SupportTab />}
         {activeTab === "activity" && <AuditTab />}
       </main>

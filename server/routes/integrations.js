@@ -943,9 +943,9 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
           await notifyCompany(pool, {
             companyId: r.company_id, type: "sync_status",
             title: `${label} daily sync completed`,
-            body: "Your latest data has finished syncing.",
+            body: "Your scheduled daily sync has finished.",
             link: "/integrations",
-            metadata: { integration_type, status: "completed", scheduled: true },
+            metadata: { integration_type, status: "completed", scheduled: true, trigger: "daily" },
             dedupeKey: `daily-sync:${integration_type}:${day}`,
           });
         }
@@ -972,15 +972,17 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
 
         // In-app notification for the sync result (best-effort).
         const label = integrationLabel(integration_type);
+        // A job_id means this was a user-triggered ("manual") sync, as opposed to
+        // the scheduled all-workspace daily run handled above.
         await notifyCompany(pool, {
           companyId: company_id,
           type: "sync_status",
-          title: is_synced ? `${label} sync completed` : `${label} sync failed`,
+          title: is_synced ? `${label} manual sync completed` : `${label} manual sync failed`,
           body: is_synced
-            ? (records_synced != null ? `${Number(records_synced).toLocaleString()} records synced.` : "Your latest data has finished syncing.")
-            : "We couldn't complete the sync. Open Integrations to retry.",
+            ? (records_synced != null ? `${Number(records_synced).toLocaleString()} records synced from your manual sync.` : "Your manually triggered sync has finished.")
+            : "We couldn't complete your manually triggered sync. Open Integrations to retry.",
           link: "/integrations",
-          metadata: { integration_type, status: is_synced ? "completed" : "failed", job_id, records_synced: records_synced ?? null },
+          metadata: { integration_type, status: is_synced ? "completed" : "failed", job_id, records_synced: records_synced ?? null, trigger: "manual" },
         });
       }
 

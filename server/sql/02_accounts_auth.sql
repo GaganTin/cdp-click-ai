@@ -347,6 +347,19 @@ CREATE INDEX audit_log_company_idx  ON app.audit_log(company_id, occurred_at DES
 CREATE INDEX audit_log_account_idx  ON app.audit_log(account_id, occurred_at DESC);
 CREATE INDEX audit_log_resource_idx ON app.audit_log(resource_type, resource_id);
 
+-- ── Blocked emails ──────────────────────────────────────────────────────────
+-- Emails that owned/belonged to a DELETED account. They may never sign up or
+-- sign in again, on any provider (password, Google, Microsoft). Deliberately has
+-- NO foreign key: the row must survive the account-deletion cascade that removes
+-- the original user. Populated by the account-delete paths; checked by register
+-- and OAuth provisioning. Remove a row to let an email be used again.
+CREATE TABLE app.blocked_emails (
+  email      TEXT        PRIMARY KEY,          -- stored lowercased
+  reason     TEXT        NOT NULL DEFAULT 'account_deleted',
+  account_id UUID,                             -- the now-deleted account (no FK)
+  blocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- ── Support tickets (account scoped) ────────────────────────────────────────
 CREATE TABLE app.support_tickets (
   id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

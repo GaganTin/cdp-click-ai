@@ -17,6 +17,16 @@ const TYPE_ICON = {
   new_leads:          UserPlus,
 };
 
+// Sync notifications carry metadata.trigger ("manual" | "daily") so we can tell a
+// user-triggered sync apart from the scheduled daily run. Returns null for others.
+function syncTrigger(n) {
+  if (n.type !== "sync_status") return null;
+  const trig = n.metadata?.trigger;
+  if (trig === "daily" || n.metadata?.scheduled) return "daily";
+  if (trig === "manual") return "manual";
+  return null;
+}
+
 function relativeTime(val) {
   if (!val) return "";
   const diff = Date.now() - new Date(val).getTime();
@@ -140,6 +150,7 @@ export default function NotificationBell({ collapsed = false }) {
               <TooltipProvider delayDuration={250}>
               {notifications.map((n) => {
                 const Icon = TYPE_ICON[n.type] || Bell;
+                const trigger = syncTrigger(n);
                 return (
                   <Tooltip key={n.id}>
                     <TooltipTrigger asChild>
@@ -159,6 +170,11 @@ export default function NotificationBell({ collapsed = false }) {
                     <span className="flex-1 min-w-0">
                       <span className="flex items-center gap-1.5">
                         <span className={cn("text-sm truncate", n.is_read ? "font-medium" : "font-semibold")}>{n.title}</span>
+                        {trigger && (
+                          <span className="flex-shrink-0 rounded border border-border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {trigger === "daily" ? t("Daily") : t("Manual")}
+                          </span>
+                        )}
                         {!n.is_read && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
                       </span>
                       {n.body && <span className="block text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</span>}

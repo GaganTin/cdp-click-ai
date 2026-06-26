@@ -2,22 +2,20 @@ import { useState, useEffect } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil } from "lucide-react";
+import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil, Trash2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useDashboardLayout } from "@/lib/useDashboardLayout";
 import PinnedChartCard from "../components/dashboard/PinnedChartCard";
 import { normalizeSize, sizeMeta, nextSize } from "@/lib/chartSizes";
-
-const TABS_STORAGE_KEY = "dashboard_tabs_v1";
-
-function loadTabState() {
-  try {
-    const raw = localStorage.getItem(TABS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return null;
-}
 
 // Pixel heights for the full-width dashboard grid; column span comes from the
 // shared size model (src/lib/chartSizes.js) so it matches the Dashboard Preview.
@@ -27,39 +25,40 @@ export default function Dashboard() {
   const { t } = usePreferences();
   const queryClient = useQueryClient();
 
-  const [tabs, setTabs] = useState(() => {
-    const s = loadTabState();
-    return s?.tabs?.length ? s.tabs : [{ id: "main", name: "Overview" }];
-  });
-  const [activeTab, setActiveTab] = useState(() => {
-    const s = loadTabState();
-    return s?.tabs?.[0]?.id || "main";
-  });
+  // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
+  // (company-scoped app.settings) via this hook — nothing is stored locally.
+  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
+
+  const [activeTab, setActiveTab] = useState("main");
   const [editingTab, setEditingTab] = useState(null);
   const [editingName, setEditingName] = useState("");
-  const [tabAssignments, setTabAssignments] = useState(() => {
-    const s = loadTabState();
-    return s?.tabAssignments || { main: null };
-  });
-  const [chartSizes, setChartSizes] = useState(() => {
-    const s = loadTabState();
-    return s?.chartSizes || {};
-  });
 
+  // Keep the active tab valid once the persisted tabs load (e.g. if "main" was
+  // renamed/removed in a previous session).
   useEffect(() => {
-    try {
-      localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify({ tabs, tabAssignments, chartSizes }));
-    } catch {}
-  }, [tabs, tabAssignments, chartSizes]);
+    if (tabs.length && !tabs.some(tab => tab.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
   const { data: pinnedCharts = [], isLoading } = useQuery({
     queryKey: ["pinnedCharts"],
     queryFn: () => appClient.entities.PinnedChart.list("-created_date"),
   });
 
+  // Permanently delete a chart from the list (DB) and drop it from every tab.
   const deleteMutation = useMutation({
     mutationFn: (id) => appClient.entities.PinnedChart.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] }),
+    onSuccess: (_data, id) => {
+      setTabAssignments(prev => {
+        const next = {};
+        for (const [k, v] of Object.entries(prev)) {
+          next[k] = Array.isArray(v) ? v.filter(cid => cid !== id) : v;
+        }
+        return next;
+      });
+      queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
+    },
   });
 
   const updateMutation = useMutation({
@@ -102,20 +101,24 @@ export default function Dashboard() {
     });
   };
 
+  // Remove a chart from the current tab's display only — keeps it in the chart
+  // list (DB) and on any other tabs it's assigned to.
+  const removeChartFromTab = (tabId, chartId) => {
+    setTabAssignments(prev => ({
+      ...prev,
+      [tabId]: (prev[tabId] || []).filter(id => id !== chartId),
+    }));
+  };
+
   const cycleSize = (chartId) => {
     setChartSizes(prev => ({ ...prev, [chartId]: nextSize(prev[chartId]) }));
   };
 
-  // Get charts visible in active tab
-  const visibleCharts = (() => {
-    const assignment = tabAssignments[activeTab];
-    if (assignment === null || assignment === undefined) return pinnedCharts; // "all" tab
-    if (assignment.length === 0) return [];
-    return pinnedCharts.filter(c => assignment.includes(c.id));
-  })();
-
-  // Is this the "all" tab?
-  const isAllTab = tabAssignments[activeTab] === null || tabAssignments[activeTab] === undefined;
+  // Charts visible in the active tab — only those explicitly assigned to it.
+  const assignment = tabAssignments[activeTab] || [];
+  const visibleCharts = assignment.length === 0
+    ? []
+    : pinnedCharts.filter(c => assignment.includes(c.id));
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -191,26 +194,56 @@ export default function Dashboard() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
-        {/* Tab management - assign charts to tab */}
-        {!isAllTab && pinnedCharts.length > 0 && (
-          <div className="mb-4 p-3 bg-secondary/40 rounded-lg">
-            <p className="text-xs font-medium mb-2 text-muted-foreground">{t("Add charts to this tab:")}</p>
-            <div className="flex flex-wrap gap-2">
-              {pinnedCharts.map(c => {
-                const assigned = (tabAssignments[activeTab] || []).includes(c.id);
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => toggleChartInTab(activeTab, c.id)}
-                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                      assigned ? "bg-foreground text-background border-foreground" : "border-border text-muted-foreground hover:border-foreground/40"
-                    }`}
-                  >
-                    {c.title}
-                  </button>
-                );
-              })}
-            </div>
+        {/* Tab management - assign charts to this tab (dropdown, shown on every tab) */}
+        {pinnedCharts.length > 0 && (
+          <div className="mb-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+                  <Plus className="w-3.5 h-3.5" />
+                  {t("Add charts to this tab:")}
+                  <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-72">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">
+                  {t("Toggle charts on this tab")}
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <div className="max-h-72 overflow-auto">
+                  {pinnedCharts.map(c => {
+                    const assigned = assignment.includes(c.id);
+                    return (
+                      <div
+                        key={c.id}
+                        className="flex items-center gap-2 px-2 py-1.5 text-sm rounded-sm hover:bg-accent"
+                      >
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                          onClick={() => toggleChartInTab(activeTab, c.id)}
+                        >
+                          <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${
+                            assigned ? "bg-foreground border-foreground text-background" : "border-border"
+                          }`}>
+                            {assigned && <Check className="h-3 w-3" />}
+                          </span>
+                          <span className="truncate">{c.title}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="flex-shrink-0 text-muted-foreground hover:text-destructive"
+                          title={t("Delete chart from list")}
+                          onClick={() => deleteMutation.mutate(c.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         )}
 
@@ -248,7 +281,7 @@ export default function Dashboard() {
                   <PinnedChartCard
                     chart={chart}
                     size={size}
-                    onRemove={(c) => deleteMutation.mutate(c.id)}
+                    onRemove={(c) => removeChartFromTab(activeTab, c.id)}
                     onCycleSize={() => cycleSize(chart.id)}
                     onUpdate={(updated) => updateMutation.mutate({ id: updated.id, data: { title: updated.title, description: updated.description, chart_type: updated.chart_type, chart_config: updated.chart_config } })}
                   />

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate, clearAuthCookie } from "../middleware/auth.js";
+import { blockEmails } from "../lib/blockedEmails.js";
 
 export function createAccountRouter(pool) {
   const router = Router();
@@ -81,17 +82,38 @@ export function createAccountRouter(pool) {
         return res.status(400).json({ error: "The email you typed doesn't match your account email." });
       }
 
-      // Capture sync watermarks (keyed by capsuite_ref, no FK cascade) to clean up
-      // after the row-level cascade below.
-      const { rows: refs } = await pool.query(
-        "SELECT capsuite_ref FROM app.companies WHERE account_id = $1",
-        [ctx.account_id]
-      );
+      // Block + delete atomically so a deleted account can never come back in
+      // (incl. via OAuth, which would otherwise silently re-provision it).
+      const client = await pool.connect();
+      let refs = [];
+      try {
+        await client.query("BEGIN");
+        // Block EVERY email in the account (owner + any other users) before the
+        // cascade removes the user rows. No FK on app.blocked_emails so it survives.
+        const { rows: emailRows } = await client.query(
+          "SELECT email FROM app.users WHERE account_id = $1",
+          [ctx.account_id]
+        );
+        await blockEmails(client, emailRows.map((r) => r.email), { accountId: ctx.account_id });
 
-      // Deleting the account cascades to users, companies (and every
-      // company-scoped row in app.* and the source schemas), members,
-      // integrations, audit_log, support_tickets, etc. via ON DELETE CASCADE.
-      await pool.query("DELETE FROM app.accounts WHERE id = $1", [ctx.account_id]);
+        // Capture sync watermarks (keyed by capsuite_ref, no FK cascade) for the
+        // best-effort cleanup after the row-level cascade.
+        ({ rows: refs } = await client.query(
+          "SELECT capsuite_ref FROM app.companies WHERE account_id = $1",
+          [ctx.account_id]
+        ));
+
+        // Deleting the account cascades to users, companies (and every
+        // company-scoped row in app.* and the source schemas), members,
+        // integrations, audit_log, support_tickets, etc. via ON DELETE CASCADE.
+        await client.query("DELETE FROM app.accounts WHERE id = $1", [ctx.account_id]);
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
       clearAuthCookie(res);
 
       // Best-effort cleanup of capsuite_ref-keyed sync state (no FK cascade).

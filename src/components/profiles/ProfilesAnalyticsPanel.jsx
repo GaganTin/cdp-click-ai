@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 import { useStickyState } from "@/lib/useStickyState";
-import { Users, Ghost, MailCheck, Activity, ShoppingBag, UserPlus, BarChart2 } from "lucide-react";
+import { usePreferences } from "@/lib/PreferencesContext";
+import { Users, Ghost, MailCheck, Activity, ShoppingBag, UserPlus, BarChart2, UserCheck } from "lucide-react";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock,
   DateRangeBar, AnalyticsLoading,
@@ -19,6 +20,41 @@ const DEMO_DIMS = [
 const ENGAGEMENT_ORDER = ["0", "1-2", "3-5", "6-10", "10+"];
 const pct = (num, denom) => (denom > 0 ? ((num / denom) * 100).toFixed(1) : "0.0");
 const pctNum = (num, denom) => (denom > 0 ? (num / denom) * 100 : 0);
+
+// Compact identification funnel: Visitors → Engaged → Identified → Customers → Buyers.
+function IdentificationFunnel() {
+  const { t } = usePreferences();
+  const { data } = useQuery({ queryKey: ["profiles-funnel"], queryFn: () => appClient.profiles.funnel() });
+  if (!data) return null;
+  const steps = [
+    { label: t("Visitors"),   value: data.visitors,   icon: Ghost },
+    { label: t("Engaged"),    value: data.engaged,    icon: Activity },
+    { label: t("Identified"), value: data.identified, icon: UserCheck },
+    { label: t("Customers"),  value: data.customers,  icon: Users },
+    { label: t("Buyers"),     value: data.buyers,     icon: ShoppingBag },
+  ];
+  const max = Math.max(...steps.map(s => Number(s.value) || 0), 1);
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      {steps.map((s, i) => {
+        const Icon = s.icon;
+        const val = Number(s.value) || 0;
+        const prev = i > 0 ? (Number(steps[i - 1].value) || 0) : null;
+        const conv = prev != null && prev > 0 ? Math.round((val / prev) * 100) : null;
+        return (
+          <div key={s.label} className="rounded-lg border border-border bg-card p-3">
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Icon className="w-3.5 h-3.5" /> {s.label}</div>
+            <p className="text-xl font-semibold mt-1">{val.toLocaleString()}</p>
+            <div className="h-1 rounded-full bg-secondary mt-2 overflow-hidden">
+              <div className="h-full bg-foreground/70" style={{ width: `${Math.round((val / max) * 100)}%` }} />
+            </div>
+            {conv != null && <p className="text-[10px] text-muted-foreground mt-1">{conv}% {t("of previous")}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function ProfilesAnalyticsPanel() {
   // Period, compare and demographic-dimension selections persist across refresh.
@@ -67,6 +103,9 @@ export default function ProfilesAnalyticsPanel() {
   return (
     <div className="px-8 py-6 space-y-6">
       {bar}
+
+      {/* Identification funnel: Visitors → Engaged → Identified → Customers → Buyers */}
+      <IdentificationFunnel />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">

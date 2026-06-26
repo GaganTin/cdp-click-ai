@@ -103,16 +103,6 @@ export default function SegmentsAnalyticsPanel() {
     return <div className="px-8 py-6"><AnalyticsLoading /></div>;
   }
 
-  if (!segments.length) {
-    return (
-      <div className="px-8 py-6 flex flex-col items-center text-sm text-muted-foreground py-20">
-        <BarChart2 className="w-10 h-10 mb-3 opacity-20" />
-        <p className="font-medium text-foreground mb-1">No segments yet</p>
-        <p className="text-xs">Create a segment to see analytics here.</p>
-      </div>
-    );
-  }
-
   // KPI metrics for an arbitrary segment list (used for the selected period + compare).
   const kpiOf = (list) => {
     const sized = list.filter((s) => Number(s.estimated_size) > 0);
@@ -159,6 +149,14 @@ export default function SegmentsAnalyticsPanel() {
           curr={compare ? kpi.reach : undefined} prev={compare ? pkpi.reach : undefined} prevDisplay={pkpi.reach.toLocaleString()} />
       </div>
 
+      {segments.length === 0 ? (
+        <div className="text-center py-16 text-sm text-muted-foreground">
+          <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="font-medium text-foreground mb-1">No segments yet</p>
+          <p className="text-xs">Create a segment to see analytics here.</p>
+        </div>
+      ) : (
+        <>
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Segment size distribution" subtitle="Estimated size, top 12" resizable defaultWide
@@ -234,6 +232,8 @@ export default function SegmentsAnalyticsPanel() {
           </table>
         </div>
       </ChartCard>
+        </>
+      )}
     </div>
   );
 }

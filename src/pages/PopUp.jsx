@@ -1340,16 +1340,6 @@ function AnalyticsTab() {
     );
   }
 
-  if (analytics.length === 0) {
-    return (
-      <div className="px-8 py-6 flex flex-col items-center text-sm text-muted-foreground py-20">
-        <BarChart2 className="w-10 h-10 mb-3 opacity-20" />
-        <p className="font-medium text-foreground mb-1">{t("No pop ups yet")}</p>
-        <p className="text-xs">{t("Create a pop-up to see analytics here.")}</p>
-      </div>
-    );
-  }
-
   return (
     <div className="px-8 py-6 space-y-6">
 
@@ -1389,7 +1379,14 @@ function AnalyticsTab() {
           prevDisplay={formatSecs(pAvgEng)} />
       </div>
 
-      {/* Per-popup performance table */}
+      {/* Per-popup performance table (or empty state when there's no pop-up data at all) */}
+      {analytics.length === 0 ? (
+        <div className="text-center py-16 text-sm text-muted-foreground">
+          <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
+          <p className="font-medium text-foreground mb-1">{t("No pop ups yet")}</p>
+          <p className="text-xs">{t("Create a pop-up to see analytics here.")}</p>
+        </div>
+      ) : (
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{t("Per Pop-Up Performance")}</p>
         <TableToolbar
@@ -1487,6 +1484,7 @@ function AnalyticsTab() {
           {t("Emails submitted via pop-up forms are accessible in the Emails Collected tab.")}
         </p>
       </div>
+      )}
     </div>
   );
 }

@@ -166,6 +166,9 @@ export const appClient = {
     inviteOwner:   (email) => request("/admin/owners/invite", { method: "POST", body: JSON.stringify({ email }) }),
     listOwnerInvites: () => request("/admin/owner-invites"),
     cancelOwnerInvite: (email) => request(`/admin/owner-invites/${encodeURIComponent(email)}`, { method: "DELETE" }),
+    listBlockedEmails: () => request("/admin/blocked-emails"),
+    blockEmail:    (email) => request("/admin/blocked-emails", { method: "POST", body: JSON.stringify({ email }) }),
+    unblockEmail:  (email) => request(`/admin/blocked-emails/${encodeURIComponent(email)}`, { method: "DELETE" }),
     listAudit:     (params = {}) => {
       const q = new URLSearchParams(
         Object.entries(params).filter(([, v]) => v != null && v !== "")

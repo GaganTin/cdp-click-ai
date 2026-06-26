@@ -112,13 +112,16 @@ async function markJobCompleted(pool, job, { detail = "Sync completed" } = {}) {
      VALUES ($1,$2,'sync_completed','system',$3)`,
     [job.company_id, job.integration_type, detail]
   );
+  // Job-backed syncs are user-triggered ("manual"); the daily all-workspace run
+  // posts its own "daily sync" notification from the scheduled webhook path.
+  const trigger = job.triggered_by || "manual";
   await notifyCompany(pool, {
     companyId: job.company_id,
     type: "sync_status",
-    title: `${integrationLabel(job.integration_type)} sync completed`,
-    body: "Your latest data has finished syncing.",
+    title: `${integrationLabel(job.integration_type)} manual sync completed`,
+    body: "Your manually triggered sync has finished.",
     link: "/integrations",
-    metadata: { integration_type: job.integration_type, status: "completed", job_id: job.id },
+    metadata: { integration_type: job.integration_type, status: "completed", job_id: job.id, trigger },
   });
 }
 
@@ -142,13 +145,14 @@ async function markJobFailed(pool, job, message) {
      VALUES ($1,$2,'sync_failed','system',$3)`,
     [job.company_id, job.integration_type, message]
   );
+  const trigger = job.triggered_by || "manual";
   await notifyCompany(pool, {
     companyId: job.company_id,
     type: "sync_status",
-    title: `${integrationLabel(job.integration_type)} sync failed`,
-    body: "We couldn't complete the sync. Open Integrations to retry.",
+    title: `${integrationLabel(job.integration_type)} manual sync failed`,
+    body: "We couldn't complete your manually triggered sync. Open Integrations to retry.",
     link: "/integrations",
-    metadata: { integration_type: job.integration_type, status: "failed", job_id: job.id },
+    metadata: { integration_type: job.integration_type, status: "failed", job_id: job.id, trigger },
   });
 }
 

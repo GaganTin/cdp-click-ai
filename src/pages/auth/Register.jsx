@@ -4,12 +4,14 @@ import { appClient } from "@/api/appClient";
 import { toast } from "sonner";
 import { Eye, EyeOff, Check } from "lucide-react";
 import { AuthLayout, GoogleButton, MicrosoftButton, OrDivider } from "@/components/layout/AuthLayout";
+import { passwordError } from "@/lib/password";
 
 function PasswordStrength({ password }) {
   const checks = [
     { label: "At least 8 characters", ok: password.length >= 8 },
-    { label: "Contains a number", ok: /\d/.test(password) },
-    { label: "Contains a letter", ok: /[a-zA-Z]/.test(password) },
+    { label: "A capital letter", ok: /[A-Z]/.test(password) },
+    { label: "A number", ok: /[0-9]/.test(password) },
+    { label: "A symbol", ok: /[^A-Za-z0-9]/.test(password) },
   ];
   if (!password) return null;
   return (
@@ -38,8 +40,9 @@ export default function Register() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (form.password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    const pwErr = passwordError(form.password);
+    if (pwErr) {
+      toast.error(pwErr);
       return;
     }
     if (form.password !== confirm) {
@@ -115,7 +118,7 @@ export default function Register() {
                 value={form.password}
                 onChange={handle}
                 className="w-full px-3 py-2.5 pr-10 border border-border rounded-md bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground/60"
-                placeholder="Min 8 characters"
+                placeholder="Create a strong password"
               />
               <button
                 type="button"
