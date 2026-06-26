@@ -7,7 +7,7 @@ import {
   RefreshCw, Check, GitMerge, AlertCircle, Loader2, ExternalLink, Play,
   Search, RotateCcw, Ban, FlaskConical, ChevronLeft, ListChecks, X, Layers,
   FileText, Upload, ArrowRight, Download,
-  Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, History, Sparkles, Undo2, BarChart2, Clock,
+  Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, ChevronRight, ChevronsUpDown, ChevronsDownUp, History, Sparkles, Undo2, BarChart2, Clock,
   Copy, Lock, RotateCw, CheckCheck,
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
@@ -146,6 +146,34 @@ function StatusReminder({ status }) {
     <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 mt-3 flex items-start gap-2 text-xs">
       <AlertCircle className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
       <span>{t("This attribute is")} <strong>{status === "archived" ? t("Archived") : t("Draft")}</strong> - {t("set the status to")} <strong>{t("Active")}</strong> {t("to apply its values to customers (in Segments, Pop-ups, and on Profiles).")}</span>
+    </div>
+  );
+}
+
+// Standard action bar shared by the Manual & Rule detail views so both pages
+// behave identically: a Status select (Draft/Active/Archived) on the left and a
+// Save button on the right. The status select stages a pending value - nothing is
+// persisted until Save. Save is enabled only when something actually changed
+// (status, details, or tags) via `dirty`. Save persists everything at once; the
+// parent applies (recomputes tags onto profiles) only when the status is Active.
+function AttributeActionBar({ status, onStatusChange, lastRun, onSave, dirty, saving, saveTitle }) {
+  const { t } = usePreferences();
+  return (
+    <div className="flex items-center justify-between gap-3 mt-3 pb-3 border-b border-border">
+      <div className="flex items-center gap-2">
+        <Select value={status} onValueChange={onStatusChange} disabled={saving}>
+          <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="draft">{t("Draft")}</SelectItem>
+            <SelectItem value="active">{t("Active")}</SelectItem>
+            <SelectItem value="archived">{t("Archived")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {lastRun && <span className="text-[11px] text-muted-foreground">{t("Updated")} {formatDistanceToNow(new Date(lastRun), { addSuffix: true })}</span>}
+      </div>
+      <Button size="sm" className="h-8 gap-1.5" disabled={!dirty || saving} onClick={onSave} title={saveTitle}>
+        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t("Save")}
+      </Button>
     </div>
   );
 }
@@ -2166,6 +2194,9 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
   const [rules, setRules] = useState([BLANK_RULE()]);
   const [timePeriod, setTimePeriod] = useState(""); // "" = all time (lifetime)
   const [dailyRefresh, setDailyRefresh] = useState(false); // nightly add + drop
+  const [defDirty, setDefDirty] = useState(false); // unsaved local edits to the rule definition
+  const [pendingStatus, setPendingStatus] = useState("draft"); // staged status (persisted on Save)
+  const markDirty = () => setDefDirty(true);
 
   const { data: attr } = useQuery({ queryKey: ["attribute", attributeId], queryFn: () => appClient.attributes.get(attributeId), enabled: !!attributeId });
   const { data: fields } = useQuery({ queryKey: ["rule-fields"], queryFn: () => appClient.attributes.ruleFields() });
@@ -2196,6 +2227,8 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
       setRules(attr.rule?.rules?.length ? attr.rule.rules.map(normalizeRule) : [BLANK_RULE()]);
       setTimePeriod(attr.rule?.time_period ? String(attr.rule.time_period) : "");
       setDailyRefresh(!!attr.rule?.daily_refresh);
+      setPendingStatus(attr.status);
+      setDefDirty(false); // freshly loaded definition - nothing unsaved
     }
   }, [attr?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2212,10 +2245,22 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
     .filter((r) => r.value && r.groups.length);
 
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["attribute", attributeId] }); qc.invalidateQueries({ queryKey: ["attributes"] }); };
-  const statusMut = useMutation({ mutationFn: (status) => appClient.attributes.update(attributeId, { status }), onSuccess: invalidate });
-  const recomputeMut = useMutation({
-    mutationFn: async () => { await appClient.attributes.update(attributeId, { rule: { match: "first", time_period: timePeriod || null, daily_refresh: dailyRefresh, rules: cleanRules } }); return appClient.attributes.recompute(attributeId); },
-    onSuccess: (r) => { toast.success(`${t("Saved - tagged")} ${Number(r.tagged).toLocaleString()} ${t("profiles")}`); invalidate(); },
+  const ruleConfig = () => ({ match: "first", time_period: timePeriod || null, daily_refresh: dailyRefresh, rules: cleanRules });
+
+  // Save is enabled whenever the status, settings, or rules changed. It persists
+  // everything in one shot; tags are applied (recomputed onto profiles) only when
+  // the saved status is Active - saving a Draft / Archived attribute just stores it.
+  const statusChanged = !!attr && pendingStatus !== attr.status;
+  const dirty = (defDirty && !!cleanRules.length) || statusChanged;
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      await appClient.attributes.update(attributeId, { status: pendingStatus, rule: ruleConfig() });
+      return pendingStatus === "active" ? appClient.attributes.recompute(attributeId) : null;
+    },
+    onSuccess: (r) => {
+      setDefDirty(false); invalidate();
+      toast.success(r ? `${t("Saved & applied - tagged")} ${Number(r.tagged).toLocaleString()} ${t("profiles")}` : t("Saved"));
+    },
     onError: (e) => toast.error(e.message),
   });
 
@@ -2242,24 +2287,16 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-3 mt-3 pb-3 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Select value={attr.status} onValueChange={(v) => statusMut.mutate(v)}>
-                <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="draft">{t("Draft")}</SelectItem>
-                  <SelectItem value="active">{t("Active")}</SelectItem>
-                  <SelectItem value="archived">{t("Archived")}</SelectItem>
-                </SelectContent>
-              </Select>
-              {attr.last_run_date && <span className="text-[11px] text-muted-foreground">{t("Updated")} {formatDistanceToNow(new Date(attr.last_run_date), { addSuffix: true })}</span>}
-            </div>
-            <Button size="sm" className="h-8 gap-1.5" disabled={recomputeMut.isPending || !cleanRules.length} onClick={() => recomputeMut.mutate()}>
-              {recomputeMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} {t("Save & apply")}
-            </Button>
-          </div>
+          <AttributeActionBar
+            status={pendingStatus}
+            onStatusChange={setPendingStatus}
+            lastRun={attr.last_run_date}
+            onSave={() => saveMut.mutate()}
+            dirty={dirty}
+            saving={saveMut.isPending}
+          />
 
-          <StatusReminder status={attr.status} />
+          <StatusReminder status={pendingStatus} />
 
           {/* Daily refresh: nightly cron re-derives (add + drop). Off = frozen. */}
           <div className={`mt-3 rounded-lg border p-3 transition-colors ${dailyRefresh ? "border-foreground/30 bg-secondary/40" : "border-border bg-secondary/10"}`}>
@@ -2271,11 +2308,11 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
                   <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
                     {dailyRefresh
                       ? t("Re-evaluated every night (~2:30 AM): newly-matching profiles are added and non-matching ones dropped.")
-                      : t("Tags stay frozen between manual reapplies - nothing is added or dropped automatically. Use Save & apply to re-derive on demand.")}
+                      : t("Tags stay frozen between saves - nothing is added or dropped automatically. Save while Active to re-derive on demand.")}
                   </p>
                 </div>
               </div>
-              <Switch checked={dailyRefresh} onCheckedChange={setDailyRefresh} className="flex-shrink-0 mt-0.5" />
+              <Switch checked={dailyRefresh} onCheckedChange={(v) => { setDailyRefresh(v); markDirty(); }} className="flex-shrink-0 mt-0.5" />
             </div>
           </div>
 
@@ -2284,7 +2321,7 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
             <div className="flex items-center gap-2 flex-wrap">
               <Clock className={`w-4 h-4 flex-shrink-0 ${timePeriod ? "text-foreground" : "text-muted-foreground"}`} />
               <span className="text-xs font-medium">{t("Time period")}</span>
-              <Select value={timePeriod || "all"} onValueChange={(v) => setTimePeriod(v === "all" ? "" : v)}>
+              <Select value={timePeriod || "all"} onValueChange={(v) => { setTimePeriod(v === "all" ? "" : v); markDirty(); }}>
                 <SelectTrigger className="h-8 w-44 text-xs"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t("All time (lifetime)")}</SelectItem>
@@ -2307,11 +2344,11 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
           <div className="space-y-2">
             {rules.map((r, i) => (
               <RuleRow key={i} rule={r} idx={i} scope={scope} timePeriod={timePeriod} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor}
-                onChange={(nr) => setRules((rs) => rs.map((x, j) => (j === i ? nr : x)))}
-                onRemove={() => setRules((rs) => rs.filter((_, j) => j !== i))}
+                onChange={(nr) => { setRules((rs) => rs.map((x, j) => (j === i ? nr : x))); markDirty(); }}
+                onRemove={() => { setRules((rs) => rs.filter((_, j) => j !== i)); markDirty(); }}
                 canRemove={rules.length > 1} />
             ))}
-            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setRules((rs) => [...rs, BLANK_RULE()])}>
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => { setRules((rs) => [...rs, BLANK_RULE()]); markDirty(); }}>
               <Plus className="w-3.5 h-3.5" /> {t("Add value")}
             </Button>
           </div>
@@ -2525,10 +2562,16 @@ function ManualDetail({ attributeId, onBack, onEdit }) {
   const qc = useQueryClient();
   const [newValue, setNewValue] = useState("");
   const [assignFor, setAssignFor] = useState(null);
+  const [pendingStatus, setPendingStatus] = useState("draft"); // staged status (persisted on Save)
 
   const { data: attr } = useQuery({ queryKey: ["attribute", attributeId], queryFn: () => appClient.attributes.get(attributeId), enabled: !!attributeId });
+  useEffect(() => { if (attr) setPendingStatus(attr.status); }, [attr?.id, attr?.status]);
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["attribute", attributeId] }); qc.invalidateQueries({ queryKey: ["attributes"] }); };
-  const statusMut = useMutation({ mutationFn: (status) => appClient.attributes.update(attributeId, { status }), onSuccess: invalidate });
+  // Manual values/assignments persist immediately (a value must exist before people
+  // can be assigned to it). The only thing the Save button stages is the status -
+  // assignments simply go live on profiles once the saved status is Active.
+  const statusChanged = !!attr && pendingStatus !== attr.status;
+  const saveMut = useMutation({ mutationFn: () => appClient.attributes.update(attributeId, { status: pendingStatus }), onSuccess: () => { toast.success(t("Saved")); invalidate(); }, onError: (e) => toast.error(e.message) });
   const addValueMut = useMutation({ mutationFn: (v) => appClient.attributes.addValue(attributeId, v), onSuccess: () => { setNewValue(""); invalidate(); }, onError: (e) => toast.error(e.message) });
   const delValueMut = useMutation({ mutationFn: (id) => appClient.attributes.deleteValue(id), onSuccess: invalidate });
 
@@ -2555,18 +2598,21 @@ function ManualDetail({ attributeId, onBack, onEdit }) {
             )}
           </div>
 
-          <div className="flex items-center gap-2 mt-3 pb-3 border-b border-border">
-            <Select value={attr.status} onValueChange={(v) => statusMut.mutate(v)}>
-              <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="draft">{t("Draft")}</SelectItem>
-                <SelectItem value="active">{t("Active")}</SelectItem>
-                <SelectItem value="archived">{t("Archived")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Same action bar as Rule. Manual values & assignments persist immediately
+              as you add them (a value must exist before people can be assigned to it),
+              so the only thing Save stages is the status. Setting it Active is what
+              makes the assignments live on profiles (Segments, Pop-ups, Profiles). */}
+          <AttributeActionBar
+            status={pendingStatus}
+            onStatusChange={setPendingStatus}
+            lastRun={attr.last_run_date}
+            onSave={() => saveMut.mutate()}
+            dirty={statusChanged}
+            saving={saveMut.isPending}
+            saveTitle={t("Manual values and assignments save automatically; Save applies the status change")}
+          />
 
-          <StatusReminder status={attr.status} />
+          <StatusReminder status={pendingStatus} />
 
           <div className="flex gap-2 mt-4">
             <Input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder={t("Add a value (e.g. VIP)")} className="h-8 text-sm flex-1"
@@ -2679,6 +2725,13 @@ function CardGrid({
   onOpen, onEdit, onDelete, onClone, onImportExport,
 }) {
   const { t } = usePreferences();
+  // Collapsible status groups (mirrors the Segments page). View-only state, kept
+  // local to this grid so each source tab remembers its own collapsed groups.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleGroup = (k) => setCollapsed((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const groupKeys = gridGroups.map((g) => g.key);
+  const allCollapsed = groupByStatus && groupKeys.length > 0 && groupKeys.every((k) => collapsed.has(k));
+  const toggleAll = () => setCollapsed(allCollapsed ? new Set() : new Set(groupKeys));
   return (
     <>
       {intro && <p className="text-xs text-muted-foreground mb-4 max-w-2xl">{intro}</p>}
@@ -2741,6 +2794,12 @@ function CardGrid({
           <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={onImportExport}>
             <Upload className="w-3.5 h-3.5" /> {t("Import / Export")}
           </Button>
+          {groupByStatus && gridGroups.length > 1 && (
+            <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={toggleAll}>
+              {allCollapsed ? <ChevronsUpDown className="w-3.5 h-3.5" /> : <ChevronsDownUp className="w-3.5 h-3.5" />}
+              {allCollapsed ? t("Expand all") : t("Collapse all")}
+            </Button>
+          )}
           <span className="text-xs text-muted-foreground ml-auto">
             {sortedAttrs.length !== tabAttrs.length ? `${sortedAttrs.length} ${t("of")} ${tabAttrs.length}` : `${tabAttrs.length}`} {tabAttrs.length === 1 ? t("attribute") : t("attributes")}
           </span>
@@ -2759,20 +2818,30 @@ function CardGrid({
 
       {sortedAttrs.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-16">{t("No attributes match your search or filters.")}</p>
-      ) : gridGroups.map((group) => (
-        <div key={group.key} className="mb-8">
-          {groupByStatus && (
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">{t(group.label)}</p>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {sortedAttrs.filter(group.filter).map((attr) => (
-              <AttributeCard key={attr.id} attr={attr}
-                onOpen={() => onOpen(attr)} onEdit={() => onEdit(attr)} onDelete={() => onDelete(attr)}
-                onClone={onClone ? () => onClone(attr) : undefined} />
-            ))}
+      ) : gridGroups.map((group) => {
+        const items = sortedAttrs.filter(group.filter);
+        if (!items.length) return null;
+        const isCollapsed = groupByStatus && collapsed.has(group.key);
+        return (
+          <div key={group.key} className="mb-8">
+            {groupByStatus && (
+              <button onClick={() => toggleGroup(group.key)} className="flex items-center gap-1.5 mb-3 group/h">
+                {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide group-hover/h:text-foreground">{t(group.label)} · {items.length}</span>
+              </button>
+            )}
+            {!isCollapsed && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {items.map((attr) => (
+                  <AttributeCard key={attr.id} attr={attr}
+                    onOpen={() => onOpen(attr)} onEdit={() => onEdit(attr)} onDelete={() => onDelete(attr)}
+                    onClone={onClone ? () => onClone(attr) : undefined} />
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </>
   );
 }

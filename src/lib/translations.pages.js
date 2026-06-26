@@ -100,7 +100,7 @@ const profiles = {
   "today": { zh: "今天", "zh-cn": "今天" },
   "yesterday": { zh: "昨天", "zh-cn": "昨天" },
   "days ago": { zh: "天前", "zh-cn": "天前" },
-  "Affinities & Attributes": { zh: "親和性與屬性", "zh-cn": "亲和性与属性" },
+  "Applied Attributes": { zh: "已套用屬性", "zh-cn": "已应用属性" },
   "Loading orders…": { zh: "載入訂單中…", "zh-cn": "加载订单中…" },
   "Recent Orders": { zh: "近期訂單", "zh-cn": "近期订单" },
   "Item": { zh: "品項", "zh-cn": "项目" },

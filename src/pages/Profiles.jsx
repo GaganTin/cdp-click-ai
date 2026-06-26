@@ -171,7 +171,7 @@ function AffinitiesBlock({ entityType, entityId }) {
   }
   return (
     <div>
-      <SectionTitle>{t("Affinities & Attributes")}</SectionTitle>
+      <SectionTitle>{t("Applied Attributes")}</SectionTitle>
       <div className="flex flex-wrap gap-1">
         {tags.map((a, i) => (
           <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary/40 border border-border">

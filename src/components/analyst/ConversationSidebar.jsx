@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { appClient } from "@/api/appClient";
-import { Plus, MessageSquare, ChevronDown, ChevronRight, Check, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import { Plus, MessageSquare, ChevronLeft, ChevronRight, Check, Pencil, Trash2, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { format, isToday, isYesterday, isThisWeek } from "date-fns";
@@ -22,7 +22,15 @@ export default function ConversationSidebar({ activeConversationId, onSelect, on
   const [conversations, setConversations] = useState([]);
   const [deletedIds, setDeletedIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
-  const [collapsed, setCollapsed] = useState(false);
+  // Collapsed state persists across navigation/reload, mirroring the main app
+  // sidebar (localStorage "sidebarCollapsed"). This is a UI preference, not data.
+  const [collapsed, setCollapsed] = useState(
+    () => { try { return localStorage.getItem("analystChatsCollapsed") === "true"; } catch { return false; } }
+  );
+
+  useEffect(() => {
+    try { localStorage.setItem("analystChatsCollapsed", String(collapsed)); } catch {}
+  }, [collapsed]);
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
   const editRef = useRef(null);
@@ -109,9 +117,9 @@ export default function ConversationSidebar({ activeConversationId, onSelect, on
             size="icon"
             className="h-7 w-7"
             onClick={() => setCollapsed(v => !v)}
-            title={collapsed ? "Expand" : "Collapse"}
+            title={collapsed ? "Expand chat history" : "Collapse chat history"}
           >
-            {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
           </Button>
         </div>
       </div>
@@ -205,11 +213,20 @@ export default function ConversationSidebar({ activeConversationId, onSelect, on
         </div>
       )}
 
-      {/* New chat button when collapsed */}
+      {/* Collapsed rail: keep New chat + an expand affordance visible */}
       {collapsed && (
-        <div className="py-2 flex flex-col items-center gap-2">
+        <div className="flex-1 py-2 flex flex-col items-center gap-2">
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onNew} title="New chat">
             <Plus className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground"
+            onClick={() => setCollapsed(false)}
+            title="Expand chat history"
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
           </Button>
         </div>
       )}

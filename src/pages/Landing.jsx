@@ -18,7 +18,7 @@ function Logo() {
 function Nav() {
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/80 backdrop-blur-sm">
-      <div className="max-w-7xl mx-auto px-6 sm:px-10 h-16 grid grid-cols-3 items-center">
+      <div className="max-w-7xl mx-auto px-4 sm:px-10 h-16 flex md:grid md:grid-cols-3 items-center justify-between gap-3">
         {/* Left - logo */}
         <Logo />
 
@@ -30,19 +30,20 @@ function Nav() {
         </nav>
 
         {/* Right - auth buttons */}
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-end gap-2 sm:gap-3 flex-shrink-0">
           <Link
             to="/login"
-            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
           >
             Sign in
           </Link>
           <Link
             to="/register"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors whitespace-nowrap"
           >
-            Get started free
-            <ChevronRight className="w-3.5 h-3.5" />
+            <span className="sm:hidden">Get started</span>
+            <span className="hidden sm:inline">Get started free</span>
+            <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />
           </Link>
         </div>
       </div>
@@ -71,7 +72,7 @@ function Hero() {
 
         <p className="mt-6 text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
           Meritma is the AI-powered Customer Data Platform that unifies profiles,
-          automates email campaigns, and lets you ask questions about your data in plain English.
+          automates marketing campaigns, and lets you ask questions about your data in plain English.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -109,15 +110,15 @@ function Hero() {
           {/* Mock app UI */}
           <div className="p-6 grid grid-cols-12 gap-4 h-64">
             {/* Sidebar */}
-            <div className="col-span-2 space-y-2">
+            <div className="col-span-3 space-y-1.5">
               {["AI Analyst", "Dashboard", "Campaigns", "Email", "Profiles"].map(l => (
-                <div key={l} className={`h-7 rounded-md text-xs flex items-center px-2 ${l === "AI Analyst" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+                <div key={l} className={`h-7 rounded-md text-xs flex items-center px-2.5 whitespace-nowrap truncate ${l === "AI Analyst" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
                   {l}
                 </div>
               ))}
             </div>
             {/* Main content */}
-            <div className="col-span-10 space-y-3">
+            <div className="col-span-9 space-y-3">
               {/* Chat */}
               <div className="flex gap-3">
                 <div className="flex-1 h-10 rounded-lg border border-border bg-secondary/30 px-4 flex items-center text-xs text-muted-foreground">

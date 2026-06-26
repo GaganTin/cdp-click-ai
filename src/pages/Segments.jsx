@@ -414,11 +414,11 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
               <p className="text-[11px] text-muted-foreground">
                 <strong className="text-foreground">{t("Need more detailed targeting?")}</strong> {t("Build a")}{" "}
                 <Link to="/attributes" className="underline hover:text-foreground">{t("rule-based attribute")}</Link>{" "}
-                {t("(combine sessions, purchases, pop-ups, even other segments into one label), then select its values here under")} <strong>{t("Affinities & Attributes")}</strong>.
+                {t("(combine sessions, purchases, pop-ups, even other segments into one label), then select its values here under")} <strong>{t("Applied Attributes")}</strong>.
               </p>
             </div>
             {attrOptions.length > 0 && (
-              <CriteriaGroup title={t("Affinities & Attributes")} activeCount={attrValueIds.length}>
+              <CriteriaGroup title={t("Applied Attributes")} activeCount={attrValueIds.length}>
                 {attrOptions.map(a => {
                   const aIds = a.values.map(v => v.id);
                   const selected = attrValueIds.filter(id => aIds.includes(id));
@@ -826,7 +826,7 @@ export default function Segments() {
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <h3 className="text-sm font-semibold">{seg.name}</h3>
                             {(!seg.status || seg.status === "draft") ? (
-                              <Badge className="text-[10px] bg-yellow-500/10 text-yellow-700 border border-yellow-500/40">{t("draft")}</Badge>
+                              <Badge variant="outline" className="text-[10px]">{t("draft")}</Badge>
                             ) : (
                               <Badge variant="secondary" className="text-[10px]">{seg.status}</Badge>
                             )}

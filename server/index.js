@@ -2686,11 +2686,14 @@ app.get("/api/profiles/customers/:memberId/insights", authenticate, async (req, 
         `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
           WHERE company_id = $2 AND capsuite_apid = ANY($1) AND event_name = 'user_engagement'`, [apids, companyId]) : { rows: [{ count: 0 }] },
       pool.query(
+        // Only web-content (behavioral) attributes belong under "Top Web Activity".
+        // Manual / rule attributes surface in the card's "Affinities & Attributes" block.
         `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
            FROM app.profile_attribute_values pv
            JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
            JOIN app.attribute_values v ON v.id = pv.attribute_value_id
           WHERE pv.company_id = $2 AND pv.entity_type = 'customer' AND pv.entity_id = $1
+            AND pv.source = 'web_content'
           ORDER BY pv.score DESC LIMIT 1`, [memberId, companyId]),
       pool.query(
         `SELECT product_name AS value, SUM(qty_ordered)::int AS qty FROM commerce.order_line
@@ -2769,11 +2772,14 @@ app.get("/api/profiles/anonymous/:visitorId/insights", authenticate, async (req,
         `SELECT COUNT(*)::int AS count FROM ga_landing.path_exploration
           WHERE company_id = $2 AND capsuite_apid = $1 AND event_name = 'user_engagement'`, [vid, companyId]),
       pool.query(
+        // Only web-content (behavioral) attributes belong under "Top Web Activity".
+        // Manual / rule attributes surface in the card's "Affinities & Attributes" block.
         `SELECT a.name, COALESCE(v.display_label, v.value) AS value, pv.score
            FROM app.profile_attribute_values pv
            JOIN app.attributes a       ON a.id = pv.attribute_id AND a.status = 'active'
            JOIN app.attribute_values v ON v.id = pv.attribute_value_id
           WHERE pv.company_id = $2 AND pv.entity_type = 'anonymous' AND pv.entity_id = $1
+            AND pv.source = 'web_content'
           ORDER BY pv.score DESC LIMIT 1`, [vid, companyId]),
       pool.query(
         `SELECT DISTINCT ON (COALESCE(popup_name, popup_ref)) COALESCE(popup_name, popup_ref) AS name, collected_at AS at
