@@ -678,6 +678,7 @@ export function createAuthRouter(pool) {
         `SELECT u.id, u.email, u.full_name, u.avatar_url,
                 u.is_email_verified, u.last_login_at, u.created_date,
                 u.account_id, u.is_platform_admin, u.mfa_enabled,
+                (u.password_hash IS NOT NULL) AS has_password,
                 a.plan AS account_plan, a.plan_expires_at AS account_plan_expires_at,
                 a.plan_upgraded_at AS account_plan_upgraded_at,
                 (a.owner_user_id = u.id) AS is_account_owner,
@@ -745,6 +746,11 @@ export function createAuthRouter(pool) {
         [req.user.id]
       );
       if (!rows.length) return res.status(404).json({ error: "User not found" });
+      // OAuth-only accounts have no password to change - sign-in is handled by
+      // their identity provider (Google/Microsoft).
+      if (!rows[0].password_hash) {
+        return res.status(400).json({ error: "This account signs in with Google or Microsoft and has no password.", code: "no_password" });
+      }
 
       const valid = await bcrypt.compare(current_password, rows[0].password_hash);
       if (!valid) return res.status(401).json({ error: "Current password is incorrect" });

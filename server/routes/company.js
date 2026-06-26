@@ -255,8 +255,8 @@ export function createCompanyRouter(pool) {
       // record survives the cascade with account_id + resource_id intact.
       await client.query(
         `INSERT INTO app.audit_log (account_id, company_id, user_id, action, resource_type, resource_id, changes)
-         VALUES ($1, $2, $3, 'delete', 'workspace', $2, $4)`,
-        [company.account_id, id, req.user.id, JSON.stringify({ name: company.name })]
+         VALUES ($1, $2, $3, 'delete', 'workspace', $4, $5)`,
+        [company.account_id, id, req.user.id, id, JSON.stringify({ name: company.name })]
       );
       // Deleting the company row cascades every company_id-scoped table (members,
       // profiles, integrations, ga_landing, commerce, attributes, popups, edm, …).

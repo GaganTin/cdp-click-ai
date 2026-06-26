@@ -283,6 +283,10 @@ function ProfileTab({ user, onRefresh }) {
 
 function SecurityTab() {
   const { t } = usePreferences();
+  const { user } = useAuth();
+  // OAuth-only accounts (no password) sign in via Google/Microsoft - password
+  // management and email-OTP MFA don't apply to them.
+  const oauthOnly = user?.has_password === false;
   const [form, setForm] = useState({ current_password: "", new_password: "", confirm: "" });
   const [saving, setSaving] = useState(false);
   const [show, setShow] = useState(false);
@@ -307,7 +311,18 @@ function SecurityTab() {
   return (
     <div className="space-y-10">
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
-      <Section title={t("Security")} description={t("Update your password to keep your account secure.")}>
+      <Section
+        title={t("Security")}
+        description={oauthOnly ? t("Your sign-in is managed by your identity provider.") : t("Update your password to keep your account secure.")}
+      >
+        {oauthOnly ? (
+          <div className="flex items-start gap-3 rounded-md border border-border p-4">
+            <KeyRound className="w-5 h-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+            <p className="text-sm text-muted-foreground">
+              {t("You sign in with Google or Microsoft, so this account doesn't use a password. Manage your sign-in security from your Google or Microsoft account.")}
+            </p>
+          </div>
+        ) : (
         <form onSubmit={save} className="space-y-4">
           <Field label={t("Current password")}>
             <div className="relative">
@@ -365,8 +380,10 @@ function SecurityTab() {
             {saving ? t("Saving…") : t("Change password")}
           </Button>
         </form>
+        )}
       </Section>
 
+      {!oauthOnly && (
       <SideCard>
         <div>
           <p className="text-sm font-medium mb-2">{t("Password requirements")}</p>
@@ -390,6 +407,7 @@ function SecurityTab() {
           </p>
         </div>
       </SideCard>
+      )}
     </div>
 
     <TwoFactorCard />
@@ -404,6 +422,9 @@ function TwoFactorCard() {
   const { t } = usePreferences();
   const { user, refreshUser } = useAuth();
   const enabled = !!user?.mfa_enabled;
+  // OAuth-only accounts don't use the password login path, so email-OTP MFA
+  // would never challenge them - 2FA is handled by their identity provider.
+  const oauthOnly = user?.has_password === false;
   const [mode, setMode] = useState(null); // null | 'enabling' | 'disabling'
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -454,6 +475,33 @@ function TwoFactorCard() {
       setBusy(false);
     }
   };
+
+  // OAuth-only account: explain that 2FA lives with their provider; no toggle.
+  if (oauthOnly) {
+    return (
+      <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
+        <Section
+          title={t("Two-factor authentication")}
+          description={t("Sign-in security for this account is managed by your identity provider.")}
+        >
+          <div className="flex items-start gap-3 rounded-md border border-border p-4">
+            <Shield className="w-5 h-5 text-muted-foreground mt-0.5 flex-shrink-0" />
+            <p className="text-sm text-muted-foreground">
+              {t("You sign in with Google or Microsoft. Two-factor authentication is managed in your Google or Microsoft account settings.")}
+            </p>
+          </div>
+        </Section>
+        <SideCard>
+          <div>
+            <p className="text-sm font-medium mb-2">{t("Why is this here?")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t("Email-based two-factor only applies to password sign-in. Your provider already protects your account with its own 2FA.")}
+            </p>
+          </div>
+        </SideCard>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-[1fr_280px] gap-8 items-start">
@@ -765,11 +813,17 @@ function CompanyTab({ company, onRefresh }) {
   const [saving, setSaving] = useState(false);
   const [savingEdm, setSavingEdm] = useState(false);
 
-  // Delete-workspace danger zone (type-to-confirm).
+  // Delete-account danger zone (type-email-to-confirm). Eligibility (owner /
+  // solo / single-workspace) is decided server-side and re-checked on delete.
+  const { logout } = useAuth();
+  const { data: delStatus } = useQuery({
+    queryKey: ["account-deletion-status"],
+    queryFn: () => appClient.account.deletionStatus(),
+  });
   const [showDelete, setShowDelete] = useState(false);
-  const [confirmName, setConfirmName] = useState("");
+  const [confirmText, setConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
-  const wsName = full?.name || company?.name || "";
+  const confirmEmail = delStatus?.email || "";
 
   // Hydrate the forms once the full company record loads.
   useEffect(() => {
@@ -816,19 +870,27 @@ function CompanyTab({ company, onRefresh }) {
     }
   };
 
-  const deleteWorkspace = async () => {
+  const deleteAccount = async () => {
     setDeleting(true);
     try {
-      await appClient.companies.delete(company.id, confirmName.trim());
-      toast.success(t("Workspace deleted"));
-      // Drop the stored selection and hard-reload so the app re-resolves a valid
-      // workspace (or the no-workspace state) with all caches cleared.
+      await appClient.account.delete(confirmText.trim());
+      toast.success(t("Account deleted"));
+      // The account (incl. this login) is gone - clear local state and hard-reload
+      // to the signed-out landing page.
       localStorage.removeItem("cdp_company_id");
+      await logout();
       window.location.assign("/");
     } catch (err) {
       toast.error(err.message);
       setDeleting(false);
     }
+  };
+
+  const contactSupportToDelete = () => {
+    const subject = "Account deletion request";
+    const body = "I'd like to permanently delete my account and all of its workspaces and data.";
+    window.location.href =
+      `mailto:support@clickcdp.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
   return (
@@ -915,27 +977,42 @@ function CompanyTab({ company, onRefresh }) {
       <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-5 max-w-3xl">
         <h2 className="font-heading text-lg font-semibold tracking-tight text-destructive">{t("Danger zone")}</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          {t("Permanently delete this workspace and everything in it - profiles, integrations, analytics, segments, campaigns, attributes and team access. This cannot be undone.")}
+          {t("Permanently delete your entire account - every workspace and all of its data, your team members' access, and your own login. This cannot be undone.")}
         </p>
-        {!showDelete ? (
+        {!delStatus ? (
+          <p className="text-sm text-muted-foreground mt-4">{t("Loading…")}</p>
+        ) : !delStatus.is_account_owner ? (
+          <p className="text-sm text-muted-foreground mt-4">
+            {t("Only the account owner can delete this account.")}
+          </p>
+        ) : !delStatus.can_self_delete ? (
+          <div className="mt-4 space-y-3 max-w-md">
+            <p className="text-sm text-muted-foreground">
+              {t("Your account has other team members across its workspaces, so deletion has to be handled by our team to protect everyone's access and data.")}
+            </p>
+            <Button variant="destructive" size="sm" className="gap-1.5" onClick={contactSupportToDelete}>
+              <Mail className="w-3.5 h-3.5" /> {t("Contact support to delete account")}
+            </Button>
+          </div>
+        ) : !showDelete ? (
           <Button variant="destructive" size="sm" className="mt-4 gap-1.5" onClick={() => setShowDelete(true)}>
-            <Trash2 className="w-3.5 h-3.5" /> {t("Delete workspace")}
+            <Trash2 className="w-3.5 h-3.5" /> {t("Delete account")}
           </Button>
         ) : (
           <div className="mt-4 space-y-3 max-w-md">
-            <Field label={t("Type the workspace name to confirm")} hint={t("Enter “") + wsName + t("” exactly to enable deletion.")}>
-              <Input value={confirmName} onChange={e => setConfirmName(e.target.value)} placeholder={wsName} autoFocus />
+            <Field label={t("Type your email to confirm")} hint={t("Enter “") + confirmEmail + t("” exactly to enable deletion.")}>
+              <Input value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder={confirmEmail} autoFocus />
             </Field>
             <div className="flex items-center gap-2">
               <Button
                 variant="destructive" size="sm" className="gap-1.5"
-                disabled={deleting || confirmName.trim() !== wsName}
-                onClick={deleteWorkspace}
+                disabled={deleting || confirmText.trim().toLowerCase() !== confirmEmail.toLowerCase()}
+                onClick={deleteAccount}
               >
-                <Trash2 className="w-3.5 h-3.5" /> {deleting ? t("Deleting…") : t("Permanently delete")}
+                <Trash2 className="w-3.5 h-3.5" /> {deleting ? t("Deleting…") : t("Permanently delete account")}
               </Button>
               <Button variant="outline" size="sm" disabled={deleting}
-                onClick={() => { setShowDelete(false); setConfirmName(""); }}>
+                onClick={() => { setShowDelete(false); setConfirmText(""); }}>
                 {t("Cancel")}
               </Button>
             </div>

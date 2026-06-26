@@ -33,8 +33,6 @@ export default function VerifyEmail() {
       await appClient.auth.registerVerify(email, code);
       await checkUserAuth(); // account now exists + auth cookie set → logs in
       toast.success("Email verified - welcome to Meritma!");
-      // Expand the sidebar on this first post-signup view (one-time).
-      sessionStorage.setItem("expandSidebarOnce", "1");
       navigate("/");
     } catch (err) {
       toast.error(err.message);

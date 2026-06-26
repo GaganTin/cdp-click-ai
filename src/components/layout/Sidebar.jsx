@@ -108,16 +108,16 @@ export default function Sidebar() {
   const { user, currentCompany, logout, switchCompany } = useAuth();
   const queryClient = useQueryClient();
   const { t } = usePreferences();
-  const isAnalyst = location.pathname === "/";
-  // Right after login/signup, show the sidebar expanded once (consume the
-  // one-time flag set by the auth flow); otherwise collapse on the Analyst page.
-  const [collapsed, setCollapsed] = useState(() => {
-    if (sessionStorage.getItem("expandSidebarOnce")) {
-      sessionStorage.removeItem("expandSidebarOnce");
-      return false;
-    }
-    return isAnalyst;
-  });
+  // Expanded by default (incl. the first view after login/signup, regardless of
+  // which auth path was used). We persist the user's explicit choice so it
+  // sticks across navigation, remounts and reloads.
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem("sidebarCollapsed") === "true"
+  );
+
+  useEffect(() => {
+    localStorage.setItem("sidebarCollapsed", String(collapsed));
+  }, [collapsed]);
 
   const companies = user?.companies || [];
 

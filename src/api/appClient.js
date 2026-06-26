@@ -188,6 +188,11 @@ export const appClient = {
     listTickets:  () => request("/support/tickets"),
     createTicket: (data) => request("/support/tickets", { method: "POST", body: JSON.stringify(data) }),
   },
+  // Account-level (the whole tenant, above individual workspaces).
+  account: {
+    deletionStatus: () => request("/account/deletion-status"),
+    delete: (confirm) => request("/account", { method: "DELETE", body: JSON.stringify({ confirm }) }),
+  },
   // Platform-wide announcement banners. `listActive` is for every user (the
   // banner); the rest are platform-owner only (Studio management).
   announcements: {

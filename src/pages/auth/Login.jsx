@@ -41,8 +41,6 @@ export default function Login() {
 
   const finishLogin = async () => {
     await checkUserAuth();
-    // Expand the sidebar on this first post-login view (one-time).
-    sessionStorage.setItem("expandSidebarOnce", "1");
     navigate("/");
   };
 

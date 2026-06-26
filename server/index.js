@@ -21,6 +21,7 @@ import { runDailyRuleRefresh } from "./lib/attributeRules.js";
 import { runDailyTestLinkRefresh } from "./lib/attributeTestLinks.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createCompanyRouter } from "./routes/company.js";
+import { createAccountRouter } from "./routes/account.js";
 import { createPlansRouter, FALLBACK_PLANS } from "./routes/plans.js";
 import { createBillingRouter } from "./routes/billing.js";
 import { createAdminRouter } from "./routes/admin.js";
@@ -3149,6 +3150,7 @@ if (pool) {
   app.use("/api/plans", createPlansRouter(pool));
   app.use("/api/auth", createAuthRouter(pool));
   app.use("/api/companies", createCompanyRouter(pool));
+  app.use("/api/account", createAccountRouter(pool));
   app.use("/api/billing", createBillingRouter(pool));
   app.use("/api/admin", createAdminRouter(pool));
   app.use("/api/support", createSupportRouter(pool));
