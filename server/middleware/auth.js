@@ -182,10 +182,11 @@ export async function resolveCompanyId(pool, req, res, { blockViewerOnPost = tru
   if (!rows.length) { res.status(403).json({ error: "Access denied to this company" }); return null; }
   req.companyRole = rows[0].role;
 
-  // Trial gate: an expired free account is fully read-only (any non-GET blocked),
-  // regardless of role. GET/HEAD always allowed so they can still view their data.
+  // Trial gate: an account whose trial has ended is fully read-only (any non-GET
+  // blocked), regardless of role or tier. plan_expires_at is the sole trial
+  // marker (null once paid). GET/HEAD always allowed so they can still view data.
   const isWrite = !["GET", "HEAD"].includes(req.method);
-  if (isWrite && rows[0].account_plan === "free" && rows[0].plan_expires_at
+  if (isWrite && rows[0].plan_expires_at
       && new Date(rows[0].plan_expires_at).getTime() < Date.now()) {
     res.status(402).json({ error: "Your free trial has ended. Upgrade to keep making changes." });
     return null;

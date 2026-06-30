@@ -10,19 +10,19 @@
 -- ============================================================================
 WITH acct AS (
   INSERT INTO app.accounts (name, slug, plan)
-  VALUES ('My Company', 'my-company', 'free')
+  VALUES ('My Company', 'my-company', 'standard')
   RETURNING id
 ),
 usr AS (
   INSERT INTO app.users (account_id, email, password_hash, full_name,
                          is_email_verified, is_active, is_platform_admin)
-  SELECT id, 'admin@example.com', '$2b$10$TNdA0vxGdQcZXN7uXUvv5u0kHlE8tvIQYZv2Tu8dU8BJi0FvoTyR2', 'Admin', true, true, true
+  SELECT id, 'admin@example.com', '$2b$10$mFcKj.K31jOszOv/GfzGxeEDgK.WJLgeE91QFNB8aSUjaKYc2ZH6W', 'Admin', true, true, true
   FROM acct
   RETURNING id, account_id
 ),
 comp AS (
   INSERT INTO app.companies (account_id, name, slug, capsuite_ref, plan, is_active)
-  SELECT account_id, 'My Workspace', 'my-workspace', 'my_workspace', 'free', true
+  SELECT account_id, 'My Workspace', 'my-workspace', 'my_workspace', 'standard', true
   FROM usr
   RETURNING id, account_id
 ),

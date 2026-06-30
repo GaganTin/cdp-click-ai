@@ -75,7 +75,7 @@ const seed = `-- ===============================================================
 -- ============================================================================
 WITH acct AS (
   INSERT INTO app.accounts (name, slug, plan)
-  VALUES ('My Company', 'my-company', 'free')
+  VALUES ('My Company', 'my-company', 'standard')
   RETURNING id
 ),
 usr AS (
@@ -87,7 +87,7 @@ usr AS (
 ),
 comp AS (
   INSERT INTO app.companies (account_id, name, slug, capsuite_ref, plan, is_active)
-  SELECT account_id, 'My Workspace', 'my-workspace', 'my_workspace', 'free', true
+  SELECT account_id, 'My Workspace', 'my-workspace', 'my_workspace', 'standard', true
   FROM usr
   RETURNING id, account_id
 ),

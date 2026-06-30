@@ -1037,7 +1037,7 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
   async function ensureReportConfig(companyId) {
     const { rows } = await pool.query(
       `INSERT INTO app.company_report_config (company_id, capsuite_ref, is_trial)
-       SELECT c.id, c.capsuite_ref, (a.plan = 'free')
+       SELECT c.id, c.capsuite_ref, (a.plan_expires_at IS NOT NULL)
        FROM app.companies c JOIN app.accounts a ON a.id = c.account_id
        WHERE c.id = $1
        ON CONFLICT (company_id) DO NOTHING

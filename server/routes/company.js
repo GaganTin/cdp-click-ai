@@ -128,7 +128,7 @@ export function createCompanyRouter(pool) {
       // NULL config and silently skip the workspace.
       await client.query(
         `INSERT INTO app.company_report_config (company_id, created_by, capsuite_ref, is_trial)
-         VALUES ($1, $2, $3, (SELECT plan = 'free' FROM app.accounts WHERE id = $4))
+         VALUES ($1, $2, $3, (SELECT plan_expires_at IS NOT NULL FROM app.accounts WHERE id = $4))
          ON CONFLICT (company_id) DO NOTHING`,
         [company.id, req.user.id, capsuite_ref, accountId]
       );

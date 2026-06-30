@@ -24,7 +24,7 @@ export default function TrialBanner() {
   // Paid upgrades are "contact sales" (no in-app price), so the period is blank.
   const upgradeLabel = upgradePlan
     ? (upgradePlan.period
-        ? `${upgradePlan.name} - ${upgradePlan.price_display}/${upgradePlan.period}`
+        ? `${upgradePlan.name} - ${upgradePlan.price_display}${upgradePlan.period}`
         : upgradePlan.name)
     : "a paid plan";
 

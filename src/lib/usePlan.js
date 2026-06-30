@@ -12,7 +12,7 @@ export function usePlan() {
   });
 
   // account_plan is authoritative (billing); currentCompany.plan is a denormalised copy.
-  const planId = user?.account_plan ?? currentCompany?.plan ?? "free";
+  const planId = user?.account_plan ?? currentCompany?.plan ?? "lite";
   const planConfig = plans.find(p => p.id === planId) ?? null;
 
   // The next tier up (used by upgrade prompts so they always reference the right plan name/price)
@@ -24,20 +24,28 @@ export function usePlan() {
   const warningDays = planConfig?.warning_days ?? 7;
   const limits = planConfig?.limits ?? {};
 
-  // Authoritative trial end is the account's stored plan_expires_at; only fall back
-  // to (workspace created_date + trial_days) when the server value is absent.
-  const planExpiresAt = user?.account_plan_expires_at ? new Date(user.account_plan_expires_at) : null;
+  // plan_expires_at is the sole "in trial" marker (null/absent => paid) and is
+  // authoritative. Only fall back to (created_date + trial_days) when the server
+  // field is entirely ABSENT (legacy /me responses) - never when it is explicitly
+  // null, or a paid account on a trial-capable tier (e.g. a paying Lite customer,
+  // whose tier still has trial_days=30) would be mis-read as an expired trial.
+  const rawExpiry = user?.account_plan_expires_at;
+  const planExpiresAt = rawExpiry ? new Date(rawExpiry) : null;
   const createdDate = currentCompany?.created_date ? new Date(currentCompany.created_date) : null;
   const trialExpiresAt = planExpiresAt
-    ?? (createdDate && trialDays
+    ?? (rawExpiry === undefined && createdDate && trialDays
       ? new Date(createdDate.getTime() + trialDays * 24 * 60 * 60 * 1000)
       : null);
 
-  const isFreePlan = planId === "free";
-  const isPaidPlan = planId === "paid";
-  // When the account moved onto the paid plan (null while on free).
+  // Trial state is tier-agnostic: an account is "in trial" iff it has an expiry.
+  const inTrial = !!trialExpiresAt;
+  // Back-compat aliases: 'free' used to mean "on the trial plan" and 'paid' the
+  // converted plan; both now map to trial state, not a literal plan id.
+  const isFreePlan = inTrial;
+  const isPaidPlan = !inTrial;
+  // When the trial converted to paid (null while still on a trial).
   const upgradedAt = user?.account_plan_upgraded_at ? new Date(user.account_plan_upgraded_at) : null;
-  const isTrialExpired = isFreePlan && trialExpiresAt ? new Date() > trialExpiresAt : false;
+  const isTrialExpired = trialExpiresAt ? new Date() > trialExpiresAt : false;
   const daysLeft = trialExpiresAt
     ? Math.max(0, Math.ceil((trialExpiresAt - new Date()) / (24 * 60 * 60 * 1000)))
     : 0;
@@ -54,6 +62,7 @@ export function usePlan() {
     upgradePlan,
     plans,
     isLoadingPlans: isLoading,
+    inTrial,
     isFreePlan,
     isPaidPlan,
     upgradedAt,

@@ -33,7 +33,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
   const { data: plans } = useQuery({ queryKey: ["admin", "plans"], queryFn: () => appClient.admin.listPlans() });
 
   const account = data?.account;
-  const [plan, setPlan] = useState("free");
+  const [plan, setPlan] = useState("lite");
   const [expiry, setExpiry] = useState("");
   const [active, setActive] = useState(true);
   const [overrides, setOverrides] = useState({});
@@ -43,7 +43,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
 
   useEffect(() => {
     if (account) {
-      setPlan(account.plan || "free");
+      setPlan(account.plan || "lite");
       setExpiry(toDateInput(account.plan_expires_at));
       setActive(account.is_active !== false);
       const s = account.settings || {};
@@ -101,7 +101,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
   })();
 
   const dirty = account && (
-    plan !== (account.plan || "free") ||
+    plan !== (account.plan || "lite") ||
     expiry !== toDateInput(account.plan_expires_at) ||
     active !== (account.is_active !== false) ||
     JSON.stringify(overrides) !== JSON.stringify(origOverrides) ||
@@ -113,7 +113,9 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
     save.mutate({
       plan,
       is_active: active,
-      plan_expires_at: plan === "free" ? (expiry ? new Date(expiry).toISOString() : null) : null,
+      // Trial state is tier-agnostic: a set expiry means "on trial", clearing it
+      // converts to paid (the DB trigger stamps plan_upgraded_at).
+      plan_expires_at: expiry ? new Date(expiry).toISOString() : null,
       limit_overrides: overrides,
       billing_notes: billingNotes,
       payment_reference: paymentRef,
@@ -149,7 +151,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Plan</span>
                   <div className="flex gap-1.5">
-                    {["free", "paid"].map((p) => (
+                    {["lite", "standard", "pro"].map((p) => (
                       <button key={p} onClick={() => setPlan(p)}
                         className={`px-3 py-1 rounded-md text-sm capitalize transition-colors ${
                           plan === p ? "bg-foreground text-background" : "bg-secondary text-muted-foreground hover:text-foreground"
@@ -158,12 +160,12 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                   </div>
                 </div>
 
-                {plan === "free" && (
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm">Trial ends</span>
-                    <Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-44" />
-                  </div>
-                )}
+                {/* Trial expiry is tier-agnostic - set a date to put the account on
+                    a trial, clear it to convert to paid. */}
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm">Trial ends</span>
+                  <Input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} className="w-44" />
+                </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Account active</span>

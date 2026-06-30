@@ -75,7 +75,7 @@ export async function recordAiUsage(pool, ctx = {}) {
     }
 
     // Quota counter (company-scoped; NOT NULL company_id). Skipped for callers
-    // with no workspace context (e.g. the unauthenticated /integrations/llm).
+    // with no workspace context (defensive; all live call sites are scoped).
     if (companyId) {
       await pool.query(
         `INSERT INTO app.usage_events (company_id, user_id, event_type, quantity, metadata)

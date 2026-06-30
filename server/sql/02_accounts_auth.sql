@@ -34,11 +34,13 @@
 -- ============================================================================
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
---  Only two plans exist: 'free' (a 30-day trial that goes read-only on expiry)
---  and 'paid' (unlocked by contacting sales - there is no in-app payment flow,
---  so the upgrade is applied out-of-band by setting app.accounts.plan = 'paid').
+--  Three tiers: 'lite' ($100/mo, the entry tier carrying a 30-day trial that
+--  goes read-only on expiry), 'standard' ($199/mo) and 'pro' (contact sales).
+--  There is no in-app payment flow - the paid upgrade is applied out-of-band by
+--  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
+--  by plan_expires_at, not the tier, so any tier could in principle carry one.
 CREATE TABLE app.plans (
-  id             TEXT        PRIMARY KEY,            -- 'free' | 'paid'
+  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'pro'
   name           TEXT        NOT NULL,
   price_display  TEXT        NOT NULL DEFAULT '',
   period         TEXT        NOT NULL DEFAULT '',
@@ -60,16 +62,21 @@ INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits)
 VALUES
-  ('free', 'Free', '$0', '1 month free', 'Trial',
-   'Try everything free for 30 days. Solo use only - no team members.',
-   'Start free trial', '/register', false, false, 1, 30, 7,
-   '["Solo user only (no team members)","5 workspaces","1,000 customer profiles","5 email campaigns","1,000 AI tokens","UTM tracking"]'::jsonb,
-   '{"profiles":1000,"campaigns":5,"ai_tokens":1000,"team_members":1,"workspaces":5}'::jsonb),
-  ('paid', 'Paid', 'Contact sales', '', null,
-   'For growing teams that need more power and fewer limits. Talk to our team to get set up.',
-   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Paid', true, true, 2, null, 7,
-   '["Up to 5 team members","5 workspaces","100,000 customer profiles","Unlimited email campaigns","Unlimited AI tokens","Advanced segmentation","Priority support"]'::jsonb,
-   '{"profiles":100000,"campaigns":null,"ai_tokens":null,"team_members":5,"workspaces":5}'::jsonb);
+  ('lite', 'Lite', '$100', '/month', null,
+   'Everything you need to get started with AI-powered customer data.',
+   'Start 30-day free trial', '/register', false, false, 1, 30, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","AI tokens included"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":50000000,"team_members":null,"workspaces":2}'::jsonb),
+  ('standard', 'Standard', '$199', '/month', 'Most popular',
+   'For growing teams that need more scale and unlimited campaigns.',
+   'Get started', '/register', false, true, 2, null, 7,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":200000000,"team_members":null,"workspaces":5}'::jsonb),
+  ('pro', 'Pro', 'Contact sales', '', null,
+   'For high-volume teams. Custom profile and AI limits, tailored to you.',
+   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
+   '["Unlimited team members","Unlimited workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens","Priority support"]'::jsonb,
+   '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
 -- ── Accounts (the org / billing root) ───────────────────────────────────────
 CREATE TABLE app.accounts (
@@ -78,9 +85,9 @@ CREATE TABLE app.accounts (
   updated_date    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   name            TEXT        NOT NULL DEFAULT '',
   slug            TEXT        NOT NULL DEFAULT '',
-  plan            TEXT        NOT NULL DEFAULT 'free' REFERENCES app.plans(id),
-  plan_expires_at TIMESTAMPTZ,                    -- free-trial end; null once on a paid plan
-  plan_upgraded_at TIMESTAMPTZ,                   -- when the account moved to 'paid' (stamped by trigger below)
+  plan            TEXT        NOT NULL DEFAULT 'lite' REFERENCES app.plans(id),
+  plan_expires_at TIMESTAMPTZ,                    -- trial end; null once paid (the sole "in trial" marker)
+  plan_upgraded_at TIMESTAMPTZ,                   -- when the trial converted to paid (stamped by trigger below)
   is_active       BOOLEAN     NOT NULL DEFAULT true,
   -- the account creator / billing owner; FK added after app.users exists below.
   owner_user_id   UUID,
@@ -91,17 +98,18 @@ CREATE UNIQUE INDEX accounts_slug_lower_idx ON app.accounts(LOWER(slug));
 CREATE TRIGGER accounts_updated_date BEFORE UPDATE ON app.accounts
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 
--- Stamp plan_upgraded_at the moment an account moves onto the paid plan (and
--- clear the now-irrelevant trial expiry). The upgrade itself is applied
--- out-of-band (sales sets app.accounts.plan = 'paid'); this keeps the date
--- accurate no matter how the change is made. Reverting to free clears the stamp.
+-- Tier-agnostic trial/upgrade stamping. An account is "in trial" iff
+-- plan_expires_at is set; converting to paid (sales clears the expiry) stamps
+-- plan_upgraded_at, and (re)entering a trial clears it. Keeps the date accurate
+-- no matter which tier (lite/standard/pro) the account lands on.
 CREATE OR REPLACE FUNCTION app.stamp_plan_upgraded_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.plan = 'paid' AND COALESCE(OLD.plan, '') <> 'paid' THEN
+  IF TG_OP = 'UPDATE'
+     AND OLD.plan_expires_at IS NOT NULL
+     AND NEW.plan_expires_at IS NULL THEN
     NEW.plan_upgraded_at := NOW();
-    NEW.plan_expires_at  := NULL;
-  ELSIF NEW.plan = 'free' AND OLD.plan <> 'free' THEN
+  ELSIF NEW.plan_expires_at IS NOT NULL THEN
     NEW.plan_upgraded_at := NULL;
   END IF;
   RETURN NEW;
@@ -109,7 +117,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER accounts_stamp_plan_upgraded
-  BEFORE INSERT OR UPDATE OF plan ON app.accounts
+  BEFORE INSERT OR UPDATE OF plan, plan_expires_at ON app.accounts
   FOR EACH ROW EXECUTE FUNCTION app.stamp_plan_upgraded_at();
 
 -- ── Users (login identities; one account each) ──────────────────────────────

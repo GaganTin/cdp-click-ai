@@ -35,18 +35,18 @@ export function createAdminRouter(pool) {
       const { rows } = await pool.query(`
         SELECT
           (SELECT COUNT(*) FROM app.accounts)                                   AS total_accounts,
-          (SELECT COUNT(*) FROM app.accounts WHERE plan = 'paid')               AS paid_accounts,
-          (SELECT COUNT(*) FROM app.accounts WHERE plan = 'free')               AS free_accounts,
+          (SELECT COUNT(*) FROM app.accounts WHERE plan_expires_at IS NULL)     AS paid_accounts,
+          (SELECT COUNT(*) FROM app.accounts WHERE plan_expires_at IS NOT NULL) AS free_accounts,
           (SELECT COUNT(*) FROM app.accounts WHERE is_active = false)           AS suspended_accounts,
           (SELECT COUNT(*) FROM app.users)                                      AS total_users,
           (SELECT COUNT(*) FROM app.companies)                                  AS total_workspaces,
           (SELECT COUNT(*) FROM app.accounts WHERE created_date > NOW() - INTERVAL '30 days') AS signups_30d,
           (SELECT COUNT(*) FROM app.accounts
-             WHERE plan = 'free' AND plan_expires_at IS NOT NULL AND plan_expires_at >  NOW()) AS active_trials,
+             WHERE plan_expires_at IS NOT NULL AND plan_expires_at >  NOW()) AS active_trials,
           (SELECT COUNT(*) FROM app.accounts
-             WHERE plan = 'free' AND plan_expires_at IS NOT NULL AND plan_expires_at <= NOW()) AS expired_trials,
+             WHERE plan_expires_at IS NOT NULL AND plan_expires_at <= NOW()) AS expired_trials,
           (SELECT COUNT(*) FROM app.accounts
-             WHERE plan = 'free' AND plan_expires_at IS NOT NULL
+             WHERE plan_expires_at IS NOT NULL
                AND plan_expires_at > NOW() AND plan_expires_at <= NOW() + INTERVAL '7 days') AS expiring_7d,
           (SELECT COUNT(*) FROM app.support_tickets WHERE status IN ('open', 'in_progress')) AS open_tickets,
           (SELECT COALESCE(SUM(total_tokens), 0) FROM app.ai_usage)                          AS total_ai_tokens,
@@ -214,18 +214,18 @@ export function createAdminRouter(pool) {
   });
 
   // ── PATCH /api/admin/accounts/:id ─────────────────────────────────────────
-  // Change plan (free|paid), set/extend trial expiry, suspend/reactivate, plus
-  // per-account limit overrides + billing notes (stored in settings JSONB).
-  // The app.stamp_plan_upgraded_at trigger stamps plan_upgraded_at + clears
-  // plan_expires_at on upgrade to paid automatically.
+  // Change plan (lite|standard|pro), set/extend trial expiry, suspend/reactivate,
+  // plus per-account limit overrides + billing notes (stored in settings JSONB).
+  // The app.stamp_plan_upgraded_at trigger stamps plan_upgraded_at when the trial
+  // expiry is cleared (i.e. the account converts to paid).
   router.patch("/accounts/:id", async (req, res) => {
     const { plan, plan_expires_at, is_active, limit_overrides, billing_notes, payment_reference } = req.body;
     const sets = [];
     const vals = [];
 
     if (plan !== undefined) {
-      if (!["free", "paid"].includes(plan)) {
-        return res.status(400).json({ error: "plan must be 'free' or 'paid'" });
+      if (!["lite", "standard", "pro"].includes(plan)) {
+        return res.status(400).json({ error: "plan must be 'lite', 'standard' or 'pro'" });
       }
       sets.push(`plan = $${sets.length + 1}`); vals.push(plan);
     }

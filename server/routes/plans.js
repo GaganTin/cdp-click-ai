@@ -2,26 +2,38 @@ import { Router } from "express";
 import { authenticate, requirePlatformAdmin } from "../middleware/auth.js";
 
 // Fallback used when DB is not available - mirrors the DB seed exactly.
-// Only two plans exist: 'free' (30-day trial) and 'paid' (contact sales).
+// Three tiers: 'lite' ($100/mo, 30-day trial), 'standard' ($199/mo), 'pro'
+// (contact sales). team_members:null => unlimited. ai_tokens are a generous
+// monthly token budget (gpt-5.4-mini @ $0.15/$0.60 per 1M tokens).
 export const FALLBACK_PLANS = [
   {
-    id: "free", name: "Free", price_display: "$0", period: "1 month free",
-    badge: "Trial",
-    description: "Try everything free for 30 days. Solo use only - no team members.",
-    cta_label: "Start free trial", cta_href: "/register", cta_external: false,
+    id: "lite", name: "Lite", price_display: "$100", period: "/month",
+    badge: null,
+    description: "Everything you need to get started with AI-powered customer data.",
+    cta_label: "Start 30-day free trial", cta_href: "/register", cta_external: false,
     is_highlighted: false, sort_order: 1, trial_days: 30, warning_days: 7,
-    features: ["Solo user only (no team members)", "5 workspaces", "1,000 customer profiles", "5 email campaigns", "1,000 AI tokens", "UTM tracking", "Read-only access after trial ends"],
-    limits: { profiles: 1000, campaigns: 5, ai_tokens: 1000, team_members: 1, workspaces: 5 },
+    features: ["Unlimited team members", "2 workspaces", "Up to 10,000 customer profiles", "AI Analyst", "Intelligent Segmentation", "UTM tracking", "AI Content & Traffic Analysis", "Dynamic Pop-up", "AI tokens included"],
+    limits: { profiles: 10000, campaigns: 5, ai_tokens: 50000000, team_members: null, workspaces: 2 },
     is_active: true,
   },
   {
-    id: "paid", name: "Paid", price_display: "Contact sales", period: "",
-    badge: null,
-    description: "For growing teams that need more power and fewer limits. Talk to our team to get set up.",
-    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Upgrade to Paid", cta_external: true,
+    id: "standard", name: "Standard", price_display: "$199", period: "/month",
+    badge: "Most popular",
+    description: "For growing teams that need more scale and unlimited campaigns.",
+    cta_label: "Get started", cta_href: "/register", cta_external: false,
     is_highlighted: true, sort_order: 2, trial_days: null, warning_days: 7,
-    features: ["Up to 5 team members", "5 workspaces", "100,000 customer profiles", "Unlimited email campaigns", "Unlimited AI tokens", "Advanced segmentation", "Priority support"],
-    limits: { profiles: 100000, campaigns: null, ai_tokens: null, team_members: 5, workspaces: 5 },
+    features: ["Unlimited team members", "5 workspaces", "Up to 50,000 customer profiles", "AI Analyst", "Intelligent Segmentation", "UTM tracking", "AI Content & Traffic Analysis", "Dynamic Pop-up", "Unlimited email campaigns", "More AI tokens"],
+    limits: { profiles: 50000, campaigns: null, ai_tokens: 200000000, team_members: null, workspaces: 5 },
+    is_active: true,
+  },
+  {
+    id: "pro", name: "Pro", price_display: "Contact sales", period: "",
+    badge: null,
+    description: "For high-volume teams. Custom profile and AI limits, tailored to you.",
+    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Upgrade to Pro", cta_external: true,
+    is_highlighted: false, sort_order: 3, trial_days: null, warning_days: 7,
+    features: ["Unlimited team members", "Unlimited workspaces", "Custom customer profile volume", "AI Analyst", "Intelligent Segmentation", "UTM tracking", "AI Content & Traffic Analysis", "Dynamic Pop-up", "Unlimited email campaigns", "More AI tokens", "Priority support"],
+    limits: { profiles: null, campaigns: null, ai_tokens: null, team_members: null, workspaces: null },
     is_active: true,
   },
 ];

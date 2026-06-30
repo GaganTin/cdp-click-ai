@@ -922,7 +922,7 @@ function CompanyTab({ company, onRefresh }) {
             />
           </Field>
           <Field label={t("Plan")} hint={t("Contact support to change your plan.")}>
-            <Input value={company?.plan || "free"} disabled className="opacity-60 cursor-not-allowed capitalize" />
+            <Input value={company?.plan || "lite"} disabled className="opacity-60 cursor-not-allowed capitalize" />
           </Field>
           <Button type="submit" size="sm" disabled={saving}>
             {saving ? t("Saving…") : t("Save changes")}
@@ -1517,7 +1517,7 @@ function BillingTab({ company }) {
         <div className="border border-border rounded-lg p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <p className="font-semibold text-base">{planConfig?.name ?? "Free"}</p>
+              <p className="font-semibold text-base">{planConfig?.name ?? "Lite"}</p>
               {planConfig?.badge && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted-foreground font-medium">
                   {planConfig.badge}
@@ -1546,7 +1546,7 @@ function BillingTab({ company }) {
           ) : planConfig?.price_display && (
             <p className="text-sm font-medium">
               {planConfig.price_display}
-              {planConfig.period && <span className="text-muted-foreground font-normal"> / {planConfig.period}</span>}
+              {planConfig.period && <span className="text-muted-foreground font-normal">{planConfig.period}</span>}
             </p>
           )}
         </div>

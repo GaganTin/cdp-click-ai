@@ -147,11 +147,13 @@ $$;
 -- ============================================================================
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
---  Only two plans exist: 'free' (a 30-day trial that goes read-only on expiry)
---  and 'paid' (unlocked by contacting sales - there is no in-app payment flow,
---  so the upgrade is applied out-of-band by setting app.accounts.plan = 'paid').
+--  Three tiers: 'lite' ($100/mo, the entry tier carrying a 30-day trial that
+--  goes read-only on expiry), 'standard' ($199/mo) and 'pro' (contact sales).
+--  There is no in-app payment flow - the paid upgrade is applied out-of-band by
+--  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
+--  by plan_expires_at, not the tier, so any tier could in principle carry one.
 CREATE TABLE app.plans (
-  id             TEXT        PRIMARY KEY,            -- 'free' | 'paid'
+  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'pro'
   name           TEXT        NOT NULL,
   price_display  TEXT        NOT NULL DEFAULT '',
   period         TEXT        NOT NULL DEFAULT '',
@@ -173,16 +175,21 @@ INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits)
 VALUES
-  ('free', 'Free', '$0', '1 month free', 'Trial',
-   'Try everything free for 30 days. Solo use only - no team members.',
-   'Start free trial', '/register', false, false, 1, 30, 7,
-   '["Solo user only (no team members)","5 workspaces","1,000 customer profiles","5 email campaigns","1,000 AI tokens","UTM tracking"]'::jsonb,
-   '{"profiles":1000,"campaigns":5,"ai_tokens":1000,"team_members":1,"workspaces":5}'::jsonb),
-  ('paid', 'Paid', 'Contact sales', '', null,
-   'For growing teams that need more power and fewer limits. Talk to our team to get set up.',
-   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Paid', true, true, 2, null, 7,
-   '["Up to 5 team members","5 workspaces","100,000 customer profiles","Unlimited email campaigns","Unlimited AI tokens","Advanced segmentation","Priority support"]'::jsonb,
-   '{"profiles":100000,"campaigns":null,"ai_tokens":null,"team_members":5,"workspaces":5}'::jsonb);
+  ('lite', 'Lite', '$100', '/month', null,
+   'Everything you need to get started with AI-powered customer data.',
+   'Start 30-day free trial', '/register', false, false, 1, 30, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","AI tokens included"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":50000000,"team_members":null,"workspaces":2}'::jsonb),
+  ('standard', 'Standard', '$199', '/month', 'Most popular',
+   'For growing teams that need more scale and unlimited campaigns.',
+   'Get started', '/register', false, true, 2, null, 7,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":200000000,"team_members":null,"workspaces":5}'::jsonb),
+  ('pro', 'Pro', 'Contact sales', '', null,
+   'For high-volume teams. Custom profile and AI limits, tailored to you.',
+   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
+   '["Unlimited team members","Unlimited workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens","Priority support"]'::jsonb,
+   '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
 -- ── Accounts (the org / billing root) ───────────────────────────────────────
 CREATE TABLE app.accounts (
@@ -191,9 +198,9 @@ CREATE TABLE app.accounts (
   updated_date    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   name            TEXT        NOT NULL DEFAULT '',
   slug            TEXT        NOT NULL DEFAULT '',
-  plan            TEXT        NOT NULL DEFAULT 'free' REFERENCES app.plans(id),
-  plan_expires_at TIMESTAMPTZ,                    -- free-trial end; null once on a paid plan
-  plan_upgraded_at TIMESTAMPTZ,                   -- when the account moved to 'paid' (stamped by trigger below)
+  plan            TEXT        NOT NULL DEFAULT 'lite' REFERENCES app.plans(id),
+  plan_expires_at TIMESTAMPTZ,                    -- trial end; null once paid (the sole "in trial" marker)
+  plan_upgraded_at TIMESTAMPTZ,                   -- when the trial converted to paid (stamped by trigger below)
   is_active       BOOLEAN     NOT NULL DEFAULT true,
   -- the account creator / billing owner; FK added after app.users exists below.
   owner_user_id   UUID,
@@ -204,17 +211,18 @@ CREATE UNIQUE INDEX accounts_slug_lower_idx ON app.accounts(LOWER(slug));
 CREATE TRIGGER accounts_updated_date BEFORE UPDATE ON app.accounts
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 
--- Stamp plan_upgraded_at the moment an account moves onto the paid plan (and
--- clear the now-irrelevant trial expiry). The upgrade itself is applied
--- out-of-band (sales sets app.accounts.plan = 'paid'); this keeps the date
--- accurate no matter how the change is made. Reverting to free clears the stamp.
+-- Tier-agnostic trial/upgrade stamping. An account is "in trial" iff
+-- plan_expires_at is set; converting to paid (sales clears the expiry) stamps
+-- plan_upgraded_at, and (re)entering a trial clears it. Keeps the date accurate
+-- no matter which tier (lite/standard/pro) the account lands on.
 CREATE OR REPLACE FUNCTION app.stamp_plan_upgraded_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  IF NEW.plan = 'paid' AND COALESCE(OLD.plan, '') <> 'paid' THEN
+  IF TG_OP = 'UPDATE'
+     AND OLD.plan_expires_at IS NOT NULL
+     AND NEW.plan_expires_at IS NULL THEN
     NEW.plan_upgraded_at := NOW();
-    NEW.plan_expires_at  := NULL;
-  ELSIF NEW.plan = 'free' AND OLD.plan <> 'free' THEN
+  ELSIF NEW.plan_expires_at IS NOT NULL THEN
     NEW.plan_upgraded_at := NULL;
   END IF;
   RETURN NEW;
@@ -222,7 +230,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER accounts_stamp_plan_upgraded
-  BEFORE INSERT OR UPDATE OF plan ON app.accounts
+  BEFORE INSERT OR UPDATE OF plan, plan_expires_at ON app.accounts
   FOR EACH ROW EXECUTE FUNCTION app.stamp_plan_upgraded_at();
 
 -- ── Users (login identities; one account each) ──────────────────────────────
@@ -242,6 +250,9 @@ CREATE TABLE app.users (
   -- platform-owner flag: sits ABOVE per-workspace roles. true = full access to
   -- the Studio admin console (/api/admin/*) and every client account.
   is_platform_admin    BOOLEAN     NOT NULL DEFAULT false,
+  -- email-OTP two-factor: when true, password sign-in requires a second factor
+  -- (a 6-digit code emailed via app.mfa_challenges). Opt-in from Settings.
+  mfa_enabled          BOOLEAN     NOT NULL DEFAULT false,
   last_login_at        TIMESTAMPTZ,
   -- set on password change/reset; tokens issued before this are rejected by
   -- authenticate (so a password change signs out all other sessions).
@@ -285,6 +296,28 @@ CREATE TABLE app.email_verifications (
   expires_at    TIMESTAMPTZ NOT NULL,              -- code TTL (15 min)
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── MFA challenges (email-OTP second factor) ────────────────────────────────
+--  Short-lived 6-digit codes for two-factor auth. purpose distinguishes:
+--    'login'  - issued after a correct password when mfa_enabled; the challenge
+--               id (an unguessable UUID) is handed to the client and completed
+--               via POST /api/auth/login/mfa. No session exists until then.
+--    'enable' - issued from Settings to confirm the user can receive codes
+--               before mfa_enabled is flipped on (POST /api/auth/mfa/enable).
+--  The raw code is never stored (sha256 only). Codes expire (10 min) and the
+--  attempt counter caps brute-force guessing. Rows are deleted on use/expiry.
+CREATE TABLE app.mfa_challenges (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  purpose     TEXT        NOT NULL DEFAULT 'login'
+                CHECK (purpose IN ('login','enable')),
+  code_hash   TEXT        NOT NULL,                -- sha256 of the 6-digit code
+  attempts    INTEGER     NOT NULL DEFAULT 0,      -- wrong-code guesses (capped at 5)
+  expires_at  TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,                         -- set when the code is accepted
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX mfa_challenges_user_idx ON app.mfa_challenges(user_id);
 
 -- ── Companies (= workspaces) ────────────────────────────────────────────────
 CREATE TABLE app.companies (
@@ -436,9 +469,11 @@ CREATE INDEX audit_log_account_idx  ON app.audit_log(account_id, occurred_at DES
 CREATE INDEX audit_log_resource_idx ON app.audit_log(resource_type, resource_id);
 
 -- ── Blocked emails ──────────────────────────────────────────────────────────
--- Emails from DELETED accounts. May never sign up or sign in again, on any
--- provider. NO foreign key, so the row survives the account-deletion cascade.
--- Remove a row to let an email be used again.
+-- Emails that owned/belonged to a DELETED account. They may never sign up or
+-- sign in again, on any provider (password, Google, Microsoft). Deliberately has
+-- NO foreign key: the row must survive the account-deletion cascade that removes
+-- the original user. Populated by the account-delete paths; checked by register
+-- and OAuth provisioning. Remove a row to let an email be used again.
 CREATE TABLE app.blocked_emails (
   email      TEXT        PRIMARY KEY,          -- stored lowercased
   reason     TEXT        NOT NULL DEFAULT 'account_deleted',
@@ -478,6 +513,57 @@ CREATE TABLE app.usage_events (
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX usage_events_company_type_idx ON app.usage_events(company_id, event_type, occurred_at DESC);
+
+-- ── AI usage + cost tracking (per user / per workspace / per account) ───────
+--  usage_events above tracks the ai_token QUOTA (company-scoped, plan limits).
+--  The tables below track billable COST: every AI call records its token split
+--  and a frozen dollar cost (rate × tokens at insert time). account_ai_costs is
+--  the per-account rollup. Rates live in app.ai_model_pricing and are editable
+--  in Studio. (Mirrored in server/sql/migrations/2026-06-23_ai_usage_cost.sql
+--  for existing databases - keep the two in sync.)
+CREATE TABLE app.ai_model_pricing (
+  model         TEXT          PRIMARY KEY,
+  input_per_1m  NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
+  output_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
+  currency      TEXT          NOT NULL DEFAULT 'USD',
+  updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
+  ('gpt-5.4-mini', 0.15, 0.60, 'USD');
+
+CREATE TABLE app.ai_usage (
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id    UUID          NOT NULL REFERENCES app.accounts(id)  ON DELETE CASCADE,
+  -- kept (not cascaded) so account-level spend history survives workspace deletion
+  company_id    UUID          REFERENCES app.companies(id) ON DELETE SET NULL,
+  user_id       UUID          REFERENCES app.users(id)     ON DELETE SET NULL,
+  feature       TEXT          NOT NULL,   -- analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
+  model         TEXT          NOT NULL,
+  input_tokens  INTEGER       NOT NULL DEFAULT 0,
+  output_tokens INTEGER       NOT NULL DEFAULT 0,
+  total_tokens  INTEGER       NOT NULL DEFAULT 0,
+  cost          NUMERIC(14,6) NOT NULL DEFAULT 0,    -- frozen at insert time
+  currency      TEXT          NOT NULL DEFAULT 'USD',
+  occurred_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  metadata      JSONB         NOT NULL DEFAULT '{}'
+);
+CREATE INDEX ai_usage_account_idx ON app.ai_usage(account_id, occurred_at DESC);
+CREATE INDEX ai_usage_company_idx ON app.ai_usage(company_id, occurred_at DESC);
+CREATE INDEX ai_usage_user_idx    ON app.ai_usage(user_id, occurred_at DESC);
+
+CREATE OR REPLACE VIEW app.account_ai_costs AS
+  SELECT a.id                                        AS account_id,
+         a.name                                      AS account_name,
+         a.plan                                      AS plan,
+         COALESCE(SUM(u.input_tokens),  0)::bigint   AS input_tokens,
+         COALESCE(SUM(u.output_tokens), 0)::bigint   AS output_tokens,
+         COALESCE(SUM(u.total_tokens),  0)::bigint   AS total_tokens,
+         COALESCE(SUM(u.cost), 0)::numeric(14,6)     AS total_cost,
+         COALESCE(MAX(u.currency), 'USD')            AS currency,
+         MAX(u.occurred_at)                          AS last_used_at
+    FROM app.accounts a
+    LEFT JOIN app.ai_usage u ON u.account_id = a.id
+   GROUP BY a.id, a.name, a.plan;
 
 -- ── In-app notifications (the bell) ─────────────────────────────────────────
 --  One row per (recipient user × workspace × event). Producers fan an event out
@@ -1077,6 +1163,8 @@ CREATE TABLE app.attributes (
   metadata        JSONB       NOT NULL DEFAULT '{}'
 );
 CREATE INDEX attributes_company_idx ON app.attributes(company_id, source);
+-- Attribute names are unique within a workspace (case-insensitive).
+CREATE UNIQUE INDEX attributes_company_lower_name_idx ON app.attributes(company_id, lower(name));
 CREATE TRIGGER attributes_updated_date BEFORE UPDATE ON app.attributes
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 
@@ -1116,7 +1204,7 @@ CREATE TABLE app.web_pages (
   word_count      INTEGER     NOT NULL DEFAULT 0,
   is_valid        BOOLEAN     NOT NULL DEFAULT true,      -- overall validity = valid_content AND valid_title
   is_valid_content BOOLEAN    NOT NULL DEFAULT true,      -- body length ≥ min & no error strings
-  is_valid_title  BOOLEAN     NOT NULL DEFAULT true,      -- title length ≥ 5 chars & no error strings
+  is_valid_title  BOOLEAN     NOT NULL DEFAULT true,      -- title ≥ valid_title_min_length (default 1) & no error strings
   is_excluded     BOOLEAN     NOT NULL DEFAULT false,     -- "Excluded Pages"
   excluded_type   TEXT,                                   -- exact | pattern (how it was excluded)
   excluded_value  TEXT,                                   -- the URL or pattern that excluded it
@@ -1507,6 +1595,8 @@ CREATE TABLE ga_landing.path_exploration (
 CREATE INDEX gal_pe_company_apid_idx ON ga_landing.path_exploration(company_id, capsuite_apid);
 CREATE INDEX gal_pe_company_date_idx ON ga_landing.path_exploration(company_id, date);
 CREATE INDEX gal_pe_company_event_idx ON ga_landing.path_exploration(company_id, event_name);
+-- profile-mapping: capsuite_uid lookup (logged-in visitor -> known member)
+CREATE INDEX gal_pe_company_uid_idx ON ga_landing.path_exploration(company_id, capsuite_uid);
 
 -- ── Same, with engagement duration (dwell-time analysis) ────────────────────
 CREATE TABLE ga_landing.path_exploration_duration (
@@ -1825,6 +1915,8 @@ CREATE TABLE ga_landing.purchase_list (
   PRIMARY KEY (company_id, id)
 );
 CREATE INDEX gal_pl_company_date_idx ON ga_landing.purchase_list(company_id, date);
+-- profile-mapping: trxn_id lookup (GA purchase -> commerce/manual order -> buyer)
+CREATE INDEX gal_pl_company_trxn_idx ON ga_landing.purchase_list(company_id, trxn_id);
 
 -- ── Sync control / incremental watermark (one row per workspace × report) ────
 --  The DAGs read this BEFORE each fetch to decide the start date, and advance
@@ -2835,3 +2927,288 @@ ALTER TABLE app.company_report_config
   ADD COLUMN IF NOT EXISTS gsc_reports JSONB NOT NULL DEFAULT '{
     "keyword_performance": {"isDebugging":false,"debugStartDate":"2025-07-30"}
   }';
+
+
+-- ===================== migrations/2026-06-23_ai_usage_cost.sql =====================
+
+-- ============================================================================
+--  2026-06-23_ai_usage_cost.sql
+--  AI token usage + cost tracking, per user / per workspace(company) / per
+--  account. Idempotent (safe on existing AND fresh databases).
+--
+--    app.ai_model_pricing  - editable $/1M-token rates per model (Studio-managed)
+--    app.ai_usage          - one row per AI call: tokens + frozen cost, attributed
+--                            to account_id (always), company_id + user_id (when known)
+--    app.account_ai_costs  - rollup VIEW: total tokens + cost per account
+--
+--  Cost is computed and STORED at insert time so historical spend never shifts
+--  when the pricing table is later edited. company_id is ON DELETE SET NULL so an
+--  account's lifetime AI spend survives a workspace deletion.
+-- ============================================================================
+
+-- ── Editable model pricing (rates are USD per 1,000,000 tokens) ─────────────
+CREATE TABLE IF NOT EXISTS app.ai_model_pricing (
+  model         TEXT          PRIMARY KEY,
+  input_per_1m  NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
+  output_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
+  currency      TEXT          NOT NULL DEFAULT 'USD',
+  updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+-- Seed the deployment in use. Editable later in Studio; ON CONFLICT keeps any
+-- admin-edited rate on re-run.
+INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
+  ('gpt-5.4-mini', 0.15, 0.60, 'USD')
+ON CONFLICT (model) DO NOTHING;
+
+-- ── AI usage ledger (per call) ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app.ai_usage (
+  id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id    UUID          NOT NULL REFERENCES app.accounts(id)  ON DELETE CASCADE,
+  -- kept (not cascaded) so account-level spend history survives workspace deletion
+  company_id    UUID          REFERENCES app.companies(id) ON DELETE SET NULL,
+  user_id       UUID          REFERENCES app.users(id)     ON DELETE SET NULL,
+  feature       TEXT          NOT NULL,   -- analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
+  model         TEXT          NOT NULL,
+  input_tokens  INTEGER       NOT NULL DEFAULT 0,
+  output_tokens INTEGER       NOT NULL DEFAULT 0,
+  total_tokens  INTEGER       NOT NULL DEFAULT 0,
+  cost          NUMERIC(14,6) NOT NULL DEFAULT 0,    -- frozen at insert time
+  currency      TEXT          NOT NULL DEFAULT 'USD',
+  occurred_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  metadata      JSONB         NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ai_usage_account_idx ON app.ai_usage(account_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS ai_usage_company_idx ON app.ai_usage(company_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS ai_usage_user_idx    ON app.ai_usage(user_id, occurred_at DESC);
+
+-- ── Per-account rollup (the "cost of AI used per account" table) ────────────
+CREATE OR REPLACE VIEW app.account_ai_costs AS
+  SELECT a.id                                        AS account_id,
+         a.name                                      AS account_name,
+         a.plan                                      AS plan,
+         COALESCE(SUM(u.input_tokens),  0)::bigint   AS input_tokens,
+         COALESCE(SUM(u.output_tokens), 0)::bigint   AS output_tokens,
+         COALESCE(SUM(u.total_tokens),  0)::bigint   AS total_tokens,
+         COALESCE(SUM(u.cost), 0)::numeric(14,6)     AS total_cost,
+         COALESCE(MAX(u.currency), 'USD')            AS currency,
+         MAX(u.occurred_at)                          AS last_used_at
+    FROM app.accounts a
+    LEFT JOIN app.ai_usage u ON u.account_id = a.id
+   GROUP BY a.id, a.name, a.plan;
+
+
+-- ===================== migrations/2026-06-24_announcements.sql =====================
+
+-- ============================================================================
+--  2026-06-24_announcements.sql
+--  Platform-wide announcement banners. A platform owner ("Studio") can publish
+--  an app-wide banner shown to EVERY user across every account/workspace - e.g.
+--  scheduled-maintenance notices, incident updates or product announcements.
+--
+--  This is distinct from app.notifications (per-user, per-workspace bell feed):
+--  announcements are global broadcasts rendered as a top-of-app banner.
+--
+--  Dismissal is client-side (localStorage keyed by announcement id), matching
+--  the existing TrialBanner pattern - no per-user dismissal table needed.
+--
+--  Idempotent. Picked up automatically by scripts/apply_migrations.cjs.
+-- ============================================================================
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS app.announcements (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- 'level' drives the banner's colour/icon in the UI.
+  level       TEXT        NOT NULL DEFAULT 'info'
+                          CHECK (level IN ('info', 'success', 'warning', 'maintenance')),
+  title       TEXT,                                    -- optional bold lead-in
+  body        TEXT        NOT NULL,                     -- the message itself
+  link_url    TEXT,                                     -- optional call-to-action link
+  link_label  TEXT,
+  is_active   BOOLEAN     NOT NULL DEFAULT true,        -- master on/off switch
+  dismissible BOOLEAN     NOT NULL DEFAULT true,        -- can a user close it?
+  starts_at   TIMESTAMPTZ,                              -- NULL = live immediately
+  ends_at     TIMESTAMPTZ,                              -- NULL = no auto-expiry
+  created_by  UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- The user-facing "active now" lookup filters on is_active + the time window.
+CREATE INDEX IF NOT EXISTS idx_announcements_active
+  ON app.announcements (is_active, starts_at, ends_at);
+
+COMMIT;
+
+
+-- ===================== migrations/2026-06-24_attr_title_min_length.sql =====================
+
+-- 2026-06-24_attr_title_min_length.sql
+-- Add a configurable minimum TITLE length for content-attribute crawling, mirroring
+-- valid_content_min_length. Default 1 (was a hard-coded 5 in code). Idempotent.
+
+ALTER TABLE app.web_content_html_elements
+  ADD COLUMN IF NOT EXISTS valid_title_min_length INTEGER NOT NULL DEFAULT 1;
+
+
+-- ===================== migrations/2026-06-24_attr_unique_name.sql =====================
+
+-- 2026-06-24_attr_unique_name.sql
+-- Harden the app-level duplicate-name check with a DB constraint: attribute names
+-- are unique within a workspace (case-insensitive).
+--
+-- REQUIRES no existing duplicates. If this CREATE fails, find and resolve them first:
+--   SELECT company_id, lower(name) AS n, count(*), array_agg(id)
+--   FROM app.attributes GROUP BY company_id, lower(name) HAVING count(*) > 1;
+-- then rename/delete the extras and re-run.
+
+CREATE UNIQUE INDEX IF NOT EXISTS attributes_company_lower_name_idx
+  ON app.attributes (company_id, lower(name));
+
+
+-- ===================== migrations/2026-06-25_profile_mapping_indexes.sql =====================
+
+-- Profile-mapping support indexes (build_profile_mapping DAG + Node refreshProfiles).
+-- Non-destructive; safe to re-run. IF NOT EXISTS so this is idempotent on the live DB.
+
+-- capsuite_uid lookup: logged-in visitor -> known member (mapping methods 2/3b).
+CREATE INDEX IF NOT EXISTS gal_pe_company_uid_idx
+  ON ga_landing.path_exploration(company_id, capsuite_uid);
+
+-- trxn_id lookup: GA purchase -> commerce/manual order -> buyer (mapping method 1/1b).
+CREATE INDEX IF NOT EXISTS gal_pl_company_trxn_idx
+  ON ga_landing.purchase_list(company_id, trxn_id);
+
+
+-- ===================== migrations/2026-06-26_blocked_emails.sql =====================
+
+-- 2026-06-26  Blocked emails (deleted-account lockout)
+-- Emails from deleted accounts must never sign up or sign in again, on any
+-- provider. No foreign key so the row survives the account-deletion cascade.
+CREATE TABLE IF NOT EXISTS app.blocked_emails (
+  email      TEXT        PRIMARY KEY,          -- stored lowercased
+  reason     TEXT        NOT NULL DEFAULT 'account_deleted',
+  account_id UUID,                             -- the now-deleted account (no FK)
+  blocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+
+-- ===================== migrations/2026-06-26_mfa_email_otp.sql =====================
+
+-- Email-OTP two-factor authentication (opt-in). Mirrors the additions in
+-- server/sql/02_accounts_auth.sql for already-provisioned databases.
+-- Non-destructive and idempotent (IF NOT EXISTS), safe to re-run.
+
+-- Opt-in flag on the login identity.
+ALTER TABLE app.users
+  ADD COLUMN IF NOT EXISTS mfa_enabled BOOLEAN NOT NULL DEFAULT false;
+
+-- Short-lived 6-digit codes for the second factor (login) and for confirming
+-- the user can receive codes when turning 2FA on (enable). Raw code never stored.
+CREATE TABLE IF NOT EXISTS app.mfa_challenges (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID        NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  purpose     TEXT        NOT NULL DEFAULT 'login'
+                CHECK (purpose IN ('login','enable')),
+  code_hash   TEXT        NOT NULL,
+  attempts    INTEGER     NOT NULL DEFAULT 0,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS mfa_challenges_user_idx ON app.mfa_challenges(user_id);
+
+
+-- ===================== migrations/2026-06-30_lite_standard_pro_plans.sql =====================
+
+-- ============================================================================
+-- 2026-06-30_lite_standard_pro_plans.sql
+-- Replace the { free, paid } plan model with { lite, standard, pro }.
+--
+--   Lite     ($100/mo, 30-day trial) - entry tier   (was 'free')
+--   Standard ($199/mo)               - growth tier   (was 'paid')
+--   Pro      (contact sales)         - custom tier   (new)
+--
+-- Account remap: free -> lite (trial preserved), paid -> standard.
+--
+-- The trial / read-only state is now driven purely by plan_expires_at (a non-NULL
+-- value means "in trial"), so it is tier-agnostic: Lite carries a 30-day trial,
+-- Standard/Pro never do. There is still no in-app payment flow - the paid upgrade
+-- is applied out-of-band by sales (set plan + clear plan_expires_at).
+--
+-- Idempotent migration for EXISTING databases. New databases get this state
+-- directly from 02_accounts_auth.sql. Safe to run more than once.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
+--    team_members=null => unlimited; ai_tokens are a generous monthly token
+--    budget (gpt-5.4-mini @ $0.15/$0.60 per 1M => Lite cap ~$11, Standard ~$44).
+INSERT INTO app.plans
+  (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
+   is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
+VALUES
+  ('lite', 'Lite', '$100', '/month', NULL,
+   'Everything you need to get started with AI-powered customer data.',
+   'Start 30-day free trial', '/register', false, false, 1, 30, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","AI tokens included"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":50000000,"team_members":null,"workspaces":2}'::jsonb,
+   true),
+  ('standard', 'Standard', '$199', '/month', 'Most popular',
+   'For growing teams that need more scale and unlimited campaigns.',
+   'Get started', '/register', false, true, 2, NULL, 7,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":200000000,"team_members":null,"workspaces":5}'::jsonb,
+   true),
+  ('pro', 'Pro', 'Contact sales', '', NULL,
+   'For high-volume teams. Custom profile and AI limits, tailored to you.',
+   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, NULL, 7,
+   '["Unlimited team members","Unlimited workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens","Priority support"]'::jsonb,
+   '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb,
+   true)
+ON CONFLICT (id) DO UPDATE SET
+  name=EXCLUDED.name, price_display=EXCLUDED.price_display, period=EXCLUDED.period,
+  badge=EXCLUDED.badge, description=EXCLUDED.description, cta_label=EXCLUDED.cta_label,
+  cta_href=EXCLUDED.cta_href, cta_external=EXCLUDED.cta_external,
+  is_highlighted=EXCLUDED.is_highlighted, sort_order=EXCLUDED.sort_order,
+  trial_days=EXCLUDED.trial_days, warning_days=EXCLUDED.warning_days,
+  features=EXCLUDED.features, limits=EXCLUDED.limits, is_active=EXCLUDED.is_active;
+
+-- 2. Remap existing accounts/workspaces onto the new tiers. plan_expires_at is
+--    left untouched, so any in-flight Lite (was free) trial keeps its end date.
+UPDATE app.accounts  SET plan = 'lite'     WHERE plan = 'free';
+UPDATE app.accounts  SET plan = 'standard' WHERE plan = 'paid';
+UPDATE app.companies SET plan = 'lite'     WHERE plan = 'free';
+UPDATE app.companies SET plan = 'standard' WHERE plan = 'paid';
+
+-- 3. New signups default to the Lite entry tier.
+ALTER TABLE app.accounts ALTER COLUMN plan SET DEFAULT 'lite';
+
+-- 4. Trial/upgrade stamping, made tier-agnostic. An account is "in trial" iff
+--    plan_expires_at is set. Converting to paid (sales clears the expiry) stamps
+--    plan_upgraded_at; (re)entering a trial clears it.
+CREATE OR REPLACE FUNCTION app.stamp_plan_upgraded_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND OLD.plan_expires_at IS NOT NULL
+     AND NEW.plan_expires_at IS NULL THEN
+    NEW.plan_upgraded_at := NOW();
+  ELSIF NEW.plan_expires_at IS NOT NULL THEN
+    NEW.plan_upgraded_at := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS accounts_stamp_plan_upgraded ON app.accounts;
+CREATE TRIGGER accounts_stamp_plan_upgraded
+  BEFORE INSERT OR UPDATE OF plan, plan_expires_at ON app.accounts
+  FOR EACH ROW EXECUTE FUNCTION app.stamp_plan_upgraded_at();
+
+-- 5. Retire the obsolete catalog rows (all FKs now point at the new tiers).
+DELETE FROM app.plans WHERE id IN ('free', 'paid');
+
+COMMIT;

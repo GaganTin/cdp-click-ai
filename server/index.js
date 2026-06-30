@@ -1719,14 +1719,19 @@ app.post("/api/functions/deleteConversation", authenticate, async (req, res) => 
 });
 
 // ── LLM integration (chart editor, explainers) ────────────────────────────────
-app.post("/api/integrations/llm", async (req, res) => {
+app.post("/api/integrations/llm", authenticate, async (req, res) => {
   if (!aiClient) {
     return res.status(503).json({ error: "Azure OpenAI is not configured." });
   }
+  // Tenant-scope the call so it can't be used as an anonymous GPT proxy and so
+  // its token spend is attributed to a workspace (recorded via runSimpleLLM).
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
   try {
     const content = await runSimpleLLM(
       String(req.body.prompt || ""),
-      !!req.body.response_json_schema
+      !!req.body.response_json_schema,
+      { companyId, userId: req.user?.id, feature: "llm" }
     );
     if (req.body.response_json_schema) return res.json(JSON.parse(content));
     return res.json(content);
@@ -3179,7 +3184,7 @@ if (pool) {
 } else {
   // Fallback local-mode (no DB) - return static data so the UI is usable
   app.get("/api/plans", (_req, res) => res.json(FALLBACK_PLANS));
-  const LOCAL_COMPANY = { id: "local-company", name: "Local Workspace", slug: "local", plan: "free", role: "owner", logo_url: null, created_date: new Date().toISOString() };
+  const LOCAL_COMPANY = { id: "local-company", name: "Local Workspace", slug: "local", plan: "standard", role: "owner", logo_url: null, created_date: new Date().toISOString() };
   app.get("/api/auth/me", (_req, res) =>
     res.json({ id: "local-user", email: "local@cdp-click-ai", role: "admin", full_name: "Local User", companies: [LOCAL_COMPANY] })
   );

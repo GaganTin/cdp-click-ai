@@ -41,12 +41,13 @@ export function fmtCost(v, currency = "USD") {
 }
 
 export function PlanBadge({ plan }) {
-  const paid = plan === "paid";
+  // Higher paid tiers (standard/pro) get the solid badge; Lite is the entry tier.
+  const highlighted = plan === "standard" || plan === "pro";
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
-      paid ? "bg-foreground text-background" : "bg-secondary text-muted-foreground border border-border"
+      highlighted ? "bg-foreground text-background" : "bg-secondary text-muted-foreground border border-border"
     }`}>
-      {plan || "free"}
+      {plan || "lite"}
     </span>
   );
 }
@@ -62,10 +63,10 @@ export function StatusPill({ active }) {
   );
 }
 
-// Trial status string from an account row.
+// Trial status string from an account row. Trial state is tier-agnostic: an
+// account is in a trial iff it has a plan_expires_at (null once paid).
 export function trialLabel(account) {
-  if (!account || account.plan === "paid") return null;
-  if (!account.plan_expires_at) return null;
+  if (!account || !account.plan_expires_at) return null;
   const exp = new Date(account.plan_expires_at).getTime();
   const days = Math.ceil((exp - Date.now()) / (24 * 60 * 60 * 1000));
   if (days < 0)  return { text: `Trial ended ${Math.abs(days)}d ago`, expired: true };
@@ -73,9 +74,9 @@ export function trialLabel(account) {
   return { text: `Trial: ${days}d left`, expired: false };
 }
 
-// Days until a free account's trial ends (null if not on a trial / paid).
+// Days until an account's trial ends (null if not on a trial / already paid).
 export function trialDaysLeft(account) {
-  if (!account || account.plan !== "free" || !account.plan_expires_at) return null;
+  if (!account || !account.plan_expires_at) return null;
   return Math.ceil((new Date(account.plan_expires_at).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
 }
 
