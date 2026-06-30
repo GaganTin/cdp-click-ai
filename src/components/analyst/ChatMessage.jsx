@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { fmtCredits } from "@/lib/credits";
 import MiniChart from "../dashboard/MiniChart";
 
 const FunctionDisplay = ({ toolCall }) => {
@@ -804,7 +805,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
             </Button>
             {message.token_usage?.total > 0 && (
               <span className="text-[10px] text-muted-foreground/60 font-mono select-none">
-                {message.token_usage.total.toLocaleString()} tokens
+                {fmtCredits(message.token_usage.total)} credits
               </span>
             )}
           </div>

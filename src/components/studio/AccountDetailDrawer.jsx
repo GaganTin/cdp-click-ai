@@ -11,14 +11,25 @@ import {
   SlidersHorizontal, Receipt, MailCheck, DollarSign,
 } from "lucide-react";
 import { fmtDate, fmtRelative, toDateInput, StatusPill, trialLabel, fmtCost } from "./helpers.jsx";
+import { toCredits, toTokens } from "@/lib/credits";
 
 const LIMIT_FIELDS = [
   ["profiles",     "Profiles"],
   ["campaigns",    "Campaigns"],
-  ["ai_tokens",    "AI tokens"],
+  ["ai_tokens",    "AI credits"],
   ["team_members", "Team members"],
   ["workspaces",   "Workspaces"],
 ];
+
+// Limit overrides are stored as raw values; ai_tokens is shown/edited in credits
+// (100,000 tokens = 1 credit), so convert at the load (raw->display) and save
+// (display->raw) boundaries.
+const overridesToDisplay = (ov = {}) =>
+  Object.fromEntries(Object.entries(ov).map(([k, v]) =>
+    [k, v == null ? "" : String(k === "ai_tokens" ? toCredits(v) : v)]));
+const overridesToRaw = (ov = {}) =>
+  Object.fromEntries(Object.entries(ov).map(([k, v]) =>
+    [k, k === "ai_tokens" && v !== "" && v != null ? String(toTokens(Number(v))) : v]));
 
 // Right-side slide-over showing one account's users, workspaces and usage, plus
 // owner controls: plan, trial, suspend, per-account limit overrides, billing
@@ -47,8 +58,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
       setExpiry(toDateInput(account.plan_expires_at));
       setActive(account.is_active !== false);
       const s = account.settings || {};
-      const ov = s.limit_overrides || {};
-      setOverrides(Object.fromEntries(Object.entries(ov).map(([k, v]) => [k, v == null ? "" : String(v)])));
+      setOverrides(overridesToDisplay(s.limit_overrides || {}));
       setBillingNotes(s.billing_notes || "");
       setPaymentRef(s.payment_reference || "");
     }
@@ -95,10 +105,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
     onError: (e) => toast.error(e.message || "Delete failed"),
   });
 
-  const origOverrides = (() => {
-    const ov = account?.settings?.limit_overrides || {};
-    return Object.fromEntries(Object.entries(ov).map(([k, v]) => [k, v == null ? "" : String(v)]));
-  })();
+  const origOverrides = overridesToDisplay(account?.settings?.limit_overrides || {});
 
   const dirty = account && (
     plan !== (account.plan || "lite") ||
@@ -116,7 +123,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
       // Trial state is tier-agnostic: a set expiry means "on trial", clearing it
       // converts to paid (the DB trigger stamps plan_upgraded_at).
       plan_expires_at: expiry ? new Date(expiry).toISOString() : null,
-      limit_overrides: overrides,
+      limit_overrides: overridesToRaw(overrides),
       billing_notes: billingNotes,
       payment_reference: paymentRef,
     });
@@ -189,7 +196,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
               </p>
               <div className="grid grid-cols-2 gap-3">
                 {LIMIT_FIELDS.map(([key, label]) => {
-                  const base = baseLimits[key];
+                  const base = key === "ai_tokens" && baseLimits[key] != null ? toCredits(baseLimits[key]) : baseLimits[key];
                   return (
                     <div key={key}>
                       <label className="block text-xs text-muted-foreground mb-1">{label}</label>
@@ -238,7 +245,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                       <StatusPill active={w.is_active !== false} />
                     </div>
                     <div className="grid grid-cols-5 gap-2 mt-3 text-center">
-                      {[["Members", w.member_count], ["Profiles", w.profiles], ["Campaigns", w.campaigns], ["AI tokens", w.ai_tokens], ["AI cost", w.ai_cost, true]].map(([l, v, money]) => (
+                      {[["Members", w.member_count], ["Profiles", w.profiles], ["Campaigns", w.campaigns], ["AI credits", toCredits(w.ai_tokens)], ["AI cost", w.ai_cost, true]].map(([l, v, money]) => (
                         <div key={l}>
                           <p className="text-sm font-semibold tabular-nums">{money ? fmtCost(v) : Number(v).toLocaleString()}</p>
                           <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{l}</p>
@@ -260,8 +267,8 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                 <div className="grid grid-cols-3 gap-2 text-center border border-border rounded-lg p-3 bg-secondary/20">
                   {[
                     ["Total cost", fmtCost(data.ai_usage.total_cost, data.ai_usage.currency)],
-                    ["Total tokens", Number(data.ai_usage.total_tokens).toLocaleString()],
-                    ["In / Out", `${Number(data.ai_usage.input_tokens).toLocaleString()} / ${Number(data.ai_usage.output_tokens).toLocaleString()}`],
+                    ["Total credits", toCredits(data.ai_usage.total_tokens).toLocaleString()],
+                    ["In / Out", `${toCredits(data.ai_usage.input_tokens).toLocaleString()} / ${toCredits(data.ai_usage.output_tokens).toLocaleString()}`],
                   ].map(([l, v]) => (
                     <div key={l}>
                       <p className="text-sm font-semibold tabular-nums">{v}</p>
@@ -276,7 +283,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                       <thead className="bg-secondary/40 text-[11px] uppercase tracking-wide text-muted-foreground">
                         <tr>
                           <th className="text-left font-medium px-3 py-2">By user</th>
-                          <th className="text-right font-medium px-3 py-2">Tokens</th>
+                          <th className="text-right font-medium px-3 py-2">Credits</th>
                           <th className="text-right font-medium px-3 py-2">Cost</th>
                         </tr>
                       </thead>
@@ -284,7 +291,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                         {data.ai_usage.by_user.map((r) => (
                           <tr key={r.user_id || "unattributed"} className="border-t border-border">
                             <td className="px-3 py-2 truncate">{r.email || r.full_name || "Unattributed"}</td>
-                            <td className="px-3 py-2 text-right tabular-nums">{Number(r.tokens).toLocaleString()}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{toCredits(r.tokens).toLocaleString()}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{fmtCost(r.cost, data.ai_usage.currency)}</td>
                           </tr>
                         ))}

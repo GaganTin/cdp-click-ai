@@ -1,10 +1,32 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { appClient } from "@/api/appClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const EMPTY = { name: "", base_url: "", utm_source: "", utm_medium: "", utm_campaign: "", utm_term: "", utm_content: "", status: "draft" };
+
+// Single-value input with a suggestion dropdown (native datalist): users pick a
+// known value or type a brand-new one. utm_source / utm_medium each take ONE
+// value, so this replaces the old free-text input whose "google, newsletter"
+// placeholder misleadingly implied multiple comma-separated values were allowed.
+function ComboInput({ value, onChange, placeholder, options }) {
+  const listId = useId();
+  return (
+    <>
+      <Input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        list={listId} autoComplete="off" className="mt-1" />
+      <datalist id={listId}>
+        {options.map(o => <option key={o} value={o} />)}
+      </datalist>
+    </>
+  );
+}
+
+const uniqSort = (...lists) =>
+  [...new Set(lists.flat().filter(Boolean).map(String))].sort((a, b) => a.localeCompare(b));
 
 function buildUTMUrl(form) {
   if (!form.base_url) return "";
@@ -27,12 +49,29 @@ function splitUrl(url = "") {
   return { protocol: "https://", rest: url };
 }
 
-export default function UTMForm({ initialValues, onSubmit, isPending, submitLabel = "Save" }) {
+export default function UTMForm({ initialValues, onSubmit, isPending, submitLabel = "Save", sourceOptions = [], mediumOptions = [] }) {
   const [form, setForm] = useState(initialValues || EMPTY);
   const initUrl = splitUrl((initialValues || EMPTY).base_url);
   const [protocol, setProtocol] = useState(initUrl.protocol);
   const [urlRest, setUrlRest] = useState(initUrl.rest);
   const wasActive = initialValues?.status && initialValues.status !== "draft";
+
+  // Suggestions: distinct source / medium values previously seen in this
+  // workspace's GA data, merged with any already used on CDP UTM links. Falls
+  // back gracefully to just the CDP values if GA isn't connected.
+  const wide = { start: "20180101" }; // far enough back to cover all GA history
+  const { data: gaSources = [] } = useQuery({
+    queryKey: ["utm-suggest", "session_source"],
+    queryFn: () => appClient.utm.paramValues({ col: "session_source", ...wide }),
+    staleTime: 5 * 60 * 1000, retry: false,
+  });
+  const { data: gaMediums = [] } = useQuery({
+    queryKey: ["utm-suggest", "session_medium"],
+    queryFn: () => appClient.utm.paramValues({ col: "session_medium", ...wide }),
+    staleTime: 5 * 60 * 1000, retry: false,
+  });
+  const sourceOpts = uniqSort(sourceOptions, gaSources);
+  const mediumOpts = uniqSort(mediumOptions, gaMediums);
 
   useEffect(() => {
     if (initialValues) {
@@ -81,11 +120,11 @@ export default function UTMForm({ initialValues, onSubmit, isPending, submitLabe
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Source</Label>
-          <Input value={form.utm_source} onChange={e => set("utm_source", e.target.value)} placeholder="google, newsletter" className="mt-1" />
+          <ComboInput value={form.utm_source} onChange={v => set("utm_source", v)} placeholder="e.g. google" options={sourceOpts} />
         </div>
         <div>
           <Label className="text-xs">Medium</Label>
-          <Input value={form.utm_medium} onChange={e => set("utm_medium", e.target.value)} placeholder="cpc, email, social" className="mt-1" />
+          <ComboInput value={form.utm_medium} onChange={v => set("utm_medium", v)} placeholder="e.g. cpc" options={mediumOpts} />
         </div>
         <div>
           <Label className="text-xs">Campaign Param</Label>

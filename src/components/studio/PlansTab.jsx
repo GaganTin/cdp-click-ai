@@ -6,12 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { toCredits, toTokens } from "@/lib/credits";
 
-// Usage limits shown as editable numbers. Empty = unlimited (null).
+// Usage limits shown as editable numbers. Empty = unlimited (null). ai_tokens is
+// stored as raw tokens but edited in "credits" (100,000 tokens = 1 credit).
 const LIMIT_FIELDS = [
   ["profiles",     "Customer profiles"],
   ["campaigns",    "Email campaigns"],
-  ["ai_tokens",    "AI tokens"],
+  ["ai_tokens",    "AI credits"],
   ["team_members", "Team members"],
   ["workspaces",   "Workspaces"],
 ];
@@ -24,9 +26,15 @@ function numOrNull(v) {
 
 function PlanCard({ plan }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState(plan);
+  // Edit ai_tokens in credit units; the raw token value is restored on save.
+  const toEditable = (p) => {
+    const limits = { ...(p.limits || {}) };
+    if (limits.ai_tokens != null) limits.ai_tokens = toCredits(limits.ai_tokens);
+    return { ...p, limits };
+  };
+  const [form, setForm] = useState(() => toEditable(plan));
 
-  useEffect(() => { setForm(plan); }, [plan]);
+  useEffect(() => { setForm(toEditable(plan)); }, [plan]);
 
   const save = useMutation({
     mutationFn: (body) => appClient.admin.updatePlan(plan.id, body),
@@ -42,7 +50,11 @@ function PlanCard({ plan }) {
 
   const onSave = () => {
     const limits = {};
-    for (const [key] of LIMIT_FIELDS) limits[key] = numOrNull(form.limits?.[key]);
+    for (const [key] of LIMIT_FIELDS) {
+      let v = numOrNull(form.limits?.[key]);
+      if (key === "ai_tokens" && v != null) v = toTokens(v); // credits -> raw tokens
+      limits[key] = v;
+    }
     save.mutate({
       name: form.name,
       description: form.description,
@@ -104,7 +116,7 @@ function PlanCard({ plan }) {
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-muted-foreground mb-2">Usage limits (blank = unlimited)</label>
+        <label className="block text-xs font-medium text-muted-foreground mb-2">Usage limits (blank = unlimited; 1 AI credit = 100,000 tokens)</label>
         <div className="grid grid-cols-2 gap-3">
           {LIMIT_FIELDS.map(([key, label]) => (
             <div key={key}>

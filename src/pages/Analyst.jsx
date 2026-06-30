@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import PlanGate from "@/components/PlanGate";
 import { usePlan } from "@/lib/usePlan";
 import { parseChartConfig } from "@/lib/utils";
+import { fmtCredits } from "@/lib/credits";
 import { useAuth } from "@/lib/AuthContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -473,7 +474,7 @@ export default function Analyst() {
             )}
             {tokenUsage.total > 0 && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground font-mono">
-                {tokenUsage.total.toLocaleString()} tokens
+                {fmtCredits(tokenUsage.total)} credits
               </span>
             )}
           </div>

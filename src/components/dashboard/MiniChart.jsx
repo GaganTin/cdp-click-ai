@@ -3,12 +3,15 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from "recharts";
 
+// Theme-aware palette: these CSS vars (defined in index.css) flip between light
+// and dark mode, so series stay legible on both backgrounds. In light mode
+// --chart-1 is near-black; in dark mode it's near-white.
 const COLORS = [
-  "hsl(30, 10%, 12%)",
-  "hsl(30, 5%, 45%)",
-  "hsl(30, 5%, 65%)",
-  "hsl(30, 5%, 78%)",
-  "hsl(30, 5%, 88%)",
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
 ];
 
 const fmtNum = (v) => {
@@ -54,21 +57,22 @@ export default function MiniChart({ type, config }) {
   }
 
   const commonProps = { data, margin: { top: 5, right: 10, left: 0, bottom: 5 } };
+  const tick = { fontSize: 10, fill: "hsl(var(--muted-foreground))" };
   const xAxisProps = {
     dataKey: xKey,
-    tick: { fontSize: 10 },
+    tick,
     tickLine: false,
     axisLine: false,
     tickFormatter: (v) => truncate(String(v)),
   };
   const yAxisProps = {
-    tick: { fontSize: 10 },
+    tick,
     tickLine: false,
     axisLine: false,
     width: 52,
     tickFormatter: fmtNum,
   };
-  const gridProps = { strokeDasharray: "3 3", stroke: "hsl(30, 10%, 92%)" };
+  const gridProps = { strokeDasharray: "3 3", stroke: "hsl(var(--border))" };
   const showLegend = series.length > 1;
 
   if (type === "line") {

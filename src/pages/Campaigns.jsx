@@ -636,7 +636,7 @@ export default function Campaigns() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">{t("Create UTM Link")}</DialogTitle></DialogHeader>
-          <UTMForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel={t("Create UTM Link")} />
+          <UTMForm onSubmit={handleCreate} isPending={createMutation.isPending} submitLabel={t("Create UTM Link")} sourceOptions={uniqueSources} mediumOptions={uniqueMediums} />
         </DialogContent>
       </Dialog>
 
@@ -644,7 +644,7 @@ export default function Campaigns() {
       <Dialog open={!!editTarget} onOpenChange={v => !v && setEditTarget(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">{t("Edit UTM Link")}</DialogTitle></DialogHeader>
-          {editTarget && <UTMForm initialValues={editTarget} onSubmit={handleEdit} isPending={updateMutation.isPending} submitLabel={t("Save Changes")} />}
+          {editTarget && <UTMForm initialValues={editTarget} onSubmit={handleEdit} isPending={updateMutation.isPending} submitLabel={t("Save Changes")} sourceOptions={uniqueSources} mediumOptions={uniqueMediums} />}
         </DialogContent>
       </Dialog>
 

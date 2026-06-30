@@ -34,7 +34,7 @@
 -- ============================================================================
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
---  Three tiers: 'lite' ($100/mo, the entry tier carrying a 30-day trial that
+--  Three tiers: 'lite' ($100/mo, the entry tier carrying a 3-month trial that
 --  goes read-only on expiry), 'standard' ($199/mo) and 'pro' (contact sales).
 --  There is no in-app payment flow - the paid upgrade is applied out-of-band by
 --  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
@@ -64,18 +64,18 @@ INSERT INTO app.plans
 VALUES
   ('lite', 'Lite', '$100', '/month', null,
    'Everything you need to get started with AI-powered customer data.',
-   'Start 30-day free trial', '/register', false, false, 1, 30, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","AI tokens included"]'::jsonb,
-   '{"profiles":10000,"campaigns":5,"ai_tokens":50000000,"team_members":null,"workspaces":2}'::jsonb),
+   'Start 3-month free trial', '/register', false, false, 1, 90, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","200 credits / month"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":20000000,"team_members":null,"workspaces":2}'::jsonb),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
    'For growing teams that need more scale and unlimited campaigns.',
    'Get started', '/register', false, true, 2, null, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":200000000,"team_members":null,"workspaces":5}'::jsonb),
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","1,000 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":100000000,"team_members":null,"workspaces":5}'::jsonb),
   ('pro', 'Pro', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
    'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
-   '["Unlimited team members","Unlimited workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","More AI tokens","Priority support"]'::jsonb,
+   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
 -- ── Accounts (the org / billing root) ───────────────────────────────────────

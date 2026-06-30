@@ -13,8 +13,9 @@ function writeDismissed() {
 }
 
 export default function TrialBanner() {
-  const { isFreePlan, isLoadingPlans, isTrialExpired, daysLeft, warningDays, upgradePlan } = usePlan();
+  const { isFreePlan, isLoadingPlans, isTrialExpired, daysLeft, planConfig, upgradePlan } = usePlan();
   const [dismissed, setDismissed] = useState(readDismissed);
+  const planName = planConfig?.name ?? "Lite";
 
   // Don't render while plan data is loading- prevents the banner flashing in
   // then disappearing once the real plan/daysLeft values arrive.
@@ -34,7 +35,7 @@ export default function TrialBanner() {
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-destructive/10 border-b border-destructive/20 text-sm">
         <div className="flex items-center gap-2 text-destructive font-medium">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          Your free trial has ended. Upgrade to continue using features.
+          Your {planName} Plan free trial has ended. Upgrade to continue using features.
         </div>
         <Link
           to="/settings?tab=billing"
@@ -54,12 +55,13 @@ export default function TrialBanner() {
     <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b text-sm bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800">
       <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        {daysLeft === 0
-          ? "Your free trial expires today."
-          : daysLeft <= warningDays
-          ? `Your free trial expires in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.`
-          : "You're on the free plan."}
-        {" "}
+        <span className="font-medium">{planName} Plan</span>
+        <span>
+          {"— free trial · "}
+          {daysLeft === 0
+            ? "ends today"
+            : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+        </span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <Link

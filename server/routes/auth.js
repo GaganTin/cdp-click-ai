@@ -79,12 +79,12 @@ async function provisionUserWithCompany(client, {
   ip_address = null,
 }) {
   // 1. Account - the org / billing root. Starts on the Lite entry plan with its
-  //    trial window taken from the plan catalog (falls back to 30 days).
+  //    trial window taken from the plan catalog (falls back to 90 days).
   const accountSlug = await uniqueSlug(client, company_name, { table: "app.accounts", fallback: "account" });
   const { rows: [account] } = await client.query(
     `INSERT INTO app.accounts (name, slug, plan, plan_expires_at)
      VALUES ($1, $2, 'lite',
-       NOW() + (COALESCE((SELECT trial_days FROM app.plans WHERE id = 'lite'), 30)::text || ' days')::interval)
+       NOW() + (COALESCE((SELECT trial_days FROM app.plans WHERE id = 'lite'), 90)::text || ' days')::interval)
      RETURNING id, plan`,
     [company_name, accountSlug]
   );

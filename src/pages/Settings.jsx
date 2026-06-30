@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePlan } from "@/lib/usePlan";
 import { passwordError, PASSWORD_HINT } from "@/lib/password";
+import { TOKENS_PER_CREDIT, toCredits } from "@/lib/credits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1464,13 +1465,13 @@ function fmtCost(v, currency = "USD") {
   }
 }
 const PLAN_LIMIT_BULLETS = [
-  ["workspaces",   (n) => n == null ? "Unlimited workspaces"        : `${num(n)} workspace${n === 1 ? "" : "s"}`],
+  ["workspaces",   (n) => n == null ? "5+ workspaces"               : `${num(n)} workspace${n === 1 ? "" : "s"}`],
   ["team_members", (n) => n == null ? "Unlimited team members"      : `${num(n)} team member${n === 1 ? "" : "s"}`],
   ["profiles",     (n) => n == null ? "Unlimited customer profiles" : `${num(n)} customer profiles`],
   ["campaigns",    (n) => n == null ? "Unlimited email campaigns"   : `${num(n)} email campaigns`],
-  ["ai_tokens",    (n) => n == null ? "Unlimited AI tokens"         : `${num(n)} AI tokens`],
+  ["ai_tokens",    (n) => n == null ? "Custom credits"              : `${num(toCredits(n))} credits`],
 ];
-const LIMIT_WORDS = ["workspace", "profile", "campaign", "token", "member"];
+const LIMIT_WORDS = ["workspace", "profile", "campaign", "token", "member", "credit"];
 function planLimitBullets(limits) {
   const l = limits || {};
   return PLAN_LIMIT_BULLETS.filter(([k]) => k in l).map(([k, fmt]) => fmt(l[k] ?? null));
@@ -1505,7 +1506,7 @@ function BillingTab({ company }) {
   const usageItems = [
     { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
     { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
-    { key: "ai_tokens",    label: t("AI tokens"),         limitKey: "ai_tokens"    },
+    { key: "ai_tokens",    label: t("AI credits"),        limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT },
     { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
   ];
 
@@ -1560,15 +1561,17 @@ function BillingTab({ company }) {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            {usageItems.map(({ key, label, limitKey }) => {
-              const limit = limits[limitKey];
+            {usageItems.map(({ key, label, limitKey, divisor }) => {
+              const rawLimit = limits[limitKey];
+              const d = divisor || 1;
+              const unlimited = rawLimit === null || rawLimit === undefined;
               return (
                 <div key={key} className="border border-border rounded-lg px-5 py-4">
                   <UsageBar
                     label={label}
-                    used={usage?.[key] ?? 0}
-                    limit={limit}
-                    unlimited={limit === null || limit === undefined}
+                    used={Math.round((usage?.[key] ?? 0) / d)}
+                    limit={unlimited ? rawLimit : Math.round(rawLimit / d)}
+                    unlimited={unlimited}
                   />
                 </div>
               );
@@ -1578,7 +1581,7 @@ function BillingTab({ company }) {
       </Section>
 
       {/* AI usage & cost */}
-      <Section title={t("AI usage & cost")} description={t("Total AI tokens consumed and their cost across all your workspaces.")}>
+      <Section title={t("AI usage & cost")} description={t("Total AI credits consumed and their cost across all your workspaces.")}>
         {usageLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[1,2,3,4].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}
@@ -1587,9 +1590,9 @@ function BillingTab({ company }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: t("Total AI cost"), value: fmtCost(usage?.ai_cost ?? usage?.overall?.ai_cost ?? 0, usage?.ai_currency) },
-              { label: t("Total tokens"),  value: num(usage?.overall?.ai_tokens ?? usage?.ai_tokens ?? 0) },
-              { label: t("Input tokens"),  value: num(usage?.overall?.ai_input_tokens ?? 0) },
-              { label: t("Output tokens"), value: num(usage?.overall?.ai_output_tokens ?? 0) },
+              { label: t("Total credits"), value: num(toCredits(usage?.overall?.ai_tokens ?? usage?.ai_tokens ?? 0)) },
+              { label: t("Input credits"), value: num(toCredits(usage?.overall?.ai_input_tokens ?? 0)) },
+              { label: t("Output credits"),value: num(toCredits(usage?.overall?.ai_output_tokens ?? 0)) },
             ].map(({ label, value }) => (
               <div key={label} className="border border-border rounded-lg px-5 py-4">
                 <p className="text-xl font-semibold tabular-nums">{value}</p>
@@ -1611,7 +1614,7 @@ function BillingTab({ company }) {
                   <th className="text-right font-medium px-4 py-2.5">{t("Members")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("Profiles")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("Campaigns")}</th>
-                  <th className="text-right font-medium px-4 py-2.5">{t("AI tokens")}</th>
+                  <th className="text-right font-medium px-4 py-2.5">{t("AI credits")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("AI cost")}</th>
                 </tr>
               </thead>
@@ -1625,7 +1628,7 @@ function BillingTab({ company }) {
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.team_members.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.profiles.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.campaigns.toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{w.ai_tokens.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">{toCredits(w.ai_tokens).toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(w.ai_cost ?? 0, usage?.ai_currency)}</td>
                   </tr>
                 ))}
@@ -1636,7 +1639,7 @@ function BillingTab({ company }) {
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.team_members ?? usage.team_members ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.profiles ?? usage.profiles ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.campaigns ?? usage.campaigns ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.ai_tokens ?? usage.ai_tokens ?? 0).toLocaleString()}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{toCredits(usage.overall?.ai_tokens ?? usage.ai_tokens ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(usage.overall?.ai_cost ?? usage.ai_cost ?? 0, usage?.ai_currency)}</td>
                 </tr>
               </tfoot>
