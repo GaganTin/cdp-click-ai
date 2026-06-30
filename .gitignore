@@ -30,5 +30,6 @@ dist-ssr
 .env
 .vite
 
-# Separate service- managed in its own repo
+# Separate service - managed in its own repo (capsuite-technology/interaction-service-meritma)
 interaction-service/
+interaction-service-meritma/

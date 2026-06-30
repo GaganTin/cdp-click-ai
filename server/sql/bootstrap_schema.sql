@@ -2143,12 +2143,18 @@ CREATE TABLE shopify.shopify_sync_control (
 -- ========================= 11_interaction.sql =========================
 
 -- ============================================================================
---  11_interaction.sql - LOCAL MIRROR of interaction-service data (schema: interaction)
+--  11_interaction.sql - SHARED schema for the interaction-service microservice
 -- ----------------------------------------------------------------------------
---  The interaction-service is a separate Go microservice (GORM models:
---  Company, Interaction, Activity, Customer). This schema mirrors those tables
---  in the app DB so popup analytics can run SQL joins locally. COLUMN NAMES MATCH
---  the service / the queries in server/routes/popup.js exactly:
+--  The interaction-service is a separate Go/GORM microservice (models: Company,
+--  Interaction, Activity, Customer). It connects to THIS database and reads/writes
+--  the `interaction` schema directly (GORM NamingStrategy TablePrefix "interaction.",
+--  AutoMigrate DISABLED). Therefore the column names and types below MUST match the
+--  GORM models exactly — this file is the single source of truth for the schema.
+--
+--  GORM conventions assumed:
+--    - BaseModel → id UUID (gen_random_uuid), created_at, updated_at
+--    - struct fields → snake_case columns
+--  Popup analytics in server/routes/popup.js join these tables locally:
 --    interaction.companies(id, cdp_company_id)
 --    interaction.interactions(id, company_id → companies.id, cdp_reference_id)
 --    interaction.activities(correlated_interaction_id → interactions.id,
@@ -2157,67 +2163,168 @@ CREATE TABLE shopify.shopify_sync_control (
 -- ============================================================================
 
 -- ── Companies (service company ↔ app workspace) ─────────────────────────────
+--  GORM model: Company{ ID, CreatedAt, UpdatedAt, Name, CdpCompanyId(uniqueIndex) }
 CREATE TABLE interaction.companies (
   id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),  -- interaction-service company id
-  cdp_company_id UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,  -- → app workspace
-  name           TEXT,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  name           TEXT,
+  cdp_company_id UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,  -- → app workspace
   synced_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX interaction_companies_cdp_idx ON interaction.companies(cdp_company_id);
+CREATE UNIQUE INDEX interaction_companies_cdp_idx ON interaction.companies(cdp_company_id);
 
--- ── Interactions (popup definitions in the service) ─────────────────────────
+-- ── Interactions (popup definitions served by the microservice) ─────────────
+--  GORM model: Interaction{ ID, CreatedAt, UpdatedAt, Name, CompanyID,
+--    InteractionType, CdpReferenceId(uniqueIndex), Rules(jsonb), Content,
+--    DefaultRecommendation(jsonb), IsActive, StartTime, EndTime, IsDefault }
 CREATE TABLE interaction.interactions (
-  id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id       UUID        NOT NULL REFERENCES interaction.companies(id) ON DELETE CASCADE,
-  cdp_reference_id TEXT,                              -- ↔ app.popups.cdp_reference_id
-  name             TEXT,
-  interaction_type TEXT,
-  status           TEXT,
-  rules            JSONB       NOT NULL DEFAULT '{}',
-  content          TEXT,
-  start_time       TIMESTAMPTZ,
-  end_time         TIMESTAMPTZ,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  synced_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  name                   TEXT        NOT NULL DEFAULT '',
+  company_id             UUID        NOT NULL REFERENCES interaction.companies(id) ON DELETE CASCADE,
+  interaction_type       TEXT,
+  cdp_reference_id       TEXT,                              -- ↔ app.popups.cdp_reference_id
+  rules                  JSONB       NOT NULL DEFAULT '{}',
+  content                TEXT,
+  default_recommendation JSONB       NOT NULL DEFAULT '{}',
+  is_active              BOOLEAN     NOT NULL DEFAULT false,
+  start_time             TIMESTAMPTZ,
+  end_time               TIMESTAMPTZ,
+  is_default             BOOLEAN     NOT NULL DEFAULT false,
+  status                 TEXT,                              -- extra: convenience mirror of app.popups.status
+  synced_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX interaction_interactions_ref_idx     ON interaction.interactions(cdp_reference_id);
-CREATE INDEX interaction_interactions_company_idx ON interaction.interactions(company_id);
+CREATE UNIQUE INDEX interaction_interactions_ref_idx  ON interaction.interactions(cdp_reference_id);
+CREATE INDEX interaction_interactions_company_idx     ON interaction.interactions(company_id);
 
 -- ── Activities (impressions/clicks/closes/email collection) ─────────────────
--- action ∈ retrieve_interaction | click_interaction | close_interaction | email_collection
+--  GORM model: Activity{ ID, CreatedAt, UpdatedAt, CapsuiteSid, CapsuiteApid,
+--    Action, CorrelatedInteractionId, UrlParameters, JsonParameters }
+--  action ∈ visit | retrieve_interaction | click_interaction | close_interaction | email_collection
+--  Captured form fields (e.g. the collected email) live as JSON in json_parameters.
 CREATE TABLE interaction.activities (
-  id                        BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  correlated_interaction_id UUID        REFERENCES interaction.interactions(id) ON DELETE CASCADE,
+  id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   capsuite_sid              TEXT,       -- session id
   capsuite_apid             TEXT,       -- anonymous/visitor id
   action                    TEXT        NOT NULL,
-  page_url                  TEXT,
-  page_title                TEXT,
-  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  correlated_interaction_id UUID        REFERENCES interaction.interactions(id) ON DELETE CASCADE,
+  url_parameters            TEXT,       -- raw query-string params (debug)
+  json_parameters           TEXT,       -- JSON payload: { email, link_url, post_url, ... }
+  page_url                  TEXT,       -- extra (seed/reporting convenience)
+  page_title                TEXT,       -- extra (seed/reporting convenience)
   synced_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX interaction_activities_corr_idx   ON interaction.activities(correlated_interaction_id);
 CREATE INDEX interaction_activities_action_idx ON interaction.activities(action, created_at DESC);
 CREATE INDEX interaction_activities_sid_idx    ON interaction.activities(capsuite_sid);
 
--- ── Customers / visitors tracked by the service (email collection) ──────────
+-- ── Customers (per-visitor recommendation overrides; rarely used) ────────────
+--  GORM model: Customer{ ID, CreatedAt, UpdatedAt, Recommendations(text[]),
+--    CapsuiteSid(primaryKey), InteractionID }. Extra columns below support the
+--  dev seed's email-lead demo data and are ignored by the service.
 CREATE TABLE interaction.customers (
   id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id    UUID        NOT NULL REFERENCES interaction.companies(id) ON DELETE CASCADE,
-  capsuite_apid TEXT,
-  capsuite_sid  TEXT,
-  email         TEXT,
-  first_name    TEXT,
-  last_name     TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  recommendations TEXT[],
+  capsuite_sid  TEXT,
+  interaction_id UUID,
+  company_id    UUID        REFERENCES interaction.companies(id) ON DELETE CASCADE,  -- extra (seed)
+  capsuite_apid TEXT,                                                                -- extra (seed)
+  email         TEXT,                                                                -- extra (seed)
+  first_name    TEXT,                                                                -- extra (seed)
+  last_name     TEXT,                                                                -- extra (seed)
   synced_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX interaction_customers_email_idx ON interaction.customers(company_id, LOWER(email)) WHERE email IS NOT NULL;
 
--- ── Sync bookkeeping (per app workspace) ────────────────────────────────────
+-- ── Project collected emails into app.popup_email_collected ─────────────────
+--  When the microservice records an `email_collection` activity, surface it as a
+--  lead row on app.popup_email_collected (what the "Emails Collected" tab and the
+--  create-profile flow read). The collected fields come from the activity's
+--  json_parameters JSON blob (see buildJsonParameters in the Go service):
+--    { email, first_name, last_name, phone, post_url, page_title, utm_* }
+--  Deduped to one row per (workspace, popup, email).
+CREATE OR REPLACE FUNCTION interaction.project_email_collection() RETURNS trigger AS $$
+DECLARE
+  v_json        jsonb;
+  v_email       text;
+  v_ref         text;
+  v_cdp_company uuid;
+  v_popup       app.popups%ROWTYPE;
+BEGIN
+  -- json_parameters is TEXT holding a JSON object; tolerate malformed payloads.
+  BEGIN
+    v_json := NEW.json_parameters::jsonb;
+  EXCEPTION WHEN others THEN
+    v_json := '{}'::jsonb;
+  END;
+
+  v_email := NULLIF(btrim(lower(v_json->>'email')), '');
+  IF v_email IS NULL THEN
+    RETURN NEW;  -- no email captured on this submit
+  END IF;
+
+  -- Resolve the owning popup: activity → interaction → service company → workspace.
+  SELECT i.cdp_reference_id, c.cdp_company_id
+    INTO v_ref, v_cdp_company
+    FROM interaction.interactions i
+    JOIN interaction.companies c ON c.id = i.company_id
+   WHERE i.id = NEW.correlated_interaction_id;
+
+  IF v_cdp_company IS NULL THEN
+    RETURN NEW;  -- orphan activity, cannot attribute to a workspace
+  END IF;
+
+  SELECT * INTO v_popup
+    FROM app.popups
+   WHERE company_id = v_cdp_company AND cdp_reference_id = v_ref
+   LIMIT 1;
+
+  -- Dedupe: one lead row per (workspace, popup, email).
+  IF EXISTS (
+    SELECT 1 FROM app.popup_email_collected
+     WHERE company_id = v_cdp_company
+       AND lower(email) = v_email
+       AND popup_ref IS NOT DISTINCT FROM v_ref
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO app.popup_email_collected (
+    collected_at, company_id, popup_id, popup_name, popup_ref,
+    email, first_name, last_name, phone,
+    source_url, page_title, visitor_id, session_id,
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+    metadata
+  ) VALUES (
+    NEW.created_at, v_cdp_company, v_popup.id, v_popup.name, v_ref,
+    v_email,
+    NULLIF(v_json->>'first_name',''), NULLIF(v_json->>'last_name',''), NULLIF(v_json->>'phone',''),
+    COALESCE(NULLIF(v_json->>'post_url',''), NULLIF(v_json->>'source_url','')),
+    NULLIF(v_json->>'page_title',''),
+    NEW.capsuite_apid, NEW.capsuite_sid,
+    NULLIF(v_json->>'utm_source',''), NULLIF(v_json->>'utm_medium',''), NULLIF(v_json->>'utm_campaign',''),
+    NULLIF(v_json->>'utm_term',''), NULLIF(v_json->>'utm_content',''),
+    jsonb_build_object('source','interaction_activity','activity_id', NEW.id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_project_email ON interaction.activities;
+CREATE TRIGGER activities_project_email
+  AFTER INSERT ON interaction.activities
+  FOR EACH ROW
+  WHEN (NEW.action = 'email_collection')
+  EXECUTE FUNCTION interaction.project_email_collection();
+
+-- ── Sync bookkeeping (vestigial: kept for compatibility; no ETL in unified mode) ─
 CREATE TABLE interaction.sync_state (
   company_id     UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
   entity         TEXT        NOT NULL,   -- interactions | activities | customers
@@ -3117,6 +3224,173 @@ CREATE TABLE IF NOT EXISTS app.mfa_challenges (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS mfa_challenges_user_idx ON app.mfa_challenges(user_id);
+
+
+-- ===================== migrations/2026-06-30_interaction_schema_unify.sql =====================
+
+-- 2026-06-30  Unify interaction-service onto the shared CDP database.
+-- ----------------------------------------------------------------------------
+-- The interaction-service microservice now connects to THIS database and
+-- reads/writes the `interaction` schema directly (GORM TablePrefix "interaction.",
+-- AutoMigrate disabled). The previous mirror tables had shapes that did not match
+-- the GORM models (notably activities.id was BIGINT, and several GORM columns were
+-- missing). This migration rebuilds the four service tables to match the models in
+-- server/sql/11_interaction.sql exactly.
+--
+-- DESTRUCTIVE: drops existing interaction.companies/interactions/activities/customers
+-- rows. Safe in unified mode because no live service data has been written to these
+-- tables yet (they previously held only seed/demo rows). interaction.sync_state is
+-- left untouched.
+-- ----------------------------------------------------------------------------
+
+CREATE SCHEMA IF NOT EXISTS interaction;
+
+DROP TABLE IF EXISTS interaction.activities    CASCADE;
+DROP TABLE IF EXISTS interaction.customers     CASCADE;
+DROP TABLE IF EXISTS interaction.interactions  CASCADE;
+DROP TABLE IF EXISTS interaction.companies     CASCADE;
+
+-- Companies (GORM: Company)
+CREATE TABLE interaction.companies (
+  id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  name           TEXT,
+  cdp_company_id UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  synced_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX interaction_companies_cdp_idx ON interaction.companies(cdp_company_id);
+
+-- Interactions (GORM: Interaction)
+CREATE TABLE interaction.interactions (
+  id                     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  name                   TEXT        NOT NULL DEFAULT '',
+  company_id             UUID        NOT NULL REFERENCES interaction.companies(id) ON DELETE CASCADE,
+  interaction_type       TEXT,
+  cdp_reference_id       TEXT,
+  rules                  JSONB       NOT NULL DEFAULT '{}',
+  content                TEXT,
+  default_recommendation JSONB       NOT NULL DEFAULT '{}',
+  is_active              BOOLEAN     NOT NULL DEFAULT false,
+  start_time             TIMESTAMPTZ,
+  end_time               TIMESTAMPTZ,
+  is_default             BOOLEAN     NOT NULL DEFAULT false,
+  status                 TEXT,
+  synced_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX interaction_interactions_ref_idx  ON interaction.interactions(cdp_reference_id);
+CREATE INDEX interaction_interactions_company_idx     ON interaction.interactions(company_id);
+
+-- Activities (GORM: Activity)
+CREATE TABLE interaction.activities (
+  id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  capsuite_sid              TEXT,
+  capsuite_apid             TEXT,
+  action                    TEXT        NOT NULL,
+  correlated_interaction_id UUID        REFERENCES interaction.interactions(id) ON DELETE CASCADE,
+  url_parameters            TEXT,
+  json_parameters           TEXT,
+  page_url                  TEXT,
+  page_title                TEXT,
+  synced_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX interaction_activities_corr_idx   ON interaction.activities(correlated_interaction_id);
+CREATE INDEX interaction_activities_action_idx ON interaction.activities(action, created_at DESC);
+CREATE INDEX interaction_activities_sid_idx    ON interaction.activities(capsuite_sid);
+
+-- Customers (GORM: Customer; extra columns support seed/demo data)
+CREATE TABLE interaction.customers (
+  id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  recommendations TEXT[],
+  capsuite_sid    TEXT,
+  interaction_id  UUID,
+  company_id      UUID        REFERENCES interaction.companies(id) ON DELETE CASCADE,
+  capsuite_apid   TEXT,
+  email           TEXT,
+  first_name      TEXT,
+  last_name       TEXT,
+  synced_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX interaction_customers_email_idx ON interaction.customers(company_id, LOWER(email)) WHERE email IS NOT NULL;
+
+-- Project email_collection activities → app.popup_email_collected (Emails Collected tab).
+CREATE OR REPLACE FUNCTION interaction.project_email_collection() RETURNS trigger AS $$
+DECLARE
+  v_json        jsonb;
+  v_email       text;
+  v_ref         text;
+  v_cdp_company uuid;
+  v_popup       app.popups%ROWTYPE;
+BEGIN
+  BEGIN
+    v_json := NEW.json_parameters::jsonb;
+  EXCEPTION WHEN others THEN
+    v_json := '{}'::jsonb;
+  END;
+
+  v_email := NULLIF(btrim(lower(v_json->>'email')), '');
+  IF v_email IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT i.cdp_reference_id, c.cdp_company_id
+    INTO v_ref, v_cdp_company
+    FROM interaction.interactions i
+    JOIN interaction.companies c ON c.id = i.company_id
+   WHERE i.id = NEW.correlated_interaction_id;
+
+  IF v_cdp_company IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT * INTO v_popup
+    FROM app.popups
+   WHERE company_id = v_cdp_company AND cdp_reference_id = v_ref
+   LIMIT 1;
+
+  IF EXISTS (
+    SELECT 1 FROM app.popup_email_collected
+     WHERE company_id = v_cdp_company
+       AND lower(email) = v_email
+       AND popup_ref IS NOT DISTINCT FROM v_ref
+  ) THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO app.popup_email_collected (
+    collected_at, company_id, popup_id, popup_name, popup_ref,
+    email, first_name, last_name, phone,
+    source_url, page_title, visitor_id, session_id,
+    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+    metadata
+  ) VALUES (
+    NEW.created_at, v_cdp_company, v_popup.id, v_popup.name, v_ref,
+    v_email,
+    NULLIF(v_json->>'first_name',''), NULLIF(v_json->>'last_name',''), NULLIF(v_json->>'phone',''),
+    COALESCE(NULLIF(v_json->>'post_url',''), NULLIF(v_json->>'source_url','')),
+    NULLIF(v_json->>'page_title',''),
+    NEW.capsuite_apid, NEW.capsuite_sid,
+    NULLIF(v_json->>'utm_source',''), NULLIF(v_json->>'utm_medium',''), NULLIF(v_json->>'utm_campaign',''),
+    NULLIF(v_json->>'utm_term',''), NULLIF(v_json->>'utm_content',''),
+    jsonb_build_object('source','interaction_activity','activity_id', NEW.id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_project_email ON interaction.activities;
+CREATE TRIGGER activities_project_email
+  AFTER INSERT ON interaction.activities
+  FOR EACH ROW
+  WHEN (NEW.action = 'email_collection')
+  EXECUTE FUNCTION interaction.project_email_collection();
 
 
 -- ===================== migrations/2026-06-30_lite_standard_pro_plans.sql =====================

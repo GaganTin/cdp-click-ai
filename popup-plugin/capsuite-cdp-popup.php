@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Capsuite CDP Popup
  * Description: Connects your WordPress site to Capsuite CDP - tracks visitor sessions and displays personalised interactive popups.
- * Version: 2.0.0
+ * Version: 2.1.1
  * Author: Capsuite
  */
 
@@ -47,7 +47,7 @@ function capsuite_settings_page() {
             if (empty(trim($company_id))) {
                 echo '<div class="notice notice-error"><p><strong>Test failed:</strong> No Company ID configured.</p></div>';
             } else {
-                $api_url = 'https://interaction-services.capsuite.co/interaction/retrieve?company_id=' . urlencode($company_id) . '&capsuite_sid=test&capsuite_apid=test';
+                $api_url = 'https://interaction-services.meritma.com/interaction/retrieve?company_id=' . urlencode($company_id) . '&capsuite_sid=test&capsuite_apid=test';
                 $response = wp_remote_get($api_url, ['timeout' => 5]);
                 if (is_wp_error($response)) {
                     echo '<div class="notice notice-error"><p><strong>Test failed:</strong> Could not reach the Capsuite service. Check your server's internet connection.</p></div>';
@@ -280,7 +280,7 @@ function capsuite_popup_script() {
         var MAX_HEIGHT  = <?php echo intval($max_height); ?>;
         var POS_CSS     = '<?php echo esc_js($pos_css); ?>';
 
-        var API_BASE    = 'https://interaction-services.capsuite.co/interaction';
+        var API_BASE    = 'https://interaction-services.meritma.com/interaction';
         var retrieveUrl = API_BASE + '/retrieve';
         var submitUrl   = API_BASE + '/submit-form';
 
@@ -288,6 +288,19 @@ function capsuite_popup_script() {
         var capsuiteSid  = window.capsuiteGetSid  ? window.capsuiteGetSid()  : '';
 
         if (!capsuiteApid || !capsuiteSid) return;
+
+        // Capture UTM params once so they can be attached to collected leads.
+        var utmParams = (function() {
+            var out = {};
+            try {
+                var qs = new URLSearchParams(window.location.search);
+                ['utm_source','utm_medium','utm_campaign','utm_term','utm_content'].forEach(function(k) {
+                    var v = qs.get(k);
+                    if (v) out[k] = v;
+                });
+            } catch (e) {}
+            return out;
+        })();
 
         // ── Build overlay container ───────────────────────────────────────
         var overlay = document.createElement('div');
@@ -377,12 +390,45 @@ function capsuite_popup_script() {
         }
 
         // ── Form submission tracking (email collection) ───────────────────
+        // Read the first non-empty value among a list of candidate field names.
+        function readField(form, names) {
+            for (var i = 0; i < names.length; i++) {
+                var el = form.querySelector('[name="' + names[i] + '"]');
+                if (el && el.value && el.value.trim()) return el.value.trim();
+            }
+            return '';
+        }
+
         function attachFormTracking(content) {
             content.querySelectorAll('form').forEach(function(form) {
-                form.addEventListener('submit', function(e) {
-                    var emailInput = form.querySelector('input[type="email"], input[name="email"]');
-                    var email = emailInput ? emailInput.value.trim() : '';
-                    sendAction('email_collection', email ? { email: email } : {});
+                form.addEventListener('submit', function() {
+                    var emailEl = form.querySelector('input[type="email"]');
+                    var email = emailEl ? emailEl.value.trim()
+                                        : readField(form, ['email', 'your-email', 'EMAIL']);
+
+                    var extra = {};
+                    if (email) extra.email = email;
+
+                    var first = readField(form, ['first_name', 'firstname', 'fname', 'first-name']);
+                    var last  = readField(form, ['last_name', 'lastname', 'lname', 'last-name']);
+                    var name  = readField(form, ['name', 'full_name', 'fullname', 'your-name']);
+                    var phone = readField(form, ['phone', 'tel', 'telephone', 'mobile', 'phone_number']);
+
+                    if (first) extra.first_name = first;
+                    if (last)  extra.last_name  = last;
+                    // Split a single "name" field when discrete first/last aren't present.
+                    if (!first && !last && name) {
+                        var parts = name.split(/\s+/);
+                        extra.first_name = parts.shift();
+                        if (parts.length) extra.last_name = parts.join(' ');
+                    }
+                    if (phone) extra.phone = phone;
+
+                    // Attribution + page context for the collected lead.
+                    Object.keys(utmParams).forEach(function(k) { extra[k] = utmParams[k]; });
+                    extra.page_title = document.title || '';
+
+                    sendAction('email_collection', extra);
                 });
             });
         }
