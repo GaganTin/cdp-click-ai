@@ -17,7 +17,7 @@ const PREVIEW_HEIGHTS = { small: "h-48", large: "h-72" };
 export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedCharts = [], onEditRequest }) {
   // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
   // are shared with the Dashboard page - nothing is persisted in localStorage.
-  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
+  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, isLoading } = useDashboardLayout();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("main");
@@ -41,10 +41,13 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
     }
   }, [tabs, activeTab]);
 
-  // When a new chart is pinned, add it only to the currently active tab.
+  // When a new chart is pinned, add it only to the currently active tab. Wait until
+  // the layout has loaded so we merge into the real saved layout (tabs + existing
+  // assignments) rather than a default - otherwise the assignment could be written
+  // against an empty default and never show up on the Dashboard.
   const lastPinnedRef = useRef(null);
   useEffect(() => {
-    if (!pinnedChart || pinnedChart === lastPinnedRef.current) return;
+    if (!pinnedChart || isLoading || pinnedChart === lastPinnedRef.current) return;
     lastPinnedRef.current = pinnedChart;
     const chartId = pinnedChart.id;
     setTabAssignments(prev => {
@@ -52,7 +55,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
       if (current.includes(chartId)) return prev;
       return { ...prev, [activeTab]: [...current, chartId] };
     });
-  }, [pinnedChart, activeTab]);
+  }, [pinnedChart, activeTab, isLoading]);
 
   // Order by the tab's assignment array so position edits (move up/down) take effect.
   const activeCharts = (tabAssignments[activeTab] || [])

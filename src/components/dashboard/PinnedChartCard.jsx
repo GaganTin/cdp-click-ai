@@ -21,6 +21,14 @@ const DATE_FILTERS = [
 // Approximate day counts per finite period, used for the delta (current vs previous window).
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90, "6m": 182, "1y": 365 };
 
+// Periods to compare the selected window against. "prev" is the window immediately
+// preceding the selected one (e.g. this 7d vs the previous 7d); the rest let you
+// pick an explicit second window to compare against.
+const COMPARE_OPTIONS = [
+  { key: "prev", label: "Previous period" },
+  ...DATE_FILTERS.filter(f => f.key !== "all"),
+];
+
 const CHART_TYPES = [
   { value: "bar", label: "Bar" },
   { value: "line", label: "Line" },
@@ -89,6 +97,8 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
   const initialFilter = DATE_FILTERS.some(f => f.key === config.date_filter) ? config.date_filter : "all";
   const [dateFilter, setDateFilter] = useState(initialFilter);
   const [compare, setCompare] = useState(!!config.show_delta && initialFilter !== "all");
+  // The second period the selected window is compared against (see COMPARE_OPTIONS).
+  const [compareFilter, setCompareFilter] = useState("prev");
 
   // Local title so a rename shows immediately (chart object is frozen on mount).
   const [title, setTitle] = useState(initialChart.title);
@@ -104,50 +114,51 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
     setEditingTitle(false);
   };
 
-  // Whether this chart's x-axis is actually time-based. The date filter and
-  // delta/compare only make sense for time series; on categorical charts (browser,
-  // country, segment name…) they'd be meaningless, so we hide the control. Require
-  // most non-empty rows to be dates so a stray parseable label doesn't flip it.
-  const isDateData = useMemo(() => {
-    const rows = (config.data || []).filter(r => r[xKey] != null && r[xKey] !== "");
-    if (!rows.length) return false;
-    const dated = rows.filter(r => toDate(r[xKey])).length;
-    return dated / rows.length >= 0.6;
-  }, [chart.chart_config]);
-
   const filteredConfig = useMemo(() => {
-    // Never apply a time window to a non-time-series chart - it would drop rows
-    // whose x-axis isn't a date and blank the chart.
-    if (!isDateData) return config;
+    // applyDateFilter keeps rows whose x-axis isn't a date, so this is safe on
+    // categorical charts (the window simply has no effect there).
     const filtered = applyDateFilter(config.data, xKey, dateFilter);
     return { ...config, data: filtered };
-  }, [chart.chart_config, dateFilter, isDateData]);
+  }, [chart.chart_config, dateFilter]);
 
-  // % change of the primary metric: current window vs the immediately preceding window.
+  // % change of the primary metric between the selected window and a second window.
+  // The selected window ("A") is the current dateFilter; the comparison window ("B")
+  // is either the immediately preceding window ("prev") or an explicit period.
   const delta = useMemo(() => {
-    if (!compare || !isDateData) return null;
-    const days = PERIOD_DAYS[dateFilter];
-    if (!days) return null;
+    if (!compare) return null;
+    const daysA = PERIOD_DAYS[dateFilter];
+    if (!daysA) return null; // need a bounded selected period to compare
     const now = new Date();
-    const curStart = subDays(now, days);
-    const prevStart = subDays(now, days * 2);
-    const sumBetween = (from, to) => (config.data || []).reduce((sum, row) => {
+    const sumWindow = (from, to) => (config.data || []).reduce((sum, row) => {
       const d = toDate(row[xKey]);
       if (d && isAfter(d, from) && !isAfter(d, to)) return sum + (Number(row[primaryKey]) || 0);
       return sum;
     }, 0);
-    const cur = sumBetween(curStart, now);
-    const prev = sumBetween(prevStart, curStart);
+
+    const cur = sumWindow(subDays(now, daysA), now);
+
+    let prev, prevLabel;
+    if (compareFilter === "prev") {
+      prev = sumWindow(subDays(now, daysA * 2), subDays(now, daysA));
+      prevLabel = "previous period";
+    } else {
+      const daysB = PERIOD_DAYS[compareFilter];
+      if (!daysB) return null;
+      prev = sumWindow(subDays(now, daysB), now);
+      prevLabel = COMPARE_OPTIONS.find(o => o.key === compareFilter)?.label || "comparison period";
+    }
     if (prev === 0) return null;
-    return { pct: (cur - prev) / prev, cur, prev };
-  }, [compare, isDateData, dateFilter, chart.chart_config]);
+    return { pct: (cur - prev) / prev, cur, prev, prevLabel };
+  }, [compare, dateFilter, compareFilter, chart.chart_config]);
 
   const handleDiscuss = () => {
     onDiscuss?.({
       title,
       description: chart.description || "",
       chart_type: chartType,
-      chart_config: JSON.stringify(filteredConfig),
+      // Carry the LIVE chart type (chartType is editable after mount; filteredConfig
+      // keeps the frozen original), so a pie/line stays a pie/line in the chat.
+      chart_config: JSON.stringify({ ...filteredConfig, chart_type: chartType }),
       period: DATE_FILTERS.find(f => f.key === dateFilter)?.label || "All time",
       delta: delta ? { pct: delta.pct, current: delta.cur, previous: delta.prev } : null,
     });
@@ -252,31 +263,45 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             </SelectContent>
           </Select>
         )}
-        {isDateData && (
-          <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); if (v === "all") setCompare(false); }}>
-            <SelectTrigger className="h-6 text-[11px] w-32 px-2 border-border" title="Filter by time period">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DATE_FILTERS.map(f => (
-                <SelectItem key={f.key} value={f.key} className="text-xs">{f.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        {/* Time-period filter + comparison are available on every chart. On a
+            categorical chart the window is simply a no-op (rows are kept). */}
+        <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); if (v === "all") setCompare(false); }}>
+          <SelectTrigger className="h-6 text-[11px] w-32 px-2 border-border" title="Filter by time period">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {DATE_FILTERS.map(f => (
+              <SelectItem key={f.key} value={f.key} className="text-xs">{f.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        {isDateData && (
-          <button
-            type="button"
-            onClick={() => setCompare(c => !c)}
-            disabled={dateFilter === "all"}
-            title={dateFilter === "all" ? "Pick a time period to compare against the previous one" : "Compare with the previous period"}
-            className={`h-6 px-2 text-[11px] rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              compare ? "bg-foreground text-background border-foreground" : "bg-background border-border text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Δ Compare
-          </button>
+        <button
+          type="button"
+          onClick={() => setCompare(c => !c)}
+          disabled={dateFilter === "all"}
+          title={dateFilter === "all" ? "Pick a time period to compare against another" : "Compare this period against another"}
+          className={`h-6 px-2 text-[11px] rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            compare ? "bg-foreground text-background border-foreground" : "bg-background border-border text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Δ Compare
+        </button>
+
+        {compare && (
+          <div className="inline-flex items-center gap-1">
+            <span className="text-[11px] text-muted-foreground">vs</span>
+            <Select value={compareFilter} onValueChange={setCompareFilter}>
+              <SelectTrigger className="h-6 text-[11px] w-36 px-2 border-border" title="Compare against">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COMPARE_OPTIONS.map(o => (
+                  <SelectItem key={o.key} value={o.key} className="text-xs">{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
 
         {compare && delta && (
@@ -284,14 +309,17 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             className={`inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums ${
               delta.pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
             }`}
-            title={`Current: ${Number(delta.cur).toLocaleString()} · Previous: ${Number(delta.prev).toLocaleString()}`}
+            title={`${DATE_FILTERS.find(f => f.key === dateFilter)?.label}: ${Number(delta.cur).toLocaleString()} · ${delta.prevLabel}: ${Number(delta.prev).toLocaleString()}`}
           >
             {delta.pct >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             {(delta.pct * 100).toFixed(1)}%
+            <span className="text-muted-foreground font-normal ml-1">
+              ({Number(delta.cur).toLocaleString()} vs {Number(delta.prev).toLocaleString()})
+            </span>
           </span>
         )}
         {compare && !delta && dateFilter !== "all" && (
-          <span className="text-[10px] text-muted-foreground">No prior-period data</span>
+          <span className="text-[10px] text-muted-foreground">No comparable data</span>
         )}
 
         {onToggleAutoRefresh && chart.query && (

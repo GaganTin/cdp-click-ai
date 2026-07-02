@@ -782,7 +782,16 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
     discuss(buildDiscussPayload({
       title: `GA Traffic Performance (${gaPeriodLabel(days)})`,
       description: "GA4 source / medium / campaign performance from the UTM page",
-      type: "bar", data: rows, xKey: "name", dataKey: "sessions",
+      render: "table",
+      data: rows,
+      columns: [
+        { key: "name", label: "Source / Medium / Campaign" },
+        { key: "sessions", label: "Sessions" },
+        { key: "active_users", label: "Active users" },
+        { key: "new_users", label: "New users" },
+        { key: "bounce_rate", label: "Bounce rate" },
+        { key: "engagement_rate", label: "Engagement rate" },
+      ],
       period: `${gaPeriodLabel(days)}${wantCompare ? " vs previous period" : ""}`,
       source: "Campaigns (UTM) page",
     }));

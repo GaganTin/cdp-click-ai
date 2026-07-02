@@ -29,7 +29,24 @@ export function buildDiscussPayload({
   period = "All time",
   delta = null,
   source = "analytics",
+  render = "chart",
+  columns = null,
 }) {
+  // Table mode: hand the rows over as a data table (rendered as a real table in the
+  // chat, not a chart). `columns` is optional [{ key, label }]; derived from the rows
+  // when omitted. Used e.g. by the GA Traffic Performance table.
+  if (render === "table") {
+    return {
+      title,
+      description,
+      render: "table",
+      chart_type: "table",
+      chart_config: JSON.stringify({ title, description, columns, data }),
+      period,
+      delta,
+      source,
+    };
+  }
   const chartType = normDiscussType(type);
   const config = { title, data, xKey, chart_type: chartType };
   if (series) config.series = series;

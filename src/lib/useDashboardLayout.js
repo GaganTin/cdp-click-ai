@@ -57,6 +57,11 @@ export function useDashboardLayout() {
   const { data, isLoading } = useQuery({
     queryKey: ["dashboardLayout"],
     queryFn: async () => normalizeLayout(await appClient.settings.get(LAYOUT_KEY)),
+    // Keep the layout fresh in-cache for a while so navigating from the Analyst
+    // (where a chart was just pinned + assigned to a tab) to the Dashboard reads
+    // the optimistic cache rather than immediately refetching stale server data
+    // and dropping the just-made assignment.
+    staleTime: 60_000,
   });
 
   // Local working copy, seeded once from the server so edits are instant.
@@ -75,15 +80,26 @@ export function useDashboardLayout() {
   const saveRef = useRef(saveMutation);
   saveRef.current = saveMutation;
   const timerRef = useRef(null);
+  // Holds the latest un-persisted layout so we can flush it if the component
+  // unmounts before the debounce fires (e.g. pin a chart, then immediately
+  // navigate to the Dashboard) - otherwise the assignment would be lost.
+  const pendingRef = useRef(null);
   const schedulePersist = useCallback((next) => {
+    pendingRef.current = next;
     if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => { saveRef.current.mutate(next); }, 400);
+    timerRef.current = setTimeout(() => { saveRef.current.mutate(next); pendingRef.current = null; }, 400);
   }, []);
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    // Flush any pending write on unmount so a debounced change isn't dropped.
+    if (pendingRef.current) { saveRef.current.mutate(pendingRef.current); pendingRef.current = null; }
+  }, []);
 
   const update = useCallback((patch) => {
     setLayout((prev) => {
-      const base = prev || DEFAULT_LAYOUT;
+      // Fall back to the cached server layout (not DEFAULT) if our local copy
+      // hasn't seeded yet, so an early edit can't wipe existing tabs/assignments.
+      const base = prev || queryClient.getQueryData(["dashboardLayout"]) || DEFAULT_LAYOUT;
       const next = typeof patch === "function" ? patch(base) : { ...base, ...patch };
       queryClient.setQueryData(["dashboardLayout"], next);
       schedulePersist(next);

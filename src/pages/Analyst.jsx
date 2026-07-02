@@ -31,6 +31,8 @@ export default function Analyst() {
   const [showDashboard, setShowDashboard] = useState(false);
   // Chart handed over from the Dashboard "Discuss" action (choose new vs current chat).
   const [discussChart, setDiscussChart] = useState(null);
+  // The prompt the user types to send alongside the chart (no default is assumed).
+  const [discussPrompt, setDiscussPrompt] = useState("");
   const [lastPinnedChart, setLastPinnedChart] = useState(null);
   const [campaignEditorOpen, setCampaignEditorOpen] = useState(false);
   const [campaignEditorInitial, setCampaignEditorInitial] = useState(null);
@@ -489,19 +491,42 @@ export default function Analyst() {
   useEffect(() => {
     if (location.state?.discussChart) {
       setDiscussChart(location.state.discussChart);
+      setDiscussPrompt(""); // start with an empty prompt - the user types their own
       refetchConversations(); // freshen the chat list shown in the picker
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.key]);
 
-  // Compose a discussion opener from a chart (its data reflects the applied filter).
-  // Charts can come from the dashboard or any analytics page (c.source names it).
-  const buildDiscussPrompt = (c) => {
+  // Compose a discussion message from a chart plus the user's own prompt. The user's
+  // text leads; a short context line and the chart/table block are appended so the AI
+  // has the data. Charts can come from the dashboard or any analytics page (c.source).
+  const buildDiscussPrompt = (c, userPrompt) => {
     const cfg = parseChartConfig(c.chart_config);
     const source = c.source || "dashboard";
     const deltaLine = c.delta
       ? ` Change vs previous period: ${(c.delta.pct * 100).toFixed(1)}% (current ${Math.round(c.delta.current).toLocaleString()} vs previous ${Math.round(c.delta.previous).toLocaleString()}).`
       : "";
+    const context = `(Attached from my ${source}. Time period: ${c.period}.${deltaLine})`;
+    const message = (userPrompt || "").trim();
+
+    // Table mode: send the filtered rows as a ```table block (renders a real table in
+    // the chat, no chart). The block carries the rows so the AI can analyse them.
+    if (c.render === "table" || c.chart_type === "table") {
+      const tableBlock = {
+        title: cfg.title || c.title,
+        description: c.description || cfg.description || "",
+        columns: cfg.columns || null,
+        rows: (cfg.data || []).slice(0, 50),
+      };
+      return `${message}
+
+${context}
+
+\`\`\`table
+${JSON.stringify(tableBlock)}
+\`\`\``;
+    }
+
     // Embed the chart itself (its data already reflects the applied filter/period) as a
     // ```chart block so the message renders the real chart in-chat instead of raw JSON.
     // The block still carries the data, so the AI can analyse it.
@@ -512,22 +537,24 @@ export default function Analyst() {
       data: (cfg.data || []).slice(0, 50),
     };
     if (c.description && !chartBlock.description) chartBlock.description = c.description;
-    return `Let's dig into this chart from my ${source}, beyond a quick summary. Time period: ${c.period}.${deltaLine}
+    return `${message}
+
+${context}
 
 \`\`\`chart
 ${JSON.stringify(chartBlock)}
-\`\`\`
-
-Explain what's driving this, call out any notable patterns or outliers, and suggest concrete next actions. Ask me follow-up questions if useful.`;
+\`\`\``;
   };
 
   // Send the chart into a chat. `target` is "new" (start a fresh chat) or an existing
   // conversation id picked from the dialog.
   const startChartDiscussion = async (target) => {
     const c = discussChart;
+    const userPrompt = discussPrompt;
+    if (!userPrompt.trim()) return; // require the user to enter a prompt
     setDiscussChart(null);
     if (!c) return;
-    const prompt = buildDiscussPrompt(c);
+    const prompt = buildDiscussPrompt(c, userPrompt);
     if (target === "new") {
       await handleSend(prompt, undefined, { forceNew: true, chatName: c.title });
     } else {
@@ -684,24 +711,40 @@ Explain what's driving this, call out any notable patterns or outliers, and sugg
               Send “{discussChart?.title}”{discussChart?.period ? ` (${discussChart.period})` : ""} to the AI Analyst. The chart is sent with the filters currently applied.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-3 pt-2">
-            <Button className="justify-start gap-2" onClick={() => startChartDiscussion("new")}>
-              <Plus className="w-4 h-4" /> Start a new chat
+          <div className="flex flex-col gap-3 min-w-0">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="discuss-prompt" className="text-xs">Your prompt</Label>
+              <Textarea
+                id="discuss-prompt"
+                value={discussPrompt}
+                onChange={(e) => setDiscussPrompt(e.target.value)}
+                placeholder="What do you want to ask about this chart? e.g. What's driving the drop in the last week? Any anomalies I should worry about?"
+                className="min-h-[80px] text-sm"
+                autoFocus
+              />
+            </div>
+            <Button
+              className="w-full justify-start gap-2"
+              disabled={!discussPrompt.trim()}
+              onClick={() => startChartDiscussion("new")}
+            >
+              <Plus className="w-4 h-4 flex-shrink-0" /> Start a new chat
             </Button>
             {discussChatOptions.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-0.5">
+              <div className="flex flex-col gap-1.5 min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Or add to an existing chat
                 </p>
-                <div className="max-h-64 overflow-auto flex flex-col gap-1 pr-1">
+                <div className="max-h-60 overflow-y-auto flex flex-col gap-1 -mr-2 pr-2">
                   {discussChatOptions.map((conv) => (
                     <button
                       key={conv.id}
+                      disabled={!discussPrompt.trim()}
                       onClick={() => startChartDiscussion(conv.id)}
-                      className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-secondary/60 transition-colors"
+                      className="w-full min-w-0 flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-secondary/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                     >
                       <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
-                      <span className="truncate flex-1">
+                      <span className="flex-1 min-w-0 truncate">
                         {conv.metadata?.name || `Chat - ${new Date(conv.created_date).toLocaleDateString()}`}
                       </span>
                       {conv.id === conversationId && (

@@ -636,18 +636,67 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     }
   };
 
-  // Split a user message into ordered text / chart segments so a chart handed over
-  // from a page renders as a real chart card instead of a raw ```chart code fence.
+  // Render a ```table block (a data table handed over from a page) as a table card.
+  const renderTableCard = (jsonStr, key) => {
+    try {
+      const cfg = JSON.parse(jsonStr);
+      const rows = Array.isArray(cfg.rows) ? cfg.rows : (Array.isArray(cfg.data) ? cfg.data : []);
+      if (!rows.length) {
+        return (
+          <div key={key} className="my-4 border border-dashed border-border rounded-lg px-4 py-6 text-center bg-background">
+            <p className="text-xs font-medium text-muted-foreground">No rows for “{cfg.title || "this table"}”</p>
+          </div>
+        );
+      }
+      const columns = (Array.isArray(cfg.columns) && cfg.columns.length)
+        ? cfg.columns
+        : Object.keys(rows[0]).map(k => ({ key: k, label: k }));
+      const fmt = (v) => typeof v === "number" ? v.toLocaleString() : (v ?? "");
+      return (
+        <div key={key} className="my-4 border border-border rounded-lg overflow-hidden bg-background">
+          <div className="px-4 pt-4 pb-2">
+            <p className="text-xs font-semibold text-foreground">{cfg.title || "Table"}</p>
+            {cfg.description && <p className="text-[11px] text-muted-foreground mt-0.5">{cfg.description}</p>}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-secondary/60">
+                <tr>
+                  {columns.map((c, ci) => (
+                    <th key={ci} className="px-3 py-2 text-left font-semibold text-foreground whitespace-nowrap">{c.label ?? c.key}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, ri) => (
+                  <tr key={ri} className="border-b border-border last:border-0 hover:bg-secondary/30">
+                    {columns.map((c, ci) => (
+                      <td key={ci} className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmt(row[c.key])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    } catch {
+      return <pre key={key} className="text-xs text-destructive">Invalid table data</pre>;
+    }
+  };
+
+  // Split a user message into ordered text / chart / table segments so a chart or table
+  // handed over from a page renders as a real card instead of a raw code fence.
   const splitUserContent = (content) => {
-    const chartRegex = /```chart\n([\s\S]*?)```/g;
+    const blockRegex = /```(chart|table)\n([\s\S]*?)```/g;
     const segments = [];
     let lastIndex = 0;
     let match;
     let i = 0;
-    while ((match = chartRegex.exec(content)) !== null) {
+    while ((match = blockRegex.exec(content)) !== null) {
       const before = content.slice(lastIndex, match.index);
       if (before.trim()) segments.push({ type: "text", value: before.trim(), key: `ut-${i}` });
-      segments.push({ type: "chart", json: match[1], key: `uc-${i}` });
+      segments.push({ type: match[1], json: match[2], key: `ub-${i}` });
       lastIndex = match.index + match[0].length;
       i++;
     }
@@ -662,6 +711,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     if (!content) return null;
     
     const chartRegex = /```chart\n([\s\S]*?)```/g;
+    const tableCardRegex = /```table\n([\s\S]*?)```/g;
     const csvRegex = /```csv\n([\s\S]*?)```/g;
     const utmRegex = /```utm_link\n([\s\S]*?)```/g;
     const segmentRegex = /```segment\n([\s\S]*?)```/g;
@@ -675,6 +725,10 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     const charts = [];
     while ((match = chartRegex.exec(content)) !== null) {
       charts.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
+    }
+    const tableCards = [];
+    while ((match = tableCardRegex.exec(content)) !== null) {
+      tableCards.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
     }
     const csvBlocks = [];
     while ((match = csvRegex.exec(content)) !== null) {
@@ -703,6 +757,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
 
     const allBlocks = [
       ...charts.map(c => ({ ...c, type: "chart" })),
+      ...tableCards.map(c => ({ ...c, type: "table_card" })),
       ...csvBlocks.map(c => ({ ...c, type: "csv" })),
       ...utmBlocks.map(c => ({ ...c, type: "utm_link" })),
       ...segmentBlocks.map(c => ({ ...c, type: "segment" })),
@@ -759,6 +814,10 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
 
       if (block.type === "chart") {
         parts.push(renderChartCard(block.json, `chart-${i}`));
+      }
+
+      if (block.type === "table_card") {
+        parts.push(renderTableCard(block.json, `tablecard-${i}`));
       }
 
       if (block.type === "table") {
@@ -830,6 +889,8 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
             splitUserContent(message.content).map((seg) =>
               seg.type === "chart" ? (
                 <div key={seg.key} className="w-full">{renderChartCard(seg.json, seg.key)}</div>
+              ) : seg.type === "table" ? (
+                <div key={seg.key} className="w-full">{renderTableCard(seg.json, seg.key)}</div>
               ) : (
                 <div key={seg.key} className="rounded-2xl px-4 py-3 bg-foreground text-background max-w-full">
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{seg.value}</p>
