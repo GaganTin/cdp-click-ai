@@ -71,6 +71,12 @@ export function mergeByIndex(data = [], prevData) {
   return data.map((d, i) => ({ ...d, prev: prevData[i] != null ? Number(prevData[i].value) : undefined }));
 }
 
+// Sum the `value` field of a {name,value}[] series (the shape every AnalyticsKit
+// block uses). Returns null for non-arrays so callers can distinguish "no data".
+export function sumValues(arr) {
+  return Array.isArray(arr) ? arr.reduce((s, d) => s + (Number(d?.value) || 0), 0) : null;
+}
+
 // ── KPI tile ──────────────────────────────────────────────────────────────────
 // Pass `curr`+`prev` (numbers) and optional `prevDisplay` to show a comparison delta.
 export function KpiTile({ label, value, sub, icon: Icon, curr, prev, prevDisplay, isRate = false }) {
@@ -105,7 +111,13 @@ export function KpiTile({ label, value, sub, icon: Icon, curr, prev, prevDisplay
 //   resizable + defaultWide       → Expand/Shrink button toggling col-span in a
 //                                   2-col grid. Use `defaultWide` instead of a
 //                                   hard-coded "lg:col-span-2" so it can shrink.
-export function ChartCard({ title, subtitle, children, right, className = "", explain, period, resizable = false, defaultWide = false }) {
+// `prevData` (a comparison {name,value}[] series) turns on a per-chart delta badge
+// in the header: the % change of this chart's current total vs the comparison total,
+// mirroring the KPI tiles. Pass it only when Compare is on (callers already gate on
+// that). `data` optionally overrides the current series used for the total (defaults
+// to explain.data). `delta` lets callers supply pre-computed {curr,prev} totals for
+// charts whose headline metric isn't a plain sum (e.g. rates).
+export function ChartCard({ title, subtitle, children, right, className = "", explain, period, resizable = false, defaultWide = false, data, prevData, delta }) {
   const [wide, setWide] = useState(defaultWide);
   const span = resizable ? (wide ? "lg:col-span-2" : "lg:col-span-1") : "";
   const ctxPeriod = useContext(AnalyticsPeriodContext);
@@ -113,11 +125,17 @@ export function ChartCard({ title, subtitle, children, right, className = "", ex
   const handleDiscuss = () => discuss(buildDiscussPayload({
     title, description: subtitle, type: explain?.type, data: explain?.data || [], period: period ?? ctxPeriod,
   }));
+  const currTotal = delta ? delta.curr : sumValues(data ?? explain?.data);
+  const prevTotal = delta ? delta.prev : sumValues(prevData);
+  const showDelta = (delta != null || Array.isArray(prevData)) && currTotal != null && prevTotal != null;
   return (
     <div className={`border border-border rounded-lg bg-card p-4 ${span} ${className}`}>
       <div className="flex items-start justify-between gap-2 mb-3">
         <div>
-          <p className="text-sm font-semibold">{title}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold">{title}</p>
+            {showDelta && <Delta curr={currTotal} prev={prevTotal} />}
+          </div>
           {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -298,6 +316,18 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
             className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
         </div>
       </div>
+      {canCompare && compare && (
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
+          <div className="flex items-center gap-1.5">
+            <input type="date" value={compareRange?.from || ""} onChange={(e) => setCmp(e.target.value, compareRange?.to || "")}
+              className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+            <span className="text-xs text-muted-foreground">→</span>
+            <input type="date" value={compareRange?.to || ""} onChange={(e) => setCmp(compareRange?.from || "", e.target.value)}
+              className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+          </div>
+        </div>
+      )}
       {canCompare && (
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("Compare")}</p>
@@ -328,18 +358,6 @@ export function DateRangeBar({ from, to, onChange, compare, setCompare, compareR
           })}
         </div>
       </div>
-      {canCompare && compare && (
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">{t("vs. Period")}</p>
-          <div className="flex items-center gap-1.5">
-            <input type="date" value={compareRange?.from || ""} onChange={(e) => setCmp(e.target.value, compareRange?.to || "")}
-              className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-            <span className="text-xs text-muted-foreground">→</span>
-            <input type="date" value={compareRange?.to || ""} onChange={(e) => setCmp(compareRange?.from || "", e.target.value)}
-              className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-          </div>
-        </div>
-      )}
       {(from || to) && (
         <button onClick={() => set("", "")}
           className="h-8 px-3 text-xs border border-input rounded-md bg-background hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground self-end">

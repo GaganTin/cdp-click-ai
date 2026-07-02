@@ -12,27 +12,21 @@ import MiniChart from "./MiniChart";
 import ChartExplainer from "./ChartExplainer";
 import { parseChartConfig } from "@/lib/utils";
 import { normalizeSize } from "@/lib/chartSizes";
-import { format, subDays, subMonths, parseISO, isAfter, isValid } from "date-fns";
+import { format, subDays, parseISO, isValid } from "date-fns";
 
 const DATE_FILTERS = [
   { key: "all", label: "All time" },
   { key: "7d", label: "Last 7 days" },
   { key: "30d", label: "Last 30 days" },
+  { key: "cal_month", label: "Last calendar month" },
   { key: "90d", label: "Last 90 days" },
   { key: "6m", label: "Last 6 months" },
   { key: "1y", label: "Last 1 year" },
+  { key: "cal_year", label: "Last calendar year" },
 ];
 
-// Approximate day counts per finite period, used for the delta (current vs previous window).
+// Rolling-window day counts (calendar periods are handled separately in windowFor).
 const PERIOD_DAYS = { "7d": 7, "30d": 30, "90d": 90, "6m": 182, "1y": 365 };
-
-// Periods to compare the selected window against. "prev" is the window immediately
-// preceding the selected one (e.g. this 7d vs the previous 7d); the rest let you
-// pick an explicit second window to compare against.
-const COMPARE_OPTIONS = [
-  { key: "prev", label: "Previous period" },
-  ...DATE_FILTERS.filter(f => f.key !== "all"),
-];
 
 const CHART_TYPES = [
   { value: "bar", label: "Bar" },
@@ -52,26 +46,31 @@ function toDate(val) {
   return isValid(d) ? d : null;
 }
 
-function cutoffFor(filterKey, now) {
-  switch (filterKey) {
-    case "7d":  return subDays(now, 7);
-    case "30d": return subDays(now, 30);
-    case "90d": return subDays(now, 90);
-    case "6m":  return subMonths(now, 6);
-    case "1y":  return subMonths(now, 12);
-    default:    return null;
+// The [from, to) date window for a period filter, or null for "all". Rolling
+// periods end now; calendar periods cover the previous whole month / year.
+function windowFor(filterKey, now) {
+  if (filterKey === "cal_month") {
+    return { from: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+             to:   new Date(now.getFullYear(), now.getMonth(), 1) };
   }
+  if (filterKey === "cal_year") {
+    const y = now.getFullYear() - 1;
+    return { from: new Date(y, 0, 1), to: new Date(y + 1, 0, 1) };
+  }
+  const days = PERIOD_DAYS[filterKey];
+  if (!days) return null;
+  return { from: subDays(now, days), to: now };
 }
 
 function applyDateFilter(data, xKey, filterKey) {
   if (filterKey === "all" || !data?.length) return data;
-  const cutoff = cutoffFor(filterKey, new Date());
-  if (!cutoff) return data;
+  const win = windowFor(filterKey, new Date());
+  if (!win) return data;
 
   return data.filter(row => {
     const d = toDate(row[xKey]);
     if (!d) return true; // non-date x-axis (categorical) - keep the row
-    return isAfter(d, cutoff);
+    return d >= win.from && d < win.to;
   });
 }
 
@@ -102,8 +101,6 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
   const initialFilter = DATE_FILTERS.some(f => f.key === config.date_filter) ? config.date_filter : "all";
   const [dateFilter, setDateFilter] = useState(initialFilter);
   const [compare, setCompare] = useState(!!config.show_delta && initialFilter !== "all");
-  // The second period the selected window is compared against (see COMPARE_OPTIONS).
-  const [compareFilter, setCompareFilter] = useState("prev");
 
   // Local title so a rename shows immediately (chart object is frozen on mount).
   const [title, setTitle] = useState(initialChart.title);
@@ -126,35 +123,24 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
     return { ...config, data: filtered };
   }, [chart.chart_config, dateFilter]);
 
-  // % change of the primary metric between the selected window and a second window.
-  // The selected window ("A") is the current dateFilter; the comparison window ("B")
-  // is either the immediately preceding window ("prev") or an explicit period.
+  // % change of the primary metric: the selected window vs the immediately preceding
+  // window of the SAME length (e.g. last 7 days vs the 7 days before that).
   const delta = useMemo(() => {
     if (!compare) return null;
-    const daysA = PERIOD_DAYS[dateFilter];
-    if (!daysA) return null; // need a bounded selected period to compare
-    const now = new Date();
-    const sumWindow = (from, to) => (config.data || []).reduce((sum, row) => {
+    const win = windowFor(dateFilter, new Date());
+    if (!win) return null; // "all time" has no comparable prior period
+    const lenMs = win.to - win.from;
+    const prevWin = { from: new Date(win.from.getTime() - lenMs), to: win.from };
+    const sumWindow = (w) => (config.data || []).reduce((sum, row) => {
       const d = toDate(row[xKey]);
-      if (d && isAfter(d, from) && !isAfter(d, to)) return sum + (Number(row[primaryKey]) || 0);
+      if (d && d >= w.from && d < w.to) return sum + (Number(row[primaryKey]) || 0);
       return sum;
     }, 0);
-
-    const cur = sumWindow(subDays(now, daysA), now);
-
-    let prev, prevLabel;
-    if (compareFilter === "prev") {
-      prev = sumWindow(subDays(now, daysA * 2), subDays(now, daysA));
-      prevLabel = "previous period";
-    } else {
-      const daysB = PERIOD_DAYS[compareFilter];
-      if (!daysB) return null;
-      prev = sumWindow(subDays(now, daysB), now);
-      prevLabel = COMPARE_OPTIONS.find(o => o.key === compareFilter)?.label || "comparison period";
-    }
+    const cur = sumWindow(win);
+    const prev = sumWindow(prevWin);
     if (prev === 0) return null;
-    return { pct: (cur - prev) / prev, cur, prev, prevLabel };
-  }, [compare, dateFilter, compareFilter, chart.chart_config]);
+    return { pct: (cur - prev) / prev, cur, prev };
+  }, [compare, dateFilter, chart.chart_config]);
 
   const handleDiscuss = () => {
     onDiscuss?.({
@@ -297,11 +283,13 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
           </SelectContent>
         </Select>
 
+        {/* Comparison is always against the immediately preceding window of the SAME
+            length as the selected period (e.g. last 7 days vs the prior 7 days). */}
         <button
           type="button"
           onClick={() => setCompare(c => !c)}
           disabled={dateFilter === "all"}
-          title={dateFilter === "all" ? "Pick a time period to compare against another" : "Compare this period against another"}
+          title={dateFilter === "all" ? "Pick a time period to compare against the previous one" : "Compare with the previous period of equal length"}
           className={`h-6 px-2 text-[11px] rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             compare ? "bg-foreground text-background border-foreground" : "bg-background border-border text-muted-foreground hover:text-foreground"
           }`}
@@ -309,28 +297,12 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
           Δ Compare
         </button>
 
-        {compare && (
-          <div className="inline-flex items-center gap-1">
-            <span className="text-[11px] text-muted-foreground">vs</span>
-            <Select value={compareFilter} onValueChange={setCompareFilter}>
-              <SelectTrigger className="h-6 text-[11px] w-36 px-2 border-border" title="Compare against">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COMPARE_OPTIONS.map(o => (
-                  <SelectItem key={o.key} value={o.key} className="text-xs">{o.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-
         {compare && delta && (
           <span
             className={`inline-flex items-center gap-0.5 text-[11px] font-medium tabular-nums ${
               delta.pct >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"
             }`}
-            title={`${DATE_FILTERS.find(f => f.key === dateFilter)?.label}: ${Number(delta.cur).toLocaleString()} · ${delta.prevLabel}: ${Number(delta.prev).toLocaleString()}`}
+            title={`${DATE_FILTERS.find(f => f.key === dateFilter)?.label}: ${Number(delta.cur).toLocaleString()} · Previous period: ${Number(delta.prev).toLocaleString()}`}
           >
             {delta.pct >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             {(delta.pct * 100).toFixed(1)}%
@@ -343,14 +315,16 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
           <span className="text-[10px] text-muted-foreground">No comparable data</span>
         )}
 
-        {/* Snapshot indicator - only when auto-refresh is off, so the user can tell the
-            data is frozen. Toggling lives in the ⋯ menu. */}
-        {onToggleAutoRefresh && chart.query && !autoRefresh && (
+        {/* Refresh status - shown in both states so it's clear whether the chart is a
+            live daily-refreshed view or a frozen snapshot. Toggling lives in the ⋯ menu. */}
+        {chart.query && (
           <span
             className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-            title="Data is frozen as a snapshot - turn on Auto-refresh daily in the ⋯ menu"
+            title={autoRefresh
+              ? "Auto-refreshes daily - change in the ⋯ menu"
+              : "Data is frozen as a snapshot - change in the ⋯ menu"}
           >
-            <RefreshCw className="w-3 h-3" /> Snapshot
+            <RefreshCw className="w-3 h-3" /> {autoRefresh ? "Daily" : "Snapshot"}
           </span>
         )}
       </div>

@@ -23,6 +23,39 @@ function freshnessBucket(ts) {
 }
 const FRESH_ORDER = ["Today", "≤ 7 days", "≤ 30 days", "Stale (30d+)", "Never"];
 
+// Chart series for a list of segments (used for both the selected period and the
+// comparison period, so the charts can show a per-chart delta when Compare is on).
+function segChartSeries(src) {
+  const counts = (pred) => src.filter(pred).length;
+  const byStatus = ["active", "draft", "archived"].map((s) => ({
+    name: s[0].toUpperCase() + s.slice(1), value: counts((x) => STATUS_OF(x) === s),
+  }));
+  const byType = Object.entries(
+    src.reduce((m, s) => { const t = s.segment_type || "customer"; m[t] = (m[t] || 0) + 1; return m; }, {})
+  ).map(([k, v]) => ({ name: TYPE_LABEL[k] || k, value: v }));
+  const usage = [
+    { name: "In use (locked)", value: counts((s) => s.is_used) },
+    { name: "Not in use", value: counts((s) => !s.is_used) },
+  ];
+  const sized = src.filter((s) => Number(s.estimated_size) > 0);
+  const sizeDist = [...sized]
+    .sort((x, y) => Number(y.estimated_size) - Number(x.estimated_size))
+    .slice(0, 12)
+    .map((s) => ({ name: s.name, value: Number(s.estimated_size) }));
+  const refreshSegs = src.filter((s) => s.daily_refresh);
+  const freshnessMap = refreshSegs.reduce((m, s) => {
+    const b = freshnessBucket(s.last_refreshed); m[b] = (m[b] || 0) + 1; return m;
+  }, {});
+  const freshness = FRESH_ORDER.filter((b) => freshnessMap[b]).map((b) => ({ name: b, value: freshnessMap[b] }));
+  const createdMap = src.reduce((m, s) => {
+    if (!s.created_date) return m;
+    const key = format(new Date(s.created_date), "yyyy-MM");
+    m[key] = (m[key] || 0) + 1; return m;
+  }, {});
+  const createdOverTime = Object.entries(createdMap).sort(([x], [y]) => x.localeCompare(y)).map(([name, value]) => ({ name, value }));
+  return { byStatus, byType, usage, sizeDist, freshness, createdOverTime };
+}
+
 export default function SegmentsAnalyticsPanel() {
   const { data: segments = [], isLoading } = useQuery({
     queryKey: ["segments"],
@@ -59,32 +92,7 @@ export default function SegmentsAnalyticsPanel() {
   const a = useMemo(() => {
     const src = periodSegs;
     const counts = (pred) => src.filter(pred).length;
-    const byStatus = ["active", "draft", "archived"].map((s) => ({
-      name: s[0].toUpperCase() + s.slice(1), value: counts((x) => STATUS_OF(x) === s),
-    }));
-    const byType = Object.entries(
-      src.reduce((m, s) => { const t = s.segment_type || "customer"; m[t] = (m[t] || 0) + 1; return m; }, {})
-    ).map(([k, v]) => ({ name: TYPE_LABEL[k] || k, value: v }));
-    const usage = [
-      { name: "In use (locked)", value: counts((s) => s.is_used) },
-      { name: "Not in use", value: counts((s) => !s.is_used) },
-    ];
     const sized = src.filter((s) => Number(s.estimated_size) > 0);
-    const sizeDist = [...sized]
-      .sort((x, y) => Number(y.estimated_size) - Number(x.estimated_size))
-      .slice(0, 12)
-      .map((s) => ({ name: s.name, value: Number(s.estimated_size) }));
-    const refreshSegs = src.filter((s) => s.daily_refresh);
-    const freshnessMap = refreshSegs.reduce((m, s) => {
-      const b = freshnessBucket(s.last_refreshed); m[b] = (m[b] || 0) + 1; return m;
-    }, {});
-    const freshness = FRESH_ORDER.filter((b) => freshnessMap[b]).map((b) => ({ name: b, value: freshnessMap[b] }));
-    const createdMap = src.reduce((m, s) => {
-      if (!s.created_date) return m;
-      const key = format(new Date(s.created_date), "yyyy-MM");
-      m[key] = (m[key] || 0) + 1; return m;
-    }, {});
-    const createdOverTime = Object.entries(createdMap).sort(([x], [y]) => x.localeCompare(y)).map(([name, value]) => ({ name, value }));
     const totalReach = sized.reduce((s, x) => s + Number(x.estimated_size), 0);
     return {
       total: src.length,
@@ -92,12 +100,15 @@ export default function SegmentsAnalyticsPanel() {
       draft: counts((s) => STATUS_OF(s) === "draft"),
       archived: counts((s) => STATUS_OF(s) === "archived"),
       inUse: counts((s) => s.is_used),
-      refreshOn: refreshSegs.length,
+      refreshOn: src.filter((s) => s.daily_refresh).length,
       totalReach,
       avgSize: sized.length ? Math.round(totalReach / sized.length) : 0,
-      byStatus, byType, usage, sizeDist, freshness, createdOverTime,
+      ...segChartSeries(src),
     };
   }, [periodSegs]);
+
+  // Comparison-period chart series (only computed when Compare is on).
+  const pa = useMemo(() => (compare ? segChartSeries(prevSegs) : null), [compare, prevSegs]);
 
   if (isLoading) {
     return <div className="px-8 py-6"><AnalyticsLoading /></div>;

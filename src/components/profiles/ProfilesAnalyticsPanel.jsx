@@ -99,6 +99,10 @@ export default function ProfilesAnalyticsPanel() {
     { name: "Known customers", value: total },
     { name: "Anonymous", value: Number(k.anonymous_total || 0) },
   ];
+  const prevKnownVsAnon = cmp ? [
+    { name: "Known customers", value: prevTotal },
+    { name: "Anonymous", value: Number(pk.anonymous_total || 0) },
+  ] : null;
 
   return (
     <AnalyticsPeriodProvider label={rangeLabel(range)}>
@@ -132,7 +136,8 @@ export default function ProfilesAnalyticsPanel() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="New customers over time" subtitle="By join month" resizable defaultWide
-          explain={{ key: "profiles_new_over_time", type: "line", data: data?.new_over_time }}>
+          explain={{ key: "profiles_new_over_time", type: "line", data: data?.new_over_time }}
+          prevData={cmp?.new_over_time}>
           <LineBlock data={data?.new_over_time} height={240} prevData={cmp?.new_over_time} />
         </ChartCard>
 
@@ -141,6 +146,7 @@ export default function ProfilesAnalyticsPanel() {
           subtitle="Customer breakdown"
           resizable
           explain={{ key: `profiles_demographics_${demoDim}`, type: "bar", data: demo }}
+          prevData={prevDemo}
           right={
             <select value={demoDim} onChange={(e) => setDemoDim(e.target.value)}
               className="h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
@@ -151,27 +157,32 @@ export default function ProfilesAnalyticsPanel() {
         </ChartCard>
 
         <ChartCard title="Acquisition channel" subtitle="Registration channel" resizable
-          explain={{ key: "profiles_channels", type: "horizontal-bar", data: data?.channels }}>
+          explain={{ key: "profiles_channels", type: "horizontal-bar", data: data?.channels }}
+          prevData={cmp?.channels}>
           <HBarBlock data={data?.channels} prevData={cmp?.channels} />
         </ChartCard>
 
         <ChartCard title="Top web source / medium" subtitle="GA top source per customer" resizable
-          explain={{ key: "profiles_sources", type: "horizontal-bar", data: data?.sources }}>
+          explain={{ key: "profiles_sources", type: "horizontal-bar", data: data?.sources }}
+          prevData={cmp?.sources}>
           <HBarBlock data={data?.sources} prevData={cmp?.sources} />
         </ChartCard>
 
         <ChartCard title="Web engagement" subtitle="Customers by session count" resizable
-          explain={{ key: "profiles_engagement", type: "bar", data: engagement }}>
+          explain={{ key: "profiles_engagement", type: "bar", data: engagement }}
+          prevData={prevEngagement}>
           <BarBlock data={engagement} prevData={prevEngagement} />
         </ChartCard>
 
         <ChartCard title="Communication consent" subtitle="Opted-in customers by channel" resizable
-          explain={{ key: "profiles_consent", type: "bar", data: data?.consent }}>
+          explain={{ key: "profiles_consent", type: "bar", data: data?.consent }}
+          prevData={cmp?.consent}>
           <BarBlock data={data?.consent} prevData={cmp?.consent} />
         </ChartCard>
 
         <ChartCard title="Known vs anonymous" subtitle="Audience composition" resizable
-          explain={{ key: "profiles_known_vs_anon", type: "pie", data: knownVsAnon }}>
+          explain={{ key: "profiles_known_vs_anon", type: "pie", data: knownVsAnon }}
+          prevData={prevKnownVsAnon}>
           <div className="grid grid-cols-2 gap-2 items-center">
             <PieBlock data={knownVsAnon} />
             <PieLegend data={knownVsAnon} />
@@ -179,7 +190,8 @@ export default function ProfilesAnalyticsPanel() {
         </ChartCard>
 
         <ChartCard title="Anonymous traffic sources" subtitle="Top source / medium for visitors" resizable
-          explain={{ key: "profiles_anonymous_sources", type: "horizontal-bar", data: data?.anonymous_sources }}>
+          explain={{ key: "profiles_anonymous_sources", type: "horizontal-bar", data: data?.anonymous_sources }}
+          prevData={cmp?.anonymous_sources}>
           <HBarBlock data={data?.anonymous_sources} opacity={0.55} prevData={cmp?.anonymous_sources} />
         </ChartCard>
       </div>

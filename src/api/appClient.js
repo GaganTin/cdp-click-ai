@@ -329,7 +329,14 @@ export const appClient = {
     countries(params)   { return request(`/utm/countries${this._qs(params)}`); },
     utmIds(params)      { return request(`/utm/utm-ids${this._qs(params)}`); },
     paramValues(params) { return request(`/utm/param-values${this._qs(params)}`); },
-    links(days = "all", prev = false) { return request(`/utm/links?days=${days}${prev ? "&prev=1" : ""}`); },
+    links(days = "all", prev = false, range = null) {
+      // `range` = { start, end } as YYYYMMDD for a fixed window (e.g. a calendar
+      // month/year); otherwise fall back to the rolling `days` window.
+      const base = range && range.start && range.end
+        ? `start=${range.start}&end=${range.end}`
+        : `days=${days}`;
+      return request(`/utm/links?${base}${prev ? "&prev=1" : ""}`);
+    },
     campaignPerformance(names, days = 30) {
       return request(`/utm/campaign-performance`, { method: "POST", body: JSON.stringify({ names, days }) });
     },

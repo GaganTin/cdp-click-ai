@@ -34,6 +34,11 @@ const ymd = (d) => {
   return `${x.getFullYear()}${String(x.getMonth() + 1).padStart(2, "0")}${String(x.getDate()).padStart(2, "0")}`;
 };
 const isYmd = (s) => /^\d{8}$/.test(String(s || ""));
+// Parse "YYYYMMDD" back into a local Date (midnight), for span/previous-window math.
+const fromYmd = (s) => {
+  const str = String(s);
+  return new Date(Number(str.slice(0, 4)), Number(str.slice(4, 6)) - 1, Number(str.slice(6, 8)));
+};
 
 // Resolve start/end (YYYYMMDD) with a 30-day default window.
 function dateRange(q) {
@@ -208,17 +213,31 @@ export function createUtmRouter(pool) {
   // each with its aggregated performance metrics. Includes auto-attributed
   // traffic (direct / organic / referral) - nothing is excluded.
   // days=all (or 0) returns the full history with no date filter.
+  // Alternatively pass explicit start & end (YYYYMMDD) for a fixed window (e.g. a
+  // calendar month/year). prev=1 returns the immediately-preceding window of EQUAL
+  // length in both modes (for period comparison); not available for all-time.
   router.get("/links", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
-    const allTime = req.query.days === "all" || parseInt(req.query.days, 10) === 0;
+    const hasRange = isYmd(req.query.start) && isYmd(req.query.end);
+    const allTime = !hasRange && (req.query.days === "all" || parseInt(req.query.days, 10) === 0);
     const days = allTime ? null : Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-    // prev=1 returns the immediately-preceding window of equal length (for period
-    // comparison). Not available for all-time (there is no prior period).
     const usePrev = (req.query.prev === "1" || req.query.prev === "true") && !allTime;
 
     let dateClause = "";
     let params = [cid];
-    if (usePrev) {
+    if (hasRange) {
+      let start = req.query.start;
+      let end = req.query.end;
+      if (usePrev) {
+        // Preceding window of equal length: same number of (inclusive) days, ending
+        // the day before the selected window starts.
+        const spanDays = Math.round((fromYmd(end) - fromYmd(start)) / 86400000) + 1;
+        end = ymd(new Date(fromYmd(start).getTime() - 86400000));
+        start = ymd(new Date(fromYmd(start).getTime() - spanDays * 86400000));
+      }
+      dateClause = " AND date >= $2 AND date <= $3";
+      params = [cid, start, end];
+    } else if (usePrev) {
       const end   = ymd(new Date(Date.now() - days * 86400000));      // = current window's start
       const start = ymd(new Date(Date.now() - days * 2 * 86400000));  // one window earlier
       dateClause = " AND date >= $2 AND date < $3";

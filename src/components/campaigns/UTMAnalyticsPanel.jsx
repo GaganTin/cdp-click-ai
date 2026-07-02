@@ -410,6 +410,20 @@ export default function UTMAnalyticsPanel() {
           </div>
         </div>
 
+        {/* Comparison date pickers */}
+        {compare && (
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={prevStart} onChange={e => setPrevStart(e.target.value)}
+                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input type="date" value={prevEnd} onChange={e => setPrevEnd(e.target.value)}
+                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
+            </div>
+          </div>
+        )}
+
         {/* Compare toggle */}
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Compare</p>
@@ -433,20 +447,6 @@ export default function UTMAnalyticsPanel() {
             ))}
           </div>
         </div>
-
-        {/* Comparison date pickers */}
-        {compare && (
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">vs. Period</p>
-            <div className="flex items-center gap-1.5">
-              <input type="date" value={prevStart} onChange={e => setPrevStart(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-              <span className="text-xs text-muted-foreground">→</span>
-              <input type="date" value={prevEnd} onChange={e => setPrevEnd(e.target.value)}
-                className="h-8 px-2 text-xs border border-input rounded-md bg-background" />
-            </div>
-          </div>
-        )}
 
         {/* Filters button - matches UTM links tab style */}
         <div ref={paramFilterRef} className="relative">
@@ -623,14 +623,35 @@ const UTM_COLS = [
 // Period options for the GA table; keys match the `days` value sent to the API
 // ("all" = full history, no date filter).
 export const GA_PERIODS = [
-  { value: "all", label: "All time" },
-  { value: "7",   label: "Last 7 days" },
-  { value: "30",  label: "Last 30 days" },
-  { value: "90",  label: "Last 90 days" },
-  { value: "365", label: "Last 365 days" },
+  { value: "all",       label: "All time" },
+  { value: "7",         label: "Last 7 days" },
+  { value: "30",        label: "Last 30 days" },
+  { value: "cal_month", label: "Last calendar month" },
+  { value: "90",        label: "Last 90 days" },
+  { value: "365",       label: "Last 365 days" },
+  { value: "cal_year",  label: "Last calendar year" },
 ];
 const gaPeriodLabel = (days) =>
   (GA_PERIODS.find(p => p.value === String(days))?.label || "All time").toLowerCase();
+
+// Local YYYYMMDD (avoids the UTC shift toISOString would introduce at calendar edges).
+const ymdLocal = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+
+// Fixed {start, end} window (YYYYMMDD) for the calendar periods, or null for the
+// rolling `days` windows the API already understands.
+function gaCalRange(days) {
+  const now = new Date();
+  if (days === "cal_month") {
+    const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const end   = new Date(now.getFullYear(), now.getMonth(), 0); // last day of previous month
+    return { start: ymdLocal(start), end: ymdLocal(end) };
+  }
+  if (days === "cal_year") {
+    const y = now.getFullYear() - 1;
+    return { start: `${y}0101`, end: `${y}1231` };
+  }
+  return null;
+}
 
 // Relative % change of a metric vs the comparison period, as a small coloured badge.
 function GADelta({ curr, prev }) {
@@ -675,9 +696,10 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
     let cancelled = false;
     setLoading(true);
     setError(null);
+    const range = gaCalRange(days);
     Promise.all([
-      appClient.utm.links(days),
-      wantCompare ? appClient.utm.links(days, true) : Promise.resolve(null),
+      appClient.utm.links(days, false, range),
+      wantCompare ? appClient.utm.links(days, true, range) : Promise.resolve(null),
     ])
       .then(([rows, prevRows]) => {
         if (cancelled) return;
