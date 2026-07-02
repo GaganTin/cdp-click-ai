@@ -3535,12 +3535,24 @@ ON CONFLICT (id) DO UPDATE SET
   trial_days=EXCLUDED.trial_days, warning_days=EXCLUDED.warning_days,
   features=EXCLUDED.features, limits=EXCLUDED.limits, is_active=EXCLUDED.is_active;
 
--- 2. Remap existing accounts/workspaces onto the new tiers. plan_expires_at is
---    left untouched, so any in-flight Lite (was free) trial keeps its end date.
+-- 2. Remap existing accounts/workspaces onto the new tiers.
 UPDATE app.accounts  SET plan = 'lite'     WHERE plan = 'free';
 UPDATE app.accounts  SET plan = 'standard' WHERE plan = 'paid';
 UPDATE app.companies SET plan = 'lite'     WHERE plan = 'free';
 UPDATE app.companies SET plan = 'standard' WHERE plan = 'paid';
+
+-- 2b. Extend in-flight trials to the tier's current trial_days. Accounts that
+--     started under the old 30-day "free" plan kept a 30-day expiry, but Lite now
+--     grants a 90-day trial - so recompute from signup + trial_days, extending
+--     only (the "> current expiry" guard) and skipping sales-converted accounts
+--     (plan_expires_at IS NULL).
+UPDATE app.accounts a
+SET plan_expires_at = a.created_date + (p.trial_days || ' days')::interval
+FROM app.plans p
+WHERE a.plan = p.id
+  AND a.plan_expires_at IS NOT NULL
+  AND p.trial_days IS NOT NULL
+  AND a.created_date + (p.trial_days || ' days')::interval > a.plan_expires_at;
 
 -- 3. New signups default to the Lite entry tier.
 ALTER TABLE app.accounts ALTER COLUMN plan SET DEFAULT 'lite';
