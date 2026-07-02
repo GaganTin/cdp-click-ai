@@ -67,7 +67,7 @@ async function companyGuard(req, res) {
 // ── Azure OpenAI ──────────────────────────────────────────────────────────────
 const azureEndpoint = (process.env.AZURE_OPENAI_ENDPOINT || "").replace(/\/$/, "");
 const azureKey = process.env.AZURE_OPENAI_KEY || "";
-const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-mini";
+const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5-mini";
 // Cheaper model for everything EXCEPT the AI Analyst. Azure routes by the
 // deployment in the URL path, so a different model needs its own client.
 const azureDeploymentFast = process.env.AZURE_OPENAI_DEPLOYMENT_FAST || "gpt-5-nano";
