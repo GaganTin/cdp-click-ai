@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import TableToolbar from "@/components/ui/TableToolbar";
-import { KpiTile } from "@/components/analytics/AnalyticsKit";
+import { KpiTile, Delta, sumValues } from "@/components/analytics/AnalyticsKit";
 import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
 import { gaRowKey, gaDeltaPct, distinctValues, rowMatchesFilters } from "@/lib/gaTable";
 import { useChartTheme, opacityFor } from "@/lib/chartTheme";
@@ -529,7 +529,12 @@ export default function UTMAnalyticsPanel() {
           <div key={chart.id}
             className={`border border-border rounded-lg p-5 ${chart.size === "wide" ? "col-span-2" : "col-span-1"}`}>
             <div className="flex items-center justify-between mb-4">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{chart.title}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{chart.title}</p>
+                {compare && !loading && Array.isArray(prevData[chart.dataKey]) && (
+                  <Delta curr={sumValues(curData[chart.dataKey] || [])} prev={sumValues(prevData[chart.dataKey])} />
+                )}
+              </div>
               <div className="flex items-center gap-1">
                 <ChartExplainer
                   chart={{ title: chart.title, chart_type: chart.chartType, description: "" }}
