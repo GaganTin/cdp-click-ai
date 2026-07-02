@@ -149,11 +149,11 @@ export function ChartCard({ title, subtitle, children, right, className = "", ex
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-background border border-border rounded-md px-2.5 py-1.5 shadow-sm">
-      {label != null && <p className="text-[11px] font-medium mb-0.5">{label}</p>}
+    <div className="bg-black text-white border border-white rounded-md px-2.5 py-1.5 shadow-sm">
+      {label != null && <p className="text-[11px] font-medium mb-0.5 text-white">{label}</p>}
       {payload.map((p, i) => (
-        <p key={i} className="text-[11px] text-muted-foreground">
-          {p.name}: <span className="text-foreground font-medium">{fmt(p.value)}</span>
+        <p key={i} className="text-[11px] text-white">
+          {p.name}: <span className="text-white font-medium">{fmt(p.value)}</span>
         </p>
       ))}
     </div>

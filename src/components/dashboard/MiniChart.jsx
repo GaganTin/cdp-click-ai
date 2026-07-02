@@ -56,10 +56,10 @@ const truncate = (str, max = 14) =>
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-foreground text-background px-3 py-2 rounded-md text-xs shadow-lg space-y-0.5">
-      {label && <p className="font-medium mb-1">{label}</p>}
+    <div className="bg-black text-white border border-white px-3 py-2 rounded-md text-xs shadow-lg space-y-0.5">
+      {label && <p className="font-medium mb-1 text-white">{label}</p>}
       {payload.map((p, i) => (
-        <p key={i} style={{ color: p.color || "#fff" }} className="opacity-90">
+        <p key={i} className="text-white opacity-90">
           {p.name}: {typeof p.value === "number" ? p.value.toLocaleString() : p.value}
           {typeof p.value === "number" && p.value >= 1000 && (
             <span className="opacity-60 ml-1">({fmtNum(p.value)})</span>

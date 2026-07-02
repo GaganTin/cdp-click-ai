@@ -58,11 +58,11 @@ function fetchChart(key, s, e, paramFilters = {}) {
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-background border border-border rounded-md px-3 py-2 text-xs shadow">
-      <p className="font-medium mb-1">{label}</p>
+    <div className="bg-black text-white border border-white rounded-md px-3 py-2 text-xs shadow">
+      <p className="font-medium mb-1 text-white">{label}</p>
       {payload.map((p, i) => (
-        <p key={i} className="text-muted-foreground">
-          {p.name}: <span className="font-medium" style={{ color: p.color }}>
+        <p key={i} className="text-white">
+          {p.name}: <span className="font-medium text-white">
             {typeof p.value === "number" && p.value % 1 !== 0 ? p.value.toFixed(2) : p.value}
           </span>
         </p>
