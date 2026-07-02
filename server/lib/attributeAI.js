@@ -99,7 +99,7 @@ Respond with a JSON object whose keys are the exact attribute names above and wh
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     max_completion_tokens: 1200,
-    temperature: 0,
+    // gpt-5 models only accept the default temperature (1); omit it.
   });
 
   reportUsage(onUsage, resp);
@@ -146,7 +146,7 @@ Return ONLY a JSON object that maps each value (spelled exactly as given) to a c
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     max_completion_tokens: 1500,
-    temperature: 0,
+    // gpt-5 models only accept the default temperature (1); omit it.
   });
 
   reportUsage(onUsage, resp);
@@ -200,7 +200,7 @@ Return ONLY a JSON object of the form {"attributes":[{"name":...,"description":.
     messages: [{ role: "user", content: prompt }],
     response_format: { type: "json_object" },
     max_completion_tokens: 1500,
-    temperature: 0.3,
+    // gpt-5 models only accept the default temperature (1); omit it.
   });
 
   reportUsage(onUsage, resp);

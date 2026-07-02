@@ -1172,7 +1172,8 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
       tools: aiTools,
       tool_choice: "auto",
       max_completion_tokens: 8192,
-      temperature: 0.3,
+      // gpt-5 models only accept the default temperature (1); passing any other
+      // value is a 400 error, so we omit it.
     });
 
     if (response.usage) {
@@ -1234,7 +1235,7 @@ async function runSimpleLLM(prompt, jsonMode = false, usageCtx = null) {
     messages: [{ role: "user", content: prompt }],
     ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
     max_completion_tokens: 2000,
-    temperature: 0.2,
+    // gpt-5 models only accept the default temperature (1); omit it.
   });
   if (usageCtx && response.usage) {
     recordAiUsage(pool, {
