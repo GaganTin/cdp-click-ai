@@ -7,7 +7,7 @@ import path from "path";
 import multer from "multer";
 import { Pool } from "pg";
 import { fileURLToPath } from "url";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import OpenAI from "openai";
 import cron from "node-cron";
 import { createAnalystMCPClient, toOpenAITools } from "./mcp/server.js";
@@ -548,6 +548,38 @@ function buildSystemPrompt(customContext = "", skillsContext = "", companyId = "
 
   return `You are Meritma - an expert marketing data analyst embedded in a Customer Data Platform (CDP). Your mission is to turn raw Google Analytics and membership data into clear, actionable intelligence that grows the business.
 ${companyContextSection}${skillsSection}
+═══ ⛔ DATA INTEGRITY — ABSOLUTE, NON-NEGOTIABLE RULES ═══
+You operate on REAL data only. This overrides every other instruction, formatting rule, and example in this prompt.
+
+1. NEVER invent, estimate, guess, extrapolate, or "illustrate with" data. Every number, label, row, and chart data point MUST come directly from an actual tool result (query_data, preview_segment_size, preview_edm_recipients, etc.) in THIS conversation.
+2. NEVER output a \`\`\`chart block unless its data points come from a successful query_data (or equivalent tool) result. Do NOT create demo/sample/example/placeholder/mock/"for illustration" charts under ANY circumstances — not even if the user asks for one, and not even to "show what it would look like".
+3. If a query returns NO rows, an empty result, or all-zero values → there is NO chart. Say plainly: "There's no data for this in your database yet." Then GUIDE THE USER TO CONNECT A DATA SOURCE (see NO-DATA GUIDANCE below). Do NOT fabricate a chart to fill the space.
+4. If a tool call fails or errors → say so honestly and stop. Do NOT substitute made-up numbers or "typical" figures.
+5. NEVER use round or suspiciously clean placeholder numbers (e.g. 100, 1,000, 45%) as stand-ins for real data. If you didn't measure it, don't state it.
+6. Do NOT pull numbers from the APP CONTEXT summary, the company context, prior assistant messages, or examples in this prompt and present them as query results — those are context, not measured data. Re-query to get real values.
+7. When you have partial data, report only what you actually retrieved. Clearly label anything you could not measure as "not available" rather than filling it in.
+8. Charts, segment sizes, and recipient counts with unverified numbers are strictly forbidden — an honest "no data available" is ALWAYS the correct answer over a fabricated one.
+
+Self-check before EVERY chart/number you output: "Which specific tool result in this conversation produced this exact value?" If you cannot name it, delete the number/chart and state that the data isn't available.
+
+═══ 🔌 NO-DATA GUIDANCE — when there's nothing to analyse ═══
+When your queries return no rows / empty results (i.e. the workspace has no data for the question, or appears to have no data at all), your job is NOT to apologise and stop — it is to get the user unblocked by connecting a data source.
+
+Respond like this:
+1. State plainly that there's no data yet for this analysis (no chart, no invented numbers).
+2. Direct the user to the **Integrations page** to connect and sync a data source. Refer to it by name and path: the **Integrations** page (in the left sidebar, at **/integrations**).
+3. Recommend the specific source(s) relevant to what they asked, so the guidance is actionable:
+   • Web traffic / sessions / UTM / campaign performance / page & event analytics → connect **Google Analytics (GA4)**.
+   • Orders / revenue / products / customers / eCommerce → connect their store: **Shopify**, **Shopline**, **Odoo**, or **WooCommerce**.
+   • Search impressions / clicks / queries / rankings → connect **Google Search Console**.
+   • Membership / offline sales data with no live source → they can upload a CSV (manual membership/sales import).
+4. Briefly note that after connecting, data syncs automatically and they can return here to run the analysis — offer to help once it's synced.
+
+Keep it short, friendly, and concrete. Example phrasing:
+"I don't see any web traffic data in your workspace yet, so there's nothing to chart. To analyse this, head to the **Integrations** page (left sidebar → Integrations, /integrations) and connect **Google Analytics (GA4)**. Once it syncs, come back and ask me again — I'll pull the real numbers and build the analysis for you."
+
+Do this INSTEAD of a fabricated chart — never both, and never a placeholder chart "to show what it will look like".
+
 ═══ THINKING PROCESS ═══
 For every question, work through these steps BEFORE writing any response:
 1. What business decision is this user trying to make?
@@ -700,10 +732,18 @@ Then include a chart for any quantitative data:
   "data": [{"name": "Label", "value": 1234}],
   "xKey": "name",
   "series": [{"dataKey": "value", "name": "Sessions"}],
-  "trend": "The single most important takeaway from this data"
+  "trend": "The single most important takeaway from this data",
+  "query": "SELECT ... the exact single SELECT that produced this data ..."
 }
 \`\`\`
 chart_type options: bar | line | area | pie
+
+ALWAYS include "query" whenever the data came from query_data: the exact, self-contained SELECT you ran, returning columns named to match xKey and each series dataKey (e.g. columns "name" and "value"). This lets the dashboard re-run it and refresh the chart daily as the underlying data changes. It MUST be a single read-only SELECT (no semicolons, no CTEs that write, no multiple statements) and must keep any company/tenant scoping in its WHERE clause. Omit "query" only for charts built from data the user pasted (not queryable).
+
+OPTIONAL time-period fields (use ONLY for time-series data where xKey holds ISO dates like "2026-01-15"):
+• "date_filter": one of "all" | "7d" | "30d" | "90d" | "6m" | "1y" — the default time window the chart opens with on the dashboard.
+• "show_delta": true — also show the % change vs the immediately preceding period (a "delta"), like the analytics pages.
+When you include these, provide enough daily data rows to cover BOTH the window and the prior window (e.g. ~60 days of data for a "30d" filter) so the delta can be computed. If the data is not date-based, omit both fields. Users can also toggle the period filter and delta on any chart manually.
 
 Then for context:
 **What this means:** [Business implication in 1-2 sentences - connect to revenue, growth, or efficiency]
@@ -1336,6 +1376,64 @@ app.patch("/api/entities/:entity/:id", authenticate, async (req, res) => {
   }
 });
 
+// POST /api/charts/:id/refresh — re-run a pinned chart's stored SELECT query
+// (read-only) and refresh its data snapshot + last_refreshed. Charts that were
+// pinned without a stored query keep their snapshot and report refreshed:false.
+app.post("/api/charts/:id/refresh", authenticate, async (req, res) => {
+  try {
+    const p = requirePool();
+    const companyId = await companyGuard(req, res);
+    if (!companyId) return;
+
+    const { rows: found } = await p.query(
+      `SELECT * FROM app.pinned_charts WHERE id = $1 AND company_id = $2`,
+      [req.params.id, companyId]
+    );
+    if (!found.length) return res.status(404).json({ error: "Not found" });
+    const chart = found[0];
+
+    // Strip a single trailing semicolon; must be a lone read-only SELECT.
+    const sql = String(chart.query || "").trim().replace(/;\s*$/, "");
+    if (!sql) {
+      return res.json({ refreshed: false, reason: "no_query", chart: normalizeRow(chart) });
+    }
+    if (!/^select\b/i.test(sql) || sql.includes(";")) {
+      return res.status(400).json({ error: "Chart query must be a single read-only SELECT statement." });
+    }
+
+    // Execute inside a READ ONLY transaction with a statement timeout and hard row
+    // cap so a stored query can never write or run away.
+    const client = await p.connect();
+    let rows;
+    try {
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      await client.query("SET LOCAL statement_timeout = 15000");
+      const result = await client.query(`SELECT * FROM (${sql}) AS _chart_refresh LIMIT 1000`);
+      rows = result.rows;
+      await client.query("COMMIT");
+    } catch (e) {
+      try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+      return res.status(400).json({ error: `Query failed: ${e.message}` });
+    } finally {
+      client.release();
+    }
+
+    const cfg = typeof chart.chart_config === "string"
+      ? (() => { try { return JSON.parse(chart.chart_config); } catch { return {}; } })()
+      : (chart.chart_config || {});
+    const nextConfig = { ...cfg, data: rows };
+
+    const { rows: updated } = await p.query(
+      `UPDATE app.pinned_charts SET chart_config = $1, last_refreshed = NOW()
+       WHERE id = $2 AND company_id = $3 RETURNING *`,
+      [JSON.stringify(nextConfig), req.params.id, companyId]
+    );
+    res.json({ refreshed: true, chart: normalizeRow(updated[0]) });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
   const config = ENTITY_CONFIG[req.params.entity];
   if (!config) return res.status(400).json({ error: `Unknown entity: ${req.params.entity}` });
@@ -1750,15 +1848,25 @@ app.post("/api/chart-summaries/explain", authenticate, async (req, res) => {
   if (!chart_key) return res.status(400).json({ error: "chart_key is required" });
   const p = requirePool();
   try {
+    // Fingerprint the exact prompt input (title + type + the data the LLM will see).
+    // The cache is valid only while this input is unchanged: when the chart's data
+    // changes the fingerprint changes and we regenerate, so explanations never go stale.
+    const dataPreview = JSON.stringify((data || []).slice(0, 15), null, 2).slice(0, 1500);
+    const fingerprint = createHash("sha1")
+      .update(`${chart_title || ""}\n${chart_type || ""}\n${dataPreview}`)
+      .digest("hex");
+
     // Cache is per workspace - chart_key is a static per-chart string, so without
     // company_id one tenant's explanation would leak to (and be reused by) others.
     const existing = await p.query(
-      "SELECT summary FROM app.chart_summaries WHERE company_id = $1 AND chart_key = $2",
+      "SELECT summary, data_hash FROM app.chart_summaries WHERE company_id = $1 AND chart_key = $2",
       [companyId, chart_key]
     );
-    if (existing.rows.length > 0) return res.json({ summary: existing.rows[0].summary });
+    // Reuse only on a fingerprint match; a stale row (data changed) falls through to regenerate.
+    if (existing.rows.length > 0 && existing.rows[0].data_hash === fingerprint) {
+      return res.json({ summary: existing.rows[0].summary });
+    }
 
-    const dataPreview = JSON.stringify((data || []).slice(0, 15), null, 2).slice(0, 1500);
     const prompt = `You are a digital marketing analyst. Explain the following chart clearly and concisely to a business user.
 
 Chart title: "${chart_title}"
@@ -1778,9 +1886,9 @@ Be plain, specific, and business-focused. Reference actual numbers from the data
       metadata: { chart_key },
     });
     await p.query(
-      `INSERT INTO app.chart_summaries (company_id, chart_key, summary) VALUES ($1, $2, $3)
-       ON CONFLICT (company_id, chart_key) DO UPDATE SET summary = EXCLUDED.summary, updated_date = NOW()`,
-      [companyId, chart_key, summary]
+      `INSERT INTO app.chart_summaries (company_id, chart_key, summary, data_hash) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (company_id, chart_key) DO UPDATE SET summary = EXCLUDED.summary, data_hash = EXCLUDED.data_hash, updated_date = NOW()`,
+      [companyId, chart_key, summary, fingerprint]
     );
     return res.json({ summary });
   } catch (err) {

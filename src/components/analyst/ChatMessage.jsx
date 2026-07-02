@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar } from "lucide-react";
+import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar, Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fmtCredits } from "@/lib/credits";
@@ -683,6 +684,28 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
           })();
 
           const displayConfig = { ...chartConfig, data: sortedData };
+
+          // Guard against empty / all-zero chart data — never render a chart on non-data.
+          const hasRealData = Array.isArray(sortedData)
+            && sortedData.length > 0
+            && sortedData.some(d => { const v = Number(d?.[primaryKey]); return Number.isFinite(v) && v !== 0; });
+
+          if (!hasRealData) {
+            parts.push(
+              <div key={`chart-nodata-${i}`} className="my-4 border border-dashed border-border rounded-lg px-4 py-6 text-center">
+                <p className="text-xs font-medium text-muted-foreground">No data available for “{chartConfig.title || "this chart"}”</p>
+                <p className="text-[11px] text-muted-foreground/70 mt-1">There aren't any matching records in your database yet, so there's nothing to chart.</p>
+                <Link
+                  to="/integrations"
+                  className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-medium text-foreground border border-border rounded-md px-2.5 py-1 hover:bg-secondary/50 transition-colors"
+                >
+                  <Plug className="w-3 h-3" /> Connect a data source
+                </Link>
+              </div>
+            );
+            lastIndex = block.end;
+            return;
+          }
 
           parts.push(
             <div key={`chart-${i}`} className="my-4 border border-border rounded-lg overflow-hidden">

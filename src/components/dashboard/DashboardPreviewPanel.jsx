@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil, ArrowUp, ArrowDown, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { appClient } from "@/api/appClient";
 import { parseChartConfig } from "@/lib/utils";
 import { CHART_SIZES, normalizeSize, sizeMeta } from "@/lib/chartSizes";
 import { useDashboardLayout } from "@/lib/useDashboardLayout";
@@ -15,10 +18,21 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
   // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
   // are shared with the Dashboard page — nothing is persisted in localStorage.
   const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("main");
   const [editingTab, setEditingTab] = useState(null);
   const [editingName, setEditingName] = useState("");
+
+  // Inline chart editor (title + position) — no AI round-trip needed.
+  const [editingChart, setEditingChart] = useState(null); // chart id being edited
+  const [chartTitleDraft, setChartTitleDraft] = useState("");
+
+  // Persist a chart title change to the DB and refresh the shared pinned-charts cache.
+  const renameMutation = useMutation({
+    mutationFn: ({ id, title }) => appClient.entities.PinnedChart.update(id, { title }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] }),
+  });
 
   // Keep the active tab valid once the persisted tabs load.
   useEffect(() => {
@@ -40,11 +54,19 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
     });
   }, [pinnedChart, activeTab]);
 
-  const activeCharts = pinnedCharts.filter(c => (tabAssignments[activeTab] || []).includes(c.id));
+  // Order by the tab's assignment array so position edits (move up/down) take effect.
+  const activeCharts = (tabAssignments[activeTab] || [])
+    .map(id => pinnedCharts.find(c => c.id === id))
+    .filter(Boolean);
+
+  const isDuplicateName = (name, ignoreId) =>
+    tabs.some(t => t.id !== ignoreId && t.name.trim().toLowerCase() === name.trim().toLowerCase());
 
   const addTab = () => {
     const id = `tab-${Date.now()}`;
-    setTabs(prev => [...prev, { id, name: `Tab ${prev.length + 1}` }]);
+    let n = tabs.length + 1;
+    while (isDuplicateName(`Tab ${n}`)) n++;
+    setTabs(prev => [...prev, { id, name: `Tab ${n}` }]);
     setTabAssignments(prev => ({ ...prev, [id]: [] }));
     setActiveTab(id);
   };
@@ -60,7 +82,12 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
   const startEditTab = (tab) => { setEditingTab(tab.id); setEditingName(tab.name); };
   const finishEditTab = () => {
     if (!editingTab) return;
-    setTabs(prev => prev.map(t => t.id === editingTab ? { ...t, name: editingName || t.name } : t));
+    const name = editingName.trim();
+    if (name && isDuplicateName(name, editingTab)) {
+      toast.error(`A tab named "${name}" already exists`);
+      return; // keep editing so the user can pick another name
+    }
+    setTabs(prev => prev.map(t => t.id === editingTab ? { ...t, name: name || t.name } : t));
     setEditingTab(null);
   };
 
@@ -85,6 +112,33 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
         [toTabId]: to.includes(chartId) ? to : [...to, chartId],
       };
     });
+  };
+
+  // Reorder a chart within the current tab (its position on the dashboard).
+  const moveChartWithinTab = (chartId, dir) => {
+    setTabAssignments(prev => {
+      const arr = [...(prev[activeTab] || [])];
+      const i = arr.indexOf(chartId);
+      if (i < 0) return prev;
+      const j = dir === "up" ? i - 1 : i + 1;
+      if (j < 0 || j >= arr.length) return prev;
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+      return { ...prev, [activeTab]: arr };
+    });
+  };
+
+  // Move a chart to another tab and follow it there so editing can continue.
+  const changeChartTab = (chartId, toTabId) => {
+    if (!toTabId || toTabId === activeTab) return;
+    moveChartToTab(chartId, toTabId);
+    setActiveTab(toTabId);
+  };
+
+  const startEditChart = (chart) => { setEditingChart(chart.id); setChartTitleDraft(chart.title || ""); };
+  const saveChartEdit = (chart) => {
+    const title = chartTitleDraft.trim();
+    if (title && title !== chart.title) renameMutation.mutate({ id: chart.id, title });
+    setEditingChart(null);
   };
 
   return (
@@ -155,7 +209,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
       {/* Hint */}
       <div className="px-4 pt-1.5 pb-1 flex-shrink-0">
         <p className="text-[10px] text-muted-foreground">
-          Double-click or ✎ to rename · Pin charts from chat · Move charts between tabs · Tabs sync with Dashboard
+          Double-click or ✎ to rename a tab · ✎ on a chart to edit its title & position · Tabs sync with Dashboard
         </p>
       </div>
 
@@ -179,56 +233,111 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                   key={chart.id}
                   className={`border border-border rounded-lg bg-card p-4 group relative hover:shadow-md transition-shadow ${sizeMeta(size).span}`}
                 >
-                  {/* Hover actions */}
-                  <div className="absolute top-2 right-2 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" title="Edit in AI Analyst"
-                      onClick={() => onEditRequest?.(chart)}>
-                      <Edit2 className="w-3 h-3" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
-                      title="Remove from tab"
-                      onClick={() => removeChartFromTab(chart.id)}>
-                      <Trash2 className="w-3 h-3" />
-                    </Button>
-                  </div>
+                  {editingChart === chart.id ? (
+                    /* Inline editor — rename + reposition directly, no AI needed */
+                    <div className="mb-2 space-y-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Edit chart</p>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground block mb-0.5">Title</label>
+                        <Input
+                          value={chartTitleDraft}
+                          onChange={e => setChartTitleDraft(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") saveChartEdit(chart); if (e.key === "Escape") setEditingChart(null); }}
+                          className="h-7 text-xs"
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground block mb-0.5">Tab</label>
+                        <select
+                          className="w-full max-w-full min-w-0 h-7 text-xs px-1.5 border border-border rounded bg-background text-foreground cursor-pointer"
+                          value={activeTab}
+                          onChange={e => changeChartTab(chart.id, e.target.value)}
+                        >
+                          {tabs.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground block mb-0.5">Position</label>
+                        <div className="flex items-center gap-1">
+                          <Button variant="outline" size="icon" className="h-7 w-7"
+                            title="Move up" disabled={activeCharts[0]?.id === chart.id}
+                            onClick={() => moveChartWithinTab(chart.id, "up")}>
+                            <ArrowUp className="w-3 h-3" />
+                          </Button>
+                          <Button variant="outline" size="icon" className="h-7 w-7"
+                            title="Move down" disabled={activeCharts[activeCharts.length - 1]?.id === chart.id}
+                            onClick={() => moveChartWithinTab(chart.id, "down")}>
+                            <ArrowDown className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <Button size="sm" className="h-7 text-xs px-2.5" onClick={() => saveChartEdit(chart)}>Done</Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs px-2.5" onClick={() => setEditingChart(null)}>Cancel</Button>
+                        {onEditRequest && (
+                          <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1 ml-auto text-muted-foreground"
+                            title="Refine this chart with the AI Analyst"
+                            onClick={() => onEditRequest(chart)}>
+                            <Sparkles className="w-3 h-3" /> AI
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Hover actions */}
+                      <div className="absolute top-2 right-2 flex items-center gap-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" title="Edit title & position"
+                          onClick={() => startEditChart(chart)}>
+                          <Edit2 className="w-3 h-3" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive"
+                          title="Remove from tab"
+                          onClick={() => removeChartFromTab(chart.id)}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
 
-                  <div className="mb-2 pr-16">
-                    <p className="text-xs font-semibold truncate">{chart.title}</p>
-                    {chart.description && (
-                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{chart.description}</p>
-                    )}
-                  </div>
+                      <div className="mb-2 pr-16">
+                        <p className="text-xs font-semibold truncate">{chart.title}</p>
+                        {chart.description && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">{chart.description}</p>
+                        )}
+                      </div>
 
-                  {/* Size + move controls */}
-                  <div className="flex items-center gap-1 mb-2 flex-wrap">
-                    {CHART_SIZES.map(s => (
-                      <button
-                        key={s.value}
-                        title={`${s.name} size`}
-                        className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
-                          size === s.value
-                            ? "border-foreground bg-foreground text-background"
-                            : "border-border text-muted-foreground hover:border-foreground/40"
-                        }`}
-                        onClick={() => setChartSize(chart.id, s.value)}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                    {otherTabs.length > 0 && (
-                      <select
-                        className="text-[9px] h-5 px-1 border border-border rounded bg-background text-muted-foreground ml-auto cursor-pointer"
-                        value=""
-                        onChange={e => { if (e.target.value) moveChartToTab(chart.id, e.target.value); }}
-                        title="Move to another tab"
-                      >
-                        <option value="" disabled>Move to…</option>
-                        {otherTabs.map(t => (
-                          <option key={t.id} value={t.id}>{t.name}</option>
+                      {/* Size + move controls */}
+                      <div className="flex items-center gap-1 mb-2 flex-wrap">
+                        {CHART_SIZES.map(s => (
+                          <button
+                            key={s.value}
+                            title={`${s.name} size`}
+                            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
+                              size === s.value
+                                ? "border-foreground bg-foreground text-background"
+                                : "border-border text-muted-foreground hover:border-foreground/40"
+                            }`}
+                            onClick={() => setChartSize(chart.id, s.value)}
+                          >
+                            {s.label}
+                          </button>
                         ))}
-                      </select>
-                    )}
-                  </div>
+                        {otherTabs.length > 0 && (
+                          <select
+                            className="text-[9px] h-5 px-1 border border-border rounded bg-background text-muted-foreground ml-auto cursor-pointer max-w-full min-w-0 w-auto"
+                            value=""
+                            onChange={e => { if (e.target.value) moveChartToTab(chart.id, e.target.value); }}
+                            title="Move to another tab"
+                          >
+                            <option value="" disabled>Move to…</option>
+                            {otherTabs.map(t => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </>
+                  )}
 
                   <div className={sizeH}>
                     <MiniChart type={chart.chart_type || config.chart_type || "bar"} config={config} />

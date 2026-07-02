@@ -115,6 +115,7 @@ CREATE TABLE app.chart_summaries (
   created_by   UUID        REFERENCES app.users(id) ON DELETE SET NULL,
   chart_key    TEXT        NOT NULL,
   summary      TEXT        NOT NULL DEFAULT '',
+  data_hash    TEXT,        -- fingerprint of the chart data the summary was generated from; NULL forces regen
   metadata     JSONB       NOT NULL DEFAULT '{}'
 );
 CREATE UNIQUE INDEX chart_summaries_company_key_idx ON app.chart_summaries(company_id, chart_key);

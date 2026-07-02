@@ -13,7 +13,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import EmailBuilder, { blocksToHtml } from "./EmailBuilder";
+import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
 
 // ── Default email blocks ──────────────────────────────────────────────────────
 const DEFAULT_BLOCKS = [
@@ -283,6 +283,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
 
   // Email builder state
   const [blocks, setBlocks] = useState(DEFAULT_BLOCKS);
+  const [container, setContainer] = useState(DEFAULT_EMAIL_CONTAINER);
   const [htmlMode, setHtmlMode] = useState(false);
   const [rawHtml, setRawHtml] = useState("");
 
@@ -337,6 +338,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     if (initial) {
       const saved = initial.ab_test_config || {};
       setBlocks(saved._blocks || DEFAULT_BLOCKS);
+      setContainer({ ...DEFAULT_EMAIL_CONTAINER, ...(saved._container || {}) });
       setHtmlMode(saved._html_mode || false);
       setRawHtml(initial.html_body || "");
       setTriggerType(saved._trigger_type || "manual");
@@ -358,6 +360,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
       });
     } else {
       setBlocks([]);
+      setContainer(DEFAULT_EMAIL_CONTAINER);
       setHtmlMode(false);
       setRawHtml("");
       setTriggerType("manual");
@@ -423,6 +426,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     if (vars._blocks) {
       const uid2 = () => `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       setBlocks(vars._blocks.map(b => ({ ...b, id: `${b.type}_${uid2()}`, config: { ...b.config } })));
+      setContainer({ ...DEFAULT_EMAIL_CONTAINER, ...(vars._container || {}) });
       setHtmlMode(vars._html_mode || false);
     }
     if (template.subject && !form.subject) {
@@ -446,7 +450,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
     }
     setSaving(true);
     try {
-      const html_body = htmlMode ? rawHtml : blocksToHtml(blocks);
+      const html_body = htmlMode ? rawHtml : blocksToHtml(blocks, true, container);
       // Earliest upcoming schedule drives the DB column (existing cron picks it up)
       const sortedSchedules = [...schedules].sort((a, b) =>
         new Date(a.scheduled_at) - new Date(b.scheduled_at)
@@ -456,6 +460,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
         : null;
       const ab_test_config = {
         _blocks: blocks,
+        _container: container,
         _html_mode: htmlMode,
         _trigger_type: triggerType,
         _schedules: schedules,
@@ -485,7 +490,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   // Build current state for test send
   const currentState = {
     subject: form.subject,
-    html_body: htmlMode ? rawHtml : blocksToHtml(blocks),
+    html_body: htmlMode ? rawHtml : blocksToHtml(blocks, true, container),
     from_name: form.from_name,
     from_email: form.from_email,
     reply_to: form.reply_to,
@@ -656,6 +661,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                     <EmailBuilder
                       blocks={blocks}
                       onChange={setBlocks}
+                      container={container}
+                      onContainerChange={setContainer}
                       htmlMode={htmlMode}
                       onHtmlModeChange={setHtmlMode}
                       rawHtml={rawHtml}

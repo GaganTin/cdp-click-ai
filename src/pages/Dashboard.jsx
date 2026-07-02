@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil, Trash2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,8 @@ const DASHBOARD_HEIGHTS = { small: "h-64", large: "h-80" };
 export default function Dashboard() {
   const { t } = usePreferences();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [dragTabId, setDragTabId] = useState(null);
 
   // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
   // (company-scoped app.settings) via this hook — nothing is stored locally.
@@ -66,11 +69,60 @@ export default function Dashboard() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] }),
   });
 
+  // Manual per-card refresh: re-run the chart's stored query, then refetch the list.
+  const refreshChart = async (id) => {
+    await appClient.charts.refresh(id);
+    await queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
+  };
+
+  // Auto-refresh once per load: charts change daily, so any chart with a stored
+  // query that hasn't been refreshed since the start of today is re-run. This
+  // covers charts on every tab (refresh acts on the shared chart record).
+  const autoRefreshedRef = useRef(false);
+  useEffect(() => {
+    if (autoRefreshedRef.current || !pinnedCharts.length) return;
+    autoRefreshedRef.current = true;
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const stale = pinnedCharts.filter(
+      c => c.query && (!c.last_refreshed || new Date(c.last_refreshed) < startOfToday)
+    );
+    if (!stale.length) return;
+    (async () => {
+      for (const c of stale) {
+        try { await appClient.charts.refresh(c.id); } catch { /* leave snapshot as-is */ }
+      }
+      queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
+    })();
+  }, [pinnedCharts, queryClient]);
+
+  // Case-insensitive duplicate check, optionally ignoring one tab (the one being renamed).
+  const isDuplicateName = (name, ignoreId) =>
+    tabs.some(t => t.id !== ignoreId && t.name.trim().toLowerCase() === name.trim().toLowerCase());
+
   const addTab = () => {
     const id = `tab-${Date.now()}`;
-    setTabs(prev => [...prev, { id, name: `Tab ${prev.length + 1}` }]);
+    // Pick the first "Tab N" that isn't already taken so we never create a duplicate.
+    let n = tabs.length + 1;
+    while (isDuplicateName(`Tab ${n}`)) n++;
+    setTabs(prev => [...prev, { id, name: `Tab ${n}` }]);
     setTabAssignments(prev => ({ ...prev, [id]: [] }));
     setActiveTab(id);
+  };
+
+  // Reorder tabs via native drag-and-drop.
+  const handleTabDrop = (targetId) => {
+    if (!dragTabId || dragTabId === targetId) { setDragTabId(null); return; }
+    setTabs(prev => {
+      const from = prev.findIndex(t => t.id === dragTabId);
+      const to = prev.findIndex(t => t.id === targetId);
+      if (from < 0 || to < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    setDragTabId(null);
   };
 
   const removeTab = (tabId) => {
@@ -85,10 +137,14 @@ export default function Dashboard() {
 
   const startEdit = (tab) => { setEditingTab(tab.id); setEditingName(tab.name); };
   const finishEdit = () => {
-    if (editingTab) {
-      setTabs(prev => prev.map(t => t.id === editingTab ? { ...t, name: editingName || t.name } : t));
-      setEditingTab(null);
+    if (!editingTab) return;
+    const name = editingName.trim();
+    if (name && isDuplicateName(name, editingTab)) {
+      toast.error(`A tab named "${name}" already exists`);
+      return; // keep editing so the user can pick another name
     }
+    setTabs(prev => prev.map(t => t.id === editingTab ? { ...t, name: name || t.name } : t));
+    setEditingTab(null);
   };
 
   const toggleChartInTab = (tabId, chartId) => {
@@ -114,11 +170,18 @@ export default function Dashboard() {
     setChartSizes(prev => ({ ...prev, [chartId]: nextSize(prev[chartId]) }));
   };
 
-  // Charts visible in the active tab — only those explicitly assigned to it.
+  // Send a chart (with its currently-applied filter) to the AI Analyst to discuss.
+  // The Analyst page reads this navigation state and offers new vs. existing chat.
+  const discussChart = (payload) => {
+    navigate("/", { state: { discussChart: payload } });
+  };
+
+  // Charts visible in the active tab — only those explicitly assigned to it,
+  // ordered by the assignment array so positions set in the preview are honoured.
   const assignment = tabAssignments[activeTab] || [];
-  const visibleCharts = assignment.length === 0
-    ? []
-    : pinnedCharts.filter(c => assignment.includes(c.id));
+  const visibleCharts = assignment
+    .map(id => pinnedCharts.find(c => c.id === id))
+    .filter(Boolean);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -138,54 +201,65 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-border gap-6">
-          {tabs.map(tab => (
-            <div key={tab.id} className="flex items-center group relative">
-              {editingTab === tab.id ? (
-                <div className="flex items-center gap-1 pb-3">
-                  <Input value={editingName} onChange={e => setEditingName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && finishEdit()}
-                    className="h-6 text-xs w-28 px-2" autoFocus />
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={finishEdit}>
-                    <Check className="w-3 h-3" />
-                  </Button>
-                </div>
-              ) : (
-                <button
-                  className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === tab.id
-                      ? "border-foreground text-foreground"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                  onClick={() => setActiveTab(tab.id)}
-                  onDoubleClick={() => startEdit(tab)}
-                >
-                  {tab.name}
-                  {activeTab === tab.id && (
-                    <span
-                      className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
-                      title={t("Rename tab")}
-                      onClick={e => { e.stopPropagation(); startEdit(tab); }}
-                    >
-                      <Pencil className="w-2.5 h-2.5" />
-                    </span>
-                  )}
-                  {tabs.length > 1 && (
-                    <span
-                      className="opacity-0 group-hover:opacity-50 hover:!opacity-100"
-                      onClick={e => { e.stopPropagation(); removeTab(tab.id); }}
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </span>
-                  )}
-                </button>
-              )}
-            </div>
-          ))}
+        {/* Tabs — horizontally scrollable when they overflow; drag to reorder */}
+        <div className="flex items-end border-b border-border">
+          <div className="flex gap-6 flex-1 min-w-0 overflow-x-auto overflow-y-hidden dashboard-tabs-scroll">
+            {tabs.map(tab => (
+              <div
+                key={tab.id}
+                className={`flex items-center group relative flex-shrink-0 ${dragTabId === tab.id ? "opacity-40" : ""}`}
+                draggable={editingTab !== tab.id}
+                onDragStart={() => setDragTabId(tab.id)}
+                onDragOver={e => e.preventDefault()}
+                onDrop={() => handleTabDrop(tab.id)}
+                onDragEnd={() => setDragTabId(null)}
+              >
+                {editingTab === tab.id ? (
+                  <div className="flex items-center gap-1 pb-3">
+                    <Input value={editingName} onChange={e => setEditingName(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") finishEdit(); if (e.key === "Escape") setEditingTab(null); }}
+                      className="h-6 text-xs w-28 px-2" autoFocus />
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={finishEdit}>
+                      <Check className="w-3 h-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <button
+                    className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 transition-colors cursor-grab active:cursor-grabbing whitespace-nowrap ${
+                      activeTab === tab.id
+                        ? "border-foreground text-foreground"
+                        : "border-transparent text-muted-foreground hover:text-foreground"
+                    }`}
+                    onClick={() => setActiveTab(tab.id)}
+                    onDoubleClick={() => startEdit(tab)}
+                    title={t("Drag to reorder · double-click to rename")}
+                  >
+                    {tab.name}
+                    {activeTab === tab.id && (
+                      <span
+                        className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
+                        title={t("Rename tab")}
+                        onClick={e => { e.stopPropagation(); startEdit(tab); }}
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                    {tabs.length > 1 && (
+                      <span
+                        className="opacity-0 group-hover:opacity-50 hover:!opacity-100"
+                        onClick={e => { e.stopPropagation(); removeTab(tab.id); }}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
           <button
             onClick={addTab}
-            className="flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center gap-1.5 pb-3 pl-4 flex-shrink-0 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5" /> {t("New tab")}
           </button>
@@ -228,7 +302,7 @@ export default function Dashboard() {
                           }`}>
                             {assigned && <Check className="h-3 w-3" />}
                           </span>
-                          <span className="truncate">{c.title}</span>
+                          <span className="truncate" title={c.title}>{c.title}</span>
                         </button>
                         <button
                           type="button"
@@ -278,12 +352,17 @@ export default function Dashboard() {
               const size = normalizeSize(chartSizes[chart.id]);
               return (
                 <div key={chart.id} className={`${sizeMeta(size).span} ${DASHBOARD_HEIGHTS[size]}`}>
+                  {/* Include last_refreshed in the key so a refresh remounts the card
+                      with the newly-fetched data and updated timestamp. */}
                   <PinnedChartCard
+                    key={`${chart.id}:${chart.last_refreshed || ""}`}
                     chart={chart}
                     size={size}
                     onRemove={(c) => removeChartFromTab(activeTab, c.id)}
                     onCycleSize={() => cycleSize(chart.id)}
                     onUpdate={(updated) => updateMutation.mutate({ id: updated.id, data: { title: updated.title, description: updated.description, chart_type: updated.chart_type, chart_config: updated.chart_config } })}
+                    onDiscuss={discussChart}
+                    onRefresh={refreshChart}
                   />
                 </div>
               );

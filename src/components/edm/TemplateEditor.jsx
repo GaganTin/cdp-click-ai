@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, Eye, Code2 } from "lucide-react";
-import EmailBuilder, { blocksToHtml } from "./EmailBuilder";
+import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
 import { toast } from "sonner";
 
 const DEFAULT_BLOCKS = [
@@ -21,6 +21,7 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
   const [subject, setSubject] = useState("");
   const [status, setStatus] = useState("draft");
   const [blocks, setBlocks] = useState(DEFAULT_BLOCKS);
+  const [container, setContainer] = useState(DEFAULT_EMAIL_CONTAINER);
   const [htmlMode, setHtmlMode] = useState(false);
   const [rawHtml, setRawHtml] = useState("");
   const [saving, setSaving] = useState(false);
@@ -36,6 +37,7 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
       setSubject(initial.subject || "");
       setStatus(initial.status || "draft");
       setBlocks(hasBlocks ? vars._blocks : DEFAULT_BLOCKS);
+      setContainer({ ...DEFAULT_EMAIL_CONTAINER, ...(vars._container || {}) });
       // Open in HTML mode when the template is raw HTML or has saved HTML but no
       // block data, so the editor shows its real content (matching the preview)
       // instead of falling back to the default blocks.
@@ -46,6 +48,7 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
       setSubject("");
       setStatus("draft");
       setBlocks(DEFAULT_BLOCKS);
+      setContainer(DEFAULT_EMAIL_CONTAINER);
       setHtmlMode(false);
       setRawHtml("");
     }
@@ -57,12 +60,12 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
     if (!subject.trim()) return toast.error("Subject line is required");
     setSaving(true);
     try {
-      const html_body = htmlMode ? rawHtml : blocksToHtml(blocks);
+      const html_body = htmlMode ? rawHtml : blocksToHtml(blocks, true, container);
       await onSave({
         name: name.trim(),
         subject: subject.trim(),
         html_body,
-        variables: { _blocks: blocks, _html_mode: htmlMode },
+        variables: { _blocks: blocks, _container: container, _html_mode: htmlMode },
         status: saveStatus,
       });
     } catch (e) {
@@ -74,19 +77,20 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
 
   const handleUseTemplate = async () => {
     // Save first if it has unsaved changes, then open as a new campaign pre-filled
-    const html_body = htmlMode ? rawHtml : blocksToHtml(blocks);
+    const html_body = htmlMode ? rawHtml : blocksToHtml(blocks, true, container);
     if (onUseTemplate) {
       onUseTemplate({
         name: name.trim(),
         subject: subject.trim(),
         html_body,
         blocks,
+        container,
         htmlMode,
       });
     }
   };
 
-  const currentHtml = htmlMode ? rawHtml : blocksToHtml(blocks);
+  const currentHtml = htmlMode ? rawHtml : blocksToHtml(blocks, true, container);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -193,6 +197,8 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
             <EmailBuilder
               blocks={blocks}
               onChange={setBlocks}
+              container={container}
+              onContainerChange={setContainer}
               htmlMode={htmlMode}
               onHtmlModeChange={setHtmlMode}
               rawHtml={rawHtml}

@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { toast } from "sonner";
 import {
   Type, AlignLeft, MousePointer2, ImageIcon, Mail,
   Minus, MoveVertical, ChevronUp, ChevronDown, Trash2,
   Eye, EyeOff, Settings, ArrowLeft, Save, Layers, Code,
+  GripVertical, Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { ImageUploadField } from "@/components/ui/image-upload-field";
 
 // ── Block palette ──────────────────────────────────────────────────────────────
 
@@ -39,12 +41,12 @@ function isPreset(cat) { return PRESET_CATEGORIES.includes(cat); }
 function newBlock(type) {
   const id = Math.random().toString(36).slice(2, 10);
   const defaults = {
-    heading:    { type, id, content: "Your Headline", level: "2", color: "#111111", align: "center", fontSize: "24", fontWeight: "700" },
-    text:       { type, id, content: "Add your message here. Keep it clear and focused on one idea.", color: "#555555", align: "center", fontSize: "14", lineHeight: "1.6" },
-    button:     { type, id, content: "Click Here", href: "#", align: "center", bg: "#111111", color: "#ffffff", borderRadius: "8", paddingY: "12", paddingX: "32", fontSize: "14", fontWeight: "600" },
-    email_form: { type, id, placeholder: "your@email.com", buttonText: "Subscribe", buttonBg: "#111111", buttonColor: "#ffffff", borderRadius: "8", privacyNote: "No spam. Unsubscribe any time.", showName: false },
-    image:      { type, id, src: "", alt: "", align: "center", maxWidth: "100" },
-    divider:    { type, id, color: "#e5e7eb", marginY: "16" },
+    heading:    { type, id, content: "Your Headline", level: "2", color: "#111111", align: "center", fontSize: "24", fontWeight: "700", lineHeight: "1.3", letterSpacing: "0", marginBottom: "12" },
+    text:       { type, id, content: "Add your message here. Keep it clear and focused on one idea.", color: "#555555", align: "center", fontSize: "14", fontWeight: "400", lineHeight: "1.6", marginBottom: "16" },
+    button:     { type, id, content: "Click Here", href: "#", align: "center", bg: "#111111", color: "#ffffff", borderRadius: "8", paddingY: "12", paddingX: "32", fontSize: "14", fontWeight: "600", fullWidth: false, borderWidth: "0", borderColor: "#111111", marginBottom: "16" },
+    email_form: { type, id, placeholder: "your@email.com", buttonText: "Subscribe", buttonBg: "#111111", buttonColor: "#ffffff", inputBg: "#ffffff", inputColor: "#111111", inputBorderColor: "#dddddd", borderRadius: "8", privacyNote: "No spam. Unsubscribe any time.", showName: false },
+    image:      { type, id, src: "", alt: "", href: "", align: "center", maxWidth: "100", borderRadius: "0", shadow: false, marginBottom: "16" },
+    divider:    { type, id, color: "#e5e7eb", thickness: "1", style: "solid", widthPct: "100", marginY: "16" },
     spacer:     { type, id, height: "24" },
     html:       { type, id, html: `<p style="text-align:center;margin:0;font-size:14px;color:#555">Your custom HTML here</p>` },
   };
@@ -53,10 +55,14 @@ function newBlock(type) {
 
 export const DEFAULT_CONTAINER = {
   background: "#ffffff",
+  bgImage: "",
   paddingY: "32",
   paddingX: "24",
   borderRadius: "12",
   maxWidth: "480",
+  minHeight: "0",
+  borderWidth: "0",
+  borderColor: "#e5e7eb",
   fontFamily: "sans-serif",
   shadow: true,
 };
@@ -73,23 +79,32 @@ function blockToHtml(b) {
   switch (b.type) {
     case "heading": {
       const t = `h${b.level || 2}`;
-      return `<${t} style="margin:0 0 12px;font-size:${b.fontSize || 24}px;font-weight:${b.fontWeight || 700};color:${b.color || "#111"};text-align:${b.align || "center"}">${esc(b.content)}</${t}>`;
+      const ls = b.letterSpacing && b.letterSpacing !== "0" ? `letter-spacing:${b.letterSpacing}px;` : "";
+      return `<${t} style="margin:0 0 ${b.marginBottom ?? 12}px;font-size:${b.fontSize || 24}px;font-weight:${b.fontWeight || 700};line-height:${b.lineHeight || 1.3};${ls}color:${b.color || "#111"};text-align:${b.align || "center"}">${esc(b.content)}</${t}>`;
     }
     case "text":
-      return `<p style="margin:0 0 16px;font-size:${b.fontSize || 14}px;color:${b.color || "#555"};text-align:${b.align || "center"};line-height:${b.lineHeight || 1.6}">${esc(b.content)}</p>`;
-    case "button":
-      return `<div style="text-align:${b.align || "center"};margin:0 0 16px"><a href="${esc(b.href || "#")}" style="display:inline-block;padding:${b.paddingY || 12}px ${b.paddingX || 32}px;background:${b.bg || "#111"};color:${b.color || "#fff"};text-decoration:none;border-radius:${b.borderRadius || 8}px;font-size:${b.fontSize || 14}px;font-weight:${b.fontWeight || 600};cursor:pointer">${esc(b.content || "Click Here")}</a></div>`;
-    case "email_form":
+      return `<p style="margin:0 0 ${b.marginBottom ?? 16}px;font-size:${b.fontSize || 14}px;font-weight:${b.fontWeight || 400};color:${b.color || "#555"};text-align:${b.align || "center"};line-height:${b.lineHeight || 1.6}">${esc(b.content)}</p>`;
+    case "button": {
+      const border = b.borderWidth && b.borderWidth !== "0" ? `border:${b.borderWidth}px solid ${b.borderColor || b.bg || "#111"};` : "";
+      const display = b.fullWidth ? "display:block;text-align:center;" : "display:inline-block;";
+      return `<div style="text-align:${b.align || "center"};margin:0 0 ${b.marginBottom ?? 16}px"><a href="${esc(b.href || "#")}" style="${display}padding:${b.paddingY || 12}px ${b.paddingX || 32}px;background:${b.bg || "#111"};color:${b.color || "#fff"};text-decoration:none;border-radius:${b.borderRadius || 8}px;font-size:${b.fontSize || 14}px;font-weight:${b.fontWeight || 600};${border}cursor:pointer">${esc(b.content || "Click Here")}</a></div>`;
+    }
+    case "email_form": {
+      const inputStyle = `width:100%;box-sizing:border-box;padding:10px 14px;background:${b.inputBg || "#fff"};color:${b.inputColor || "#111"};border:1px solid ${b.inputBorderColor || "#ddd"};border-radius:${b.borderRadius || 8}px;font-size:14px`;
       return `<form style="margin:0 0 8px">
-  ${b.showName ? `<input name="name" type="text" placeholder="Your name" style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid #ddd;border-radius:${b.borderRadius || 8}px;font-size:14px;margin-bottom:8px" />\n  ` : ""}<input name="email" type="email" placeholder="${esc(b.placeholder || "your@email.com")}" required style="width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid #ddd;border-radius:${b.borderRadius || 8}px;font-size:14px;margin-bottom:10px" />
+  ${b.showName ? `<input name="name" type="text" placeholder="Your name" style="${inputStyle};margin-bottom:8px" />\n  ` : ""}<input name="email" type="email" placeholder="${esc(b.placeholder || "your@email.com")}" required style="${inputStyle};margin-bottom:10px" />
   <button type="submit" style="width:100%;padding:11px;background:${b.buttonBg || "#111"};color:${b.buttonColor || "#fff"};border:none;border-radius:${b.borderRadius || 8}px;font-size:14px;font-weight:600;cursor:pointer">${esc(b.buttonText || "Subscribe")}</button>
 </form>${b.privacyNote ? `\n<p style="margin:8px 0 0;font-size:11px;color:#aaa;text-align:center">${esc(b.privacyNote)}</p>` : ""}`;
-    case "image":
-      return b.src
-        ? `<div style="text-align:${b.align || "center"};margin:0 0 16px"><img src="${esc(b.src)}" alt="${esc(b.alt || "")}" style="max-width:${b.maxWidth || 100}%;height:auto;display:inline-block" /></div>`
-        : "";
+    }
+    case "image": {
+      if (!b.src) return "";
+      const shadow = b.shadow ? "box-shadow:0 4px 16px rgba(0,0,0,.15);" : "";
+      const img = `<img src="${esc(b.src)}" alt="${esc(b.alt || "")}" style="max-width:${b.maxWidth || 100}%;height:auto;display:inline-block;border-radius:${b.borderRadius || 0}px;${shadow}" />`;
+      const wrapped = b.href ? `<a href="${esc(b.href)}">${img}</a>` : img;
+      return `<div style="text-align:${b.align || "center"};margin:0 0 ${b.marginBottom ?? 16}px">${wrapped}</div>`;
+    }
     case "divider":
-      return `<hr style="border:none;border-top:1px solid ${b.color || "#e5e7eb"};margin:${b.marginY || 16}px 0" />`;
+      return `<hr style="border:none;border-top:${b.thickness || 1}px ${b.style || "solid"} ${b.color || "#e5e7eb"};width:${b.widthPct || 100}%;margin:${b.marginY || 16}px auto" />`;
     case "spacer":
       return `<div style="height:${b.height || 24}px"></div>`;
     case "html":
@@ -101,8 +116,17 @@ function blockToHtml(b) {
 
 export function generateHtml(container, blocks) {
   const shadow = container.shadow ? "box-shadow:0 4px 24px rgba(0,0,0,.12);" : "";
+  const bgImage = container.bgImage
+    ? `background-image:url('${esc(container.bgImage)}');background-size:cover;background-position:center;`
+    : "";
+  const border = container.borderWidth && container.borderWidth !== "0"
+    ? `border:${container.borderWidth}px solid ${container.borderColor || "#e5e7eb"};`
+    : "";
+  const minHeight = container.minHeight && container.minHeight !== "0"
+    ? `min-height:${container.minHeight}px;`
+    : "";
   const inner = blocks.map(blockToHtml).filter(Boolean).join("\n");
-  return `<div style="font-family:${container.fontFamily || "sans-serif"};max-width:${container.maxWidth || 480}px;margin:0 auto;padding:${container.paddingY || 32}px ${container.paddingX || 24}px;background:${container.background || "#fff"};border-radius:${container.borderRadius || 12}px;${shadow}">\n${inner}\n</div>`;
+  return `<div style="font-family:${container.fontFamily || "sans-serif"};max-width:${container.maxWidth || 480}px;margin:0 auto;padding:${container.paddingY || 32}px ${container.paddingX || 24}px;background:${container.background || "#fff"};${bgImage}${border}${minHeight}border-radius:${container.borderRadius || 12}px;${shadow}">\n${inner}\n</div>`;
 }
 
 // ── Shared field components ────────────────────────────────────────────────────
@@ -174,6 +198,18 @@ function TextareaField({ label, value, onChange, rows = 3 }) {
   );
 }
 
+function SelectField({ label, value, onChange, options }) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px]">{label}</Label>
+      <select value={value} onChange={e => onChange(e.target.value)}
+        className="w-full h-7 px-2 text-xs bg-background border border-input rounded-md">
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function ToggleField({ label, value, onChange, hint }) {
   const id = Math.random().toString(36).slice(2);
   return (
@@ -218,6 +254,9 @@ function BlockProperties({ block, onChange }) {
               <option value="800">Extra-bold</option>
             </select>
           </div>
+          <NumField label="Line height" value={block.lineHeight} onChange={v => set("lineHeight", v)} min={1} max={3} unit="×" />
+          <NumField label="Letter spacing" value={block.letterSpacing} onChange={v => set("letterSpacing", v)} min={-2} max={12} unit="px" />
+          <NumField label="Space below" value={block.marginBottom} onChange={v => set("marginBottom", v)} min={0} max={64} unit="px" />
           <AlignField value={block.align} onChange={v => set("align", v)} />
           <ColorField label="Text color" value={block.color} onChange={v => set("color", v)} />
         </div>
@@ -228,7 +267,10 @@ function BlockProperties({ block, onChange }) {
         <div className="space-y-3">
           <TextareaField label="Content" value={block.content} onChange={v => set("content", v)} rows={4} />
           <NumField label="Font size" value={block.fontSize} onChange={v => set("fontSize", v)} min={10} max={36} unit="px" />
+          <SelectField label="Weight" value={block.fontWeight || "400"} onChange={v => set("fontWeight", v)}
+            options={[{ value: "300", label: "Light" }, { value: "400", label: "Regular" }, { value: "600", label: "Semi-bold" }, { value: "700", label: "Bold" }]} />
           <NumField label="Line height" value={block.lineHeight} onChange={v => set("lineHeight", v)} min={1} max={3} unit="×" />
+          <NumField label="Space below" value={block.marginBottom} onChange={v => set("marginBottom", v)} min={0} max={64} unit="px" />
           <AlignField value={block.align} onChange={v => set("align", v)} />
           <ColorField label="Text color" value={block.color} onChange={v => set("color", v)} />
         </div>
@@ -246,25 +288,25 @@ function BlockProperties({ block, onChange }) {
             <Input value={block.href} onChange={e => set("href", e.target.value)} placeholder="https://..." className="h-7 text-xs" />
           </div>
           <AlignField value={block.align} onChange={v => set("align", v)} />
+          <ToggleField label="Full width" value={block.fullWidth} onChange={v => set("fullWidth", v)}
+            hint="Stretch the button to fill the popup width" />
           <div className="grid grid-cols-2 gap-2">
             <ColorField label="Background" value={block.bg} onChange={v => set("bg", v)} />
             <ColorField label="Text color" value={block.color} onChange={v => set("color", v)} />
           </div>
           <NumField label="Border radius" value={block.borderRadius} onChange={v => set("borderRadius", v)} min={0} max={50} unit="px" />
           <div className="grid grid-cols-2 gap-2">
+            <NumField label="Border width" value={block.borderWidth} onChange={v => set("borderWidth", v)} min={0} max={8} unit="px" />
+            <ColorField label="Border color" value={block.borderColor} onChange={v => set("borderColor", v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             <NumField label="Padding Y" value={block.paddingY} onChange={v => set("paddingY", v)} min={4} max={40} unit="px" />
             <NumField label="Padding X" value={block.paddingX} onChange={v => set("paddingX", v)} min={8} max={80} unit="px" />
           </div>
           <NumField label="Font size" value={block.fontSize} onChange={v => set("fontSize", v)} min={10} max={24} unit="px" />
-          <div className="space-y-1">
-            <Label className="text-[11px]">Font weight</Label>
-            <select value={block.fontWeight || "600"} onChange={e => set("fontWeight", e.target.value)}
-              className="w-full h-7 px-2 text-xs bg-background border border-input rounded-md">
-              <option value="400">Regular</option>
-              <option value="600">Semi-bold</option>
-              <option value="700">Bold</option>
-            </select>
-          </div>
+          <SelectField label="Font weight" value={block.fontWeight || "600"} onChange={v => set("fontWeight", v)}
+            options={[{ value: "400", label: "Regular" }, { value: "600", label: "Semi-bold" }, { value: "700", label: "Bold" }]} />
+          <NumField label="Space below" value={block.marginBottom} onChange={v => set("marginBottom", v)} min={0} max={64} unit="px" />
         </div>
       );
 
@@ -285,6 +327,11 @@ function BlockProperties({ block, onChange }) {
             <ColorField label="Button bg" value={block.buttonBg} onChange={v => set("buttonBg", v)} />
             <ColorField label="Button text" value={block.buttonColor} onChange={v => set("buttonColor", v)} />
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <ColorField label="Input bg" value={block.inputBg} onChange={v => set("inputBg", v)} />
+            <ColorField label="Input text" value={block.inputColor} onChange={v => set("inputColor", v)} />
+          </div>
+          <ColorField label="Input border" value={block.inputBorderColor} onChange={v => set("inputBorderColor", v)} />
           <NumField label="Input border radius" value={block.borderRadius} onChange={v => set("borderRadius", v)} min={0} max={50} unit="px" />
           <div className="space-y-1">
             <Label className="text-[11px]">Privacy note</Label>
@@ -298,23 +345,23 @@ function BlockProperties({ block, onChange }) {
     case "image":
       return (
         <div className="space-y-3">
-          <div className="space-y-1">
-            <Label className="text-[11px]">Image URL</Label>
-            <Input value={block.src} onChange={e => set("src", e.target.value)}
-              placeholder="https://example.com/image.png" className="h-7 text-xs" />
-          </div>
+          <ImageUploadField label="Image" value={block.src} onChange={v => set("src", v)}
+            placeholder="Or paste an image URL…" />
           <div className="space-y-1">
             <Label className="text-[11px]">Alt text</Label>
             <Input value={block.alt} onChange={e => set("alt", e.target.value)}
               placeholder="Describe the image" className="h-7 text-xs" />
           </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Link URL</Label>
+            <Input value={block.href} onChange={e => set("href", e.target.value)}
+              placeholder="https://… (optional)" className="h-7 text-xs" />
+          </div>
           <NumField label="Max width" value={block.maxWidth} onChange={v => set("maxWidth", v)} min={10} max={100} unit="%" />
+          <NumField label="Corner radius" value={block.borderRadius} onChange={v => set("borderRadius", v)} min={0} max={50} unit="px" />
+          <NumField label="Space below" value={block.marginBottom} onChange={v => set("marginBottom", v)} min={0} max={64} unit="px" />
           <AlignField value={block.align} onChange={v => set("align", v)} />
-          {block.src && (
-            <div className="rounded-md overflow-hidden border border-border bg-secondary/20 p-2">
-              <img src={block.src} alt={block.alt} className="max-h-24 mx-auto object-contain" />
-            </div>
-          )}
+          <ToggleField label="Drop shadow" value={block.shadow} onChange={v => set("shadow", v)} />
         </div>
       );
 
@@ -322,6 +369,10 @@ function BlockProperties({ block, onChange }) {
       return (
         <div className="space-y-3">
           <ColorField label="Line color" value={block.color} onChange={v => set("color", v)} />
+          <NumField label="Thickness" value={block.thickness} onChange={v => set("thickness", v)} min={1} max={12} unit="px" />
+          <SelectField label="Style" value={block.style || "solid"} onChange={v => set("style", v)}
+            options={[{ value: "solid", label: "Solid" }, { value: "dashed", label: "Dashed" }, { value: "dotted", label: "Dotted" }]} />
+          <NumField label="Width" value={block.widthPct} onChange={v => set("widthPct", v)} min={10} max={100} unit="%" />
           <NumField label="Vertical margin" value={block.marginY} onChange={v => set("marginY", v)} min={0} max={80} unit="px" />
         </div>
       );
@@ -362,12 +413,19 @@ function ContainerProperties({ container, onChange }) {
   return (
     <div className="space-y-3">
       <ColorField label="Background color" value={container.background} onChange={v => set("background", v)} />
+      <ImageUploadField label="Background image" value={container.bgImage} onChange={v => set("bgImage", v)}
+        placeholder="Or paste an image URL…" previewClassName="h-16" />
       <div className="grid grid-cols-2 gap-2">
         <NumField label="Padding top/bottom" value={container.paddingY} onChange={v => set("paddingY", v)} min={0} max={80} unit="px" />
         <NumField label="Padding left/right" value={container.paddingX} onChange={v => set("paddingX", v)} min={0} max={80} unit="px" />
       </div>
       <NumField label="Max width" value={container.maxWidth} onChange={v => set("maxWidth", v)} min={200} max={900} unit="px" />
+      <NumField label="Min height" value={container.minHeight} onChange={v => set("minHeight", v)} min={0} max={900} unit="px" />
       <NumField label="Border radius" value={container.borderRadius} onChange={v => set("borderRadius", v)} min={0} max={40} unit="px" />
+      <div className="grid grid-cols-2 gap-2">
+        <NumField label="Border width" value={container.borderWidth} onChange={v => set("borderWidth", v)} min={0} max={12} unit="px" />
+        <ColorField label="Border color" value={container.borderColor} onChange={v => set("borderColor", v)} />
+      </div>
       <div className="space-y-1">
         <Label className="text-[11px]">Font family</Label>
         <select
@@ -408,10 +466,11 @@ function BlockPreview({ block }) {
     case "button":
       return (
         <div style={{ textAlign: block.align }}>
-          <span className="inline-block text-xs" style={{
+          <span className={block.fullWidth ? "block text-xs text-center" : "inline-block text-xs"} style={{
             padding: `${Math.min(Number(block.paddingY || 12), 12)}px ${Math.min(Number(block.paddingX || 32), 24)}px`,
             background: block.bg, color: block.color,
             borderRadius: `${block.borderRadius || 8}px`,
+            border: block.borderWidth && block.borderWidth !== "0" ? `${block.borderWidth}px solid ${block.borderColor || block.bg}` : undefined,
             fontSize: "12px", fontWeight: block.fontWeight || 600,
           }}>
             {block.content || "Button"}
@@ -431,10 +490,10 @@ function BlockPreview({ block }) {
       );
     case "image":
       return block.src
-        ? <img src={block.src} alt={block.alt} className="max-h-16 mx-auto object-contain block" style={{ maxWidth: `${block.maxWidth || 100}%` }} />
-        : <div className="h-12 border-2 border-dashed border-border rounded flex items-center justify-center text-[10px] text-muted-foreground">Set image URL in properties →</div>;
+        ? <img src={block.src} alt={block.alt} className="max-h-16 mx-auto object-contain block" style={{ maxWidth: `${block.maxWidth || 100}%`, borderRadius: `${block.borderRadius || 0}px`, boxShadow: block.shadow ? "0 4px 16px rgba(0,0,0,.15)" : undefined }} />
+        : <div className="h-12 border-2 border-dashed border-border rounded flex items-center justify-center text-[10px] text-muted-foreground">Upload or set an image in properties →</div>;
     case "divider":
-      return <hr style={{ border: "none", borderTop: `1px solid ${block.color || "#e5e7eb"}`, margin: "4px 0" }} />;
+      return <hr style={{ border: "none", borderTop: `${block.thickness || 1}px ${block.style || "solid"} ${block.color || "#e5e7eb"}`, width: `${block.widthPct || 100}%`, margin: "4px auto" }} />;
     case "spacer":
       return (
         <div className="flex items-center justify-center text-[9px] text-muted-foreground/40 bg-secondary/10 rounded"
@@ -472,6 +531,9 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
   const [selectedId, setSelectedId] = useState(null);
   const [rightTab, setRightTab] = useState("block");
   const [showPreview, setShowPreview] = useState(false);
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
+  const resizeState = useRef(null);
 
   const selectedBlock = blocks.find(b => b.id === selectedId) || null;
 
@@ -490,6 +552,17 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
     if (selectedId === id) setSelectedId(null);
   };
 
+  const duplicateBlock = (id) => {
+    setBlocks(prev => {
+      const idx = prev.findIndex(b => b.id === id);
+      if (idx < 0) return prev;
+      const copy = { ...prev[idx], id: Math.random().toString(36).slice(2, 10) };
+      const next = [...prev];
+      next.splice(idx + 1, 0, copy);
+      return next;
+    });
+  };
+
   const moveBlock = (id, dir) => {
     setBlocks(prev => {
       const idx = prev.findIndex(b => b.id === id);
@@ -500,6 +573,43 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
       [next[idx], next[swap]] = [next[swap], next[idx]];
       return next;
     });
+  };
+
+  // Drag-and-drop reordering on the canvas.
+  const handleDrop = () => {
+    if (dragId && overId && dragId !== overId) {
+      setBlocks(prev => {
+        const from = prev.findIndex(b => b.id === dragId);
+        const to = prev.findIndex(b => b.id === overId);
+        if (from < 0 || to < 0) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    }
+    setDragId(null);
+    setOverId(null);
+  };
+
+  // Drag the canvas edge to resize the popup width (updates container.maxWidth).
+  const startResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeState.current = { startX: e.clientX, startWidth: Number(container.maxWidth) || 480 };
+    window.addEventListener("pointermove", onResizeMove);
+    window.addEventListener("pointerup", stopResize);
+  };
+  const onResizeMove = (e) => {
+    if (!resizeState.current) return;
+    const delta = (e.clientX - resizeState.current.startX) * 2; // centred → grows both sides
+    const next = Math.max(200, Math.min(900, Math.round(resizeState.current.startWidth + delta)));
+    setContainer(prev => ({ ...prev, maxWidth: String(next) }));
+  };
+  const stopResize = () => {
+    resizeState.current = null;
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", stopResize);
   };
 
   const generatedHtml = generateHtml(container, blocks);
@@ -632,35 +742,49 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
                   <p className="text-xs text-muted-foreground">Click any block in the left panel to add it to your template</p>
                 </div>
               ) : (
-                <div className="max-w-md mx-auto">
+                <div className="mx-auto relative" style={{ width: `${container.maxWidth || 480}px`, maxWidth: "100%" }}>
                   {/* Container wrapper preview */}
                   <div
                     className="rounded-xl shadow-lg"
                     style={{
                       background: container.background,
+                      backgroundImage: container.bgImage ? `url('${container.bgImage}')` : undefined,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
                       padding: `${container.paddingY || 32}px ${container.paddingX || 24}px`,
                       fontFamily: container.fontFamily || "sans-serif",
                       borderRadius: `${container.borderRadius || 12}px`,
+                      border: container.borderWidth && container.borderWidth !== "0" ? `${container.borderWidth}px solid ${container.borderColor || "#e5e7eb"}` : undefined,
+                      minHeight: container.minHeight && container.minHeight !== "0" ? `${container.minHeight}px` : undefined,
                       boxShadow: container.shadow ? "0 4px 24px rgba(0,0,0,.12)" : "none",
                     }}
                   >
                     {blocks.map((block, idx) => {
                       const isSelected = block.id === selectedId;
+                      const isDragging = dragId === block.id;
+                      const isOver = overId === block.id && dragId && dragId !== block.id;
                       return (
                         <div
                           key={block.id}
+                          draggable
+                          onDragStart={() => setDragId(block.id)}
+                          onDragEnter={() => setOverId(block.id)}
+                          onDragOver={e => e.preventDefault()}
+                          onDrop={handleDrop}
+                          onDragEnd={handleDrop}
                           onClick={() => { setSelectedId(block.id); setRightTab("block"); }}
+                          style={{ opacity: isDragging ? 0.4 : 1, boxShadow: isOver ? "inset 0 3px 0 var(--foreground, #111)" : undefined }}
                           className={`relative group rounded-md transition-all cursor-pointer mb-2 ${
                             isSelected
                               ? "ring-2 ring-foreground ring-offset-2"
                               : "hover:ring-1 hover:ring-border hover:ring-offset-1"
                           }`}
                         >
-                          {/* Block label (selected only) */}
+                          {/* Block label + drag handle (selected only) */}
                           {isSelected && (
-                            <div className="absolute -top-2.5 left-1 z-20">
-                              <span className="text-[9px] font-semibold bg-foreground text-background px-1.5 py-0.5 rounded">
-                                {BLOCK_TYPE_LABELS[block.type]}
+                            <div className="absolute -top-2.5 left-1 z-20 flex items-center gap-1">
+                              <span className="text-[9px] font-semibold bg-foreground text-background px-1.5 py-0.5 rounded flex items-center gap-0.5 cursor-grab">
+                                <GripVertical className="w-2.5 h-2.5" /> {BLOCK_TYPE_LABELS[block.type]}
                               </span>
                             </div>
                           )}
@@ -682,6 +806,12 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
                               <ChevronDown className="w-3 h-3" />
                             </button>
                             <button
+                              onClick={e => { e.stopPropagation(); duplicateBlock(block.id); }}
+                              className="w-5 h-5 rounded bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <Copy className="w-3 h-3" />
+                            </button>
+                            <button
                               onClick={e => { e.stopPropagation(); removeBlock(block.id); }}
                               className="w-5 h-5 rounded bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
                             >
@@ -697,8 +827,17 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
                     })}
                   </div>
 
+                  {/* Width-resize handle */}
+                  <div
+                    onPointerDown={startResize}
+                    title="Drag to resize popup width"
+                    className="absolute top-0 bottom-0 -right-3 w-6 flex items-center justify-center cursor-ew-resize"
+                  >
+                    <div className="w-1 h-11 rounded bg-slate-300" />
+                  </div>
+
                   <p className="text-center text-[11px] text-muted-foreground mt-4">
-                    Click a block to edit · Use ↑↓ to reorder · Click a block type on the left to add
+                    Drag blocks to reorder · Drag the edge to resize · {container.maxWidth || 480}px wide
                   </p>
                 </div>
               )}

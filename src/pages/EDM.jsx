@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +47,7 @@ import { blocksToHtml } from "@/components/edm/emailHtml";
 function templatePreviewHtml(template) {
   const blocks = template?.variables?._blocks;
   if (!template?.variables?._html_mode && Array.isArray(blocks) && blocks.length) {
-    return blocksToHtml(blocks);
+    return blocksToHtml(blocks, true, template?.variables?._container || null);
   }
   return template?.html_body || "";
 }
@@ -95,23 +96,21 @@ const STATUS_ACCENT = {
 // ── Email / template preview dialog ───────────────────────────────────────────
 function PreviewDialog({ open, onClose, html, title, subject }) {
   const { t } = usePreferences();
+  const [device, setDevice] = useState("desktop");
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="w-[96vw] max-w-3xl h-[90vh] p-0 flex flex-col gap-0" aria-describedby={undefined}>
         <DialogHeader className="px-5 py-3 border-b border-border flex-shrink-0">
-          <DialogTitle className="text-sm font-semibold truncate">{title || t("Preview")}</DialogTitle>
-          {subject && <p className="text-xs text-muted-foreground mt-0.5 truncate">{t("Subject")}: {subject}</p>}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle className="text-sm font-semibold truncate">{title || t("Preview")}</DialogTitle>
+              {subject && <p className="text-xs text-muted-foreground mt-0.5 truncate">{t("Subject")}: {subject}</p>}
+            </div>
+            <DevicePreviewToggle device={device} onChange={setDevice} className="flex-shrink-0 mr-6" />
+          </div>
         </DialogHeader>
         <div className="flex-1 overflow-auto bg-secondary/10 p-6">
-          <div className="max-w-[650px] mx-auto rounded-xl overflow-hidden border border-border shadow-md bg-white">
-            <iframe
-              srcDoc={html || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content to preview.</p>"}
-              className="w-full"
-              style={{ height: "600px", display: "block" }}
-              title="Email preview"
-              sandbox="allow-same-origin"
-            />
-          </div>
+          <DevicePreviewFrame html={html} device={device} title="Email preview" />
         </div>
       </DialogContent>
     </Dialog>
@@ -1778,11 +1777,12 @@ export default function EDM() {
     subject: t.subject || "",
     html_body: t.html_body || "",
     blocks: t.variables?._blocks,
+    container: t.variables?._container,
     htmlMode: t.variables?._html_mode || false,
   });
 
   // "Use Template" - close template editor, switch to Emails tab, open campaign editor pre-filled
-  const handleUseTemplate = ({ name, subject, html_body, blocks, htmlMode }) => {
+  const handleUseTemplate = ({ name, subject, html_body, blocks, container, htmlMode }) => {
     setTemplateEditorOpen(false);
     setTemplateEditTarget(null);
     setTab("emails");
@@ -1791,7 +1791,7 @@ export default function EDM() {
       name: `Email from ${name}`,
       subject,
       html_body,
-      ab_test_config: { _blocks: blocks, _html_mode: htmlMode },
+      ab_test_config: { _blocks: blocks, _container: container, _html_mode: htmlMode },
     });
   };
 

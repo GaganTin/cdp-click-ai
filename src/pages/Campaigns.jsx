@@ -18,7 +18,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { toast } from "sonner";
 import { format } from "date-fns";
 import UTMForm, { buildUTMUrl } from "../components/campaigns/UTMForm";
-import UTMAnalyticsPanel, { GAUtmLinksSection } from "../components/campaigns/UTMAnalyticsPanel";
+import UTMAnalyticsPanel, { GAUtmLinksSection, GA_PERIODS } from "../components/campaigns/UTMAnalyticsPanel";
 import UTMImportDialog from "../components/import/UTMImportDialog";
 
 // Portal-rendered tooltip so it escapes the table's overflow-auto clipping (the
@@ -75,6 +75,8 @@ export default function Campaigns() {
   const [filters, setFilters] = useState({ status: [], source: [], medium: [], campaign: [], content: [], term: [] });
   const [gaAnalytics, setGaAnalytics] = useState({});
   const [gaLoading, setGaLoading] = useState(false);
+  // Time period for the "GA Traffic Performance" table (all time by default).
+  const [gaPeriod, setGaPeriod] = useStickyState("all", "utm.gaPeriod");
 
   // Row selection
   const [selected, setSelected] = useState(new Set());
@@ -410,6 +412,15 @@ export default function Campaigns() {
                             className="rounded border-border cursor-pointer" />
                         </label>
                       </div>
+
+                      {/* Time period for the GA Traffic Performance table */}
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">{t("GA traffic period")}</p>
+                        <select value={gaPeriod} onChange={e => setGaPeriod(e.target.value)}
+                          className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
+                          {GA_PERIODS.map(p => <option key={p.value} value={p.value}>{t(p.label)}</option>)}
+                        </select>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -624,7 +635,7 @@ export default function Campaigns() {
             )}
 
             {/* GA distinct UTM links */}
-            <GAUtmLinksSection />
+            <GAUtmLinksSection days={gaPeriod} />
           </div>
         )}
 

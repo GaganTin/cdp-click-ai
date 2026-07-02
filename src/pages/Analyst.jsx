@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { LayoutDashboard, Settings, Wand2, Plus, Trash2, Pencil, ArrowLeft } from "lucide-react";
+import { LayoutDashboard, Settings, Wand2, Plus, Trash2, Pencil, ArrowLeft, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import PlanGate from "@/components/PlanGate";
@@ -21,10 +22,14 @@ import ConversationSidebar from "../components/analyst/ConversationSidebar";
 import CampaignEditor from "@/components/edm/CampaignEditor";
 
 export default function Analyst() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
+  // Chart handed over from the Dashboard "Discuss" action (choose new vs current chat).
+  const [discussChart, setDiscussChart] = useState(null);
   const [lastPinnedChart, setLastPinnedChart] = useState(null);
   const [campaignEditorOpen, setCampaignEditorOpen] = useState(false);
   const [campaignEditorInitial, setCampaignEditorInitial] = useState(null);
@@ -215,12 +220,13 @@ export default function Analyst() {
   const handleSaveSkill = async () => {
     if (!skillDraft.name.trim()) return toast.error("Name is required");
     try {
+      const label = skillDraft.type === "template" ? "Template" : "Skill";
       if (editingSkill) {
         await appClient.skills.update(editingSkill.id, skillDraft);
-        toast.success("Skill updated");
+        toast.success(`${label} updated`);
       } else {
         await appClient.skills.create(skillDraft);
-        toast.success("Skill created");
+        toast.success(`${label} created`);
       }
       refetchSkills();
       setSkillsView("list");
@@ -254,11 +260,11 @@ export default function Analyst() {
     setSkillsView("edit");
   };
 
-  const handleSend = async (text, fileUrls) => {
+  const handleSend = async (text, fileUrls, opts = {}) => {
     if (!canUseFeatures) return;
     isNearBottom.current = true;
     let conv;
-    const isNewConv = !conversationId;
+    const isNewConv = opts.forceNew || !conversationId;
 
     if (isNewConv) {
       const chatName = text.length > 50 ? text.slice(0, 50) + "…" : text;
@@ -446,6 +452,43 @@ export default function Analyst() {
     await handleSend(prompt);
   };
 
+  // A chart was sent over from the Dashboard "Discuss" action (via navigation state).
+  // Capture it, then clear the history state so a refresh/back won't re-trigger it.
+  useEffect(() => {
+    if (location.state?.discussChart) {
+      setDiscussChart(location.state.discussChart);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.key]);
+
+  // Compose a discussion opener from a dashboard chart (its data reflects the applied filter).
+  const buildDiscussPrompt = (c) => {
+    const cfg = parseChartConfig(c.chart_config);
+    const rows = (cfg.data || []).slice(0, 40);
+    const deltaLine = c.delta
+      ? `\nChange vs previous period: ${(c.delta.pct * 100).toFixed(1)}% (current ${Math.round(c.delta.current).toLocaleString()} vs previous ${Math.round(c.delta.previous).toLocaleString()}).`
+      : "";
+    return `Let's dig into this chart from my dashboard, beyond a quick summary.
+
+Chart: "${c.title}" (${c.chart_type})${c.description ? `\n${c.description}` : ""}
+Time period: ${c.period}.${deltaLine}
+
+Data (filtered to the period shown):
+\`\`\`json
+${JSON.stringify(rows)}
+\`\`\`
+
+Explain what's driving this, call out any notable patterns or outliers, and suggest concrete next actions. Ask me follow-up questions if useful.`;
+  };
+
+  const startChartDiscussion = async (mode) => {
+    const c = discussChart;
+    setDiscussChart(null);
+    if (!c) return;
+    const prompt = buildDiscussPrompt(c);
+    await handleSend(prompt, undefined, { forceNew: mode === "new" });
+  };
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Conversation history sidebar */}
@@ -577,6 +620,33 @@ export default function Analyst() {
         onSave={handleSaveEDMFromEditor}
         initial={campaignEditorInitial}
       />
+
+      {/* Discuss-chart dialog — opened when a chart is sent over from the Dashboard */}
+      <Dialog open={!!discussChart} onOpenChange={(o) => { if (!o) setDiscussChart(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-heading">Discuss chart</DialogTitle>
+            <DialogDescription>
+              Bring “{discussChart?.title}”{discussChart?.period ? ` (${discussChart.period})` : ""} into a chat to explore it beyond the quick AI explanation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="justify-start gap-2"
+              disabled={!conversationId}
+              onClick={() => startChartDiscussion("current")}
+            >
+              <MessageSquare className="w-4 h-4" />
+              Add to current chat
+              {!conversationId && <span className="ml-auto text-[10px] text-muted-foreground">No chat open</span>}
+            </Button>
+            <Button className="justify-start gap-2" onClick={() => startChartDiscussion("new")}>
+              <Plus className="w-4 h-4" /> Start a new chat
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Manage Skills dialog */}
       <Dialog open={skillsOpen} onOpenChange={(v) => {
@@ -742,7 +812,9 @@ export default function Analyst() {
                     className="text-muted-foreground hover:text-foreground transition-colors">
                     <ArrowLeft className="w-4 h-4" />
                   </button>
-                  {skillsView === "edit" ? "Edit Skill" : "New Skill"}
+                  {skillsView === "edit"
+                    ? (skillDraft.type === "template" ? "Edit Template" : "Edit Skill")
+                    : (skillDraft.type === "template" ? "New Template" : "New Skill")}
                 </DialogTitle>
               </DialogHeader>
               <div className="space-y-4 mt-1">
@@ -789,7 +861,9 @@ export default function Analyst() {
                     Cancel
                   </Button>
                   <Button size="sm" className="h-8" onClick={handleSaveSkill}>
-                    {skillsView === "edit" ? "Save changes" : "Create skill"}
+                    {skillsView === "edit"
+                      ? "Save changes"
+                      : (skillDraft.type === "template" ? "Create Template" : "Create Skill")}
                   </Button>
                 </div>
               </div>

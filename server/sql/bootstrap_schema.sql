@@ -741,6 +741,7 @@ CREATE TABLE app.chart_summaries (
   created_by   UUID        REFERENCES app.users(id) ON DELETE SET NULL,
   chart_key    TEXT        NOT NULL,
   summary      TEXT        NOT NULL DEFAULT '',
+  data_hash    TEXT,        -- fingerprint of the chart data the summary was generated from; NULL forces regen
   metadata     JSONB       NOT NULL DEFAULT '{}'
 );
 CREATE UNIQUE INDEX chart_summaries_company_key_idx ON app.chart_summaries(company_id, chart_key);
@@ -3486,3 +3487,15 @@ CREATE TRIGGER accounts_stamp_plan_upgraded
 DELETE FROM app.plans WHERE id IN ('free', 'paid');
 
 COMMIT;
+
+
+-- ===================== migrations/2026-07-02_chart_summary_data_hash.sql =====================
+
+-- Adds app.chart_summaries.data_hash so cached AI chart explanations become
+-- data-aware: the server fingerprints the chart data (title + type + preview) it
+-- generated a summary from, and regenerates when that fingerprint changes instead
+-- of serving a stale explanation forever. Existing rows get NULL, which never
+-- matches a fingerprint and so forces a one-time regeneration on next view.
+-- Matches server/sql/03_app_core.sql. Idempotent.
+ALTER TABLE app.chart_summaries
+  ADD COLUMN IF NOT EXISTS data_hash TEXT;

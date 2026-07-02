@@ -16,6 +16,7 @@ export default function TrialBanner() {
   const { isFreePlan, isLoadingPlans, isTrialExpired, daysLeft, planConfig, upgradePlan } = usePlan();
   const [dismissed, setDismissed] = useState(readDismissed);
   const planName = planConfig?.name ?? "Lite";
+  const trialDays = planConfig?.trial_days ?? 90;
 
   // Don't render while plan data is loading- prevents the banner flashing in
   // then disappearing once the real plan/daysLeft values arrive.
@@ -55,12 +56,13 @@ export default function TrialBanner() {
     <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b text-sm bg-yellow-50 border-yellow-200 dark:bg-yellow-950/30 dark:border-yellow-800">
       <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-300">
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-        <span className="font-medium">{planName} Plan</span>
         <span>
-          {"— free trial · "}
+          {"You're on the "}
+          <span className="font-medium">{planName}</span>
+          {" plan, "}
           {daysLeft === 0
-            ? "ends today"
-            : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`}
+            ? `with your ${trialDays}-day free trial ending today.`
+            : `with ${daysLeft} day${daysLeft === 1 ? "" : "s"} left out of the ${trialDays}-day free trial.`}
         </span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">

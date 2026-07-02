@@ -207,10 +207,12 @@ export function createUtmRouter(pool) {
   // GET /api/utm/links?days=30 - source/medium/campaign combinations seen in GA,
   // each with its aggregated performance metrics. Includes auto-attributed
   // traffic (direct / organic / referral) - nothing is excluded.
+  // days=all (or 0) returns the full history with no date filter.
   router.get("/links", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-    const start = ymd(new Date(Date.now() - days * 86400000));
+    const allTime = req.query.days === "all" || parseInt(req.query.days, 10) === 0;
+    const days = allTime ? null : Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const start = allTime ? null : ymd(new Date(Date.now() - days * 86400000));
     try {
       const { rows } = await pool.query(
         `SELECT session_source, session_medium, session_campaign_name,
@@ -221,12 +223,12 @@ export function createUtmRouter(pool) {
                 ROUND(AVG(bounce_rate)::numeric, 3) AS bounce_rate,
                 ROUND(AVG(engagement_rate)::numeric, 3) AS engagement_rate
          FROM ${FULL}
-         WHERE company_id = $1 AND date >= $2
+         WHERE company_id = $1${allTime ? "" : " AND date >= $2"}
          GROUP BY session_source, session_medium, session_campaign_name,
                   session_content, session_term, session_utm_id
          ORDER BY sessions DESC NULLS LAST
          LIMIT 500`,
-        [cid, start]
+        allTime ? [cid] : [cid, start]
       );
       res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }

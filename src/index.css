@@ -91,3 +91,19 @@
     font-family: var(--font-body);
   }
 }
+
+/* Thin horizontal scrollbar for the Dashboard tab strip when tabs overflow. */
+.dashboard-tabs-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+.dashboard-tabs-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.dashboard-tabs-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+}
+.dashboard-tabs-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}

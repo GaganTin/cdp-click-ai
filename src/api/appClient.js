@@ -328,7 +328,7 @@ export const appClient = {
     countries(params)   { return request(`/utm/countries${this._qs(params)}`); },
     utmIds(params)      { return request(`/utm/utm-ids${this._qs(params)}`); },
     paramValues(params) { return request(`/utm/param-values${this._qs(params)}`); },
-    links(days = 30)    { return request(`/utm/links?days=${days}`); },
+    links(days = "all") { return request(`/utm/links?days=${days}`); },
     campaignPerformance(names, days = 30) {
       return request(`/utm/campaign-performance`, { method: "POST", body: JSON.stringify({ names, days }) });
     },
@@ -497,6 +497,12 @@ export const appClient = {
   chartSummaries: {
     async explain(payload) {
       return request("/chart-summaries/explain", { method: "POST", body: JSON.stringify(payload) });
+    },
+  },
+  charts: {
+    // Re-run a pinned chart's stored SELECT query and refresh its data + last_refreshed.
+    refresh(id) {
+      return request(`/charts/${id}/refresh`, { method: "POST" });
     },
   },
   attributes: {

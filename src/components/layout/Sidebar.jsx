@@ -23,7 +23,7 @@ const navGroups = [
   {
     label: "Campaigns",
     items: [
-      { path: "/edm",      label: "Email",  icon: Mail },
+      { path: "/edm",      label: "Email",  icon: Mail, comingSoon: true },
       { path: "/popup",    label: "Pop Up", icon: MousePointer2 },
       { path: "/utm",      label: "UTM",    icon: Target },
     ],
@@ -159,6 +159,25 @@ export default function Sidebar() {
             )}
             {group.items.map((item) => {
               const isActive = location.pathname === item.path;
+              if (item.comingSoon) {
+                return (
+                  <div
+                    key={item.path}
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-muted-foreground/40 cursor-not-allowed select-none"
+                    title={collapsed ? `${item.label} — coming soon` : undefined}
+                  >
+                    <item.icon className="w-4 h-4 flex-shrink-0" />
+                    {!collapsed && (
+                      <>
+                        <span className="font-medium">{t(item.label)}</span>
+                        <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide bg-secondary text-muted-foreground/70 rounded px-1.5 py-0.5">
+                          {t("Coming soon")}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                );
+              }
               return (
                 <Link
                   key={item.path}

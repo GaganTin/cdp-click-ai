@@ -598,7 +598,19 @@ const UTM_COLS = [
   { key: "engagement_rate",       label: "Engagement",  defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtRate, info: "GA4 Engagement Rate: the percentage of sessions that were engaged sessions - sessions that lasted 10+ seconds, included a conversion event, or had 2 or more page/screen views - out of all sessions." },
 ];
 
-export function GAUtmLinksSection() {
+// Period options for the GA table; keys match the `days` value sent to the API
+// ("all" = full history, no date filter).
+export const GA_PERIODS = [
+  { value: "all", label: "All time" },
+  { value: "7",   label: "Last 7 days" },
+  { value: "30",  label: "Last 30 days" },
+  { value: "90",  label: "Last 90 days" },
+  { value: "365", label: "Last 365 days" },
+];
+const gaPeriodLabel = (days) =>
+  (GA_PERIODS.find(p => p.value === String(days))?.label || "All time").toLowerCase();
+
+export function GAUtmLinksSection({ days = "all" }) {
   const [utmLinks, setUtmLinks]     = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
@@ -616,10 +628,11 @@ export function GAUtmLinksSection() {
   };
 
   useEffect(() => {
-    appClient.utm.links(30)
+    setLoading(true);
+    appClient.utm.links(days)
       .then(rows => { setUtmLinks(rows || []); setLoading(false); })
       .catch(e => { setError(e?.message || "Failed to load GA UTM data"); setLoading(false); });
-  }, []);
+  }, [days]);
 
   const setFilter  = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const toggleCol  = (k) => setHiddenCols(p => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (colOrder.filter(x => !n.has(x)).length > 1) n.add(k); return n; });
@@ -714,7 +727,7 @@ export function GAUtmLinksSection() {
   if (utmLinks.length === 0) {
     return (
       <p className="mt-8 text-xs text-muted-foreground">
-        No Google Analytics traffic found for the last 30 days. Connect and sync
+        No Google Analytics traffic found for {gaPeriodLabel(days)}. Connect and sync
         Google Analytics, and this table will list the source / medium / campaign
         combinations seen in your data.
       </p>
@@ -724,7 +737,7 @@ export function GAUtmLinksSection() {
   return (
     <div className="mt-8">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        GA Traffic Performance (last 30d)
+        GA Traffic Performance ({gaPeriodLabel(days)})
       </h3>
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}

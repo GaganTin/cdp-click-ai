@@ -22,6 +22,7 @@ import TableToolbar from "@/components/ui/TableToolbar";
 import { useStickyState } from "@/lib/useStickyState";
 import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -824,6 +825,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
   const { t } = usePreferences();
   const qc = useQueryClient();
   const [preview, setPreview] = useState(null);
+  const [previewDevice, setPreviewDevice] = useState("desktop");
   const [builderOpen, setBuilderOpen] = useState(false);    // for TemplateBuilder
   const [builderTarget, setBuilderTarget] = useState(null); // template loaded into builder
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -1034,11 +1036,13 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
       <Dialog open={!!preview} onOpenChange={(o) => !o && setPreview(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{preview?.name} - {t("Preview")}</DialogTitle>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>{preview?.name} - {t("Preview")}</DialogTitle>
+              <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} className="flex-shrink-0 mr-6" />
+            </div>
           </DialogHeader>
-          <div className="border border-border rounded-lg overflow-hidden bg-gray-50">
-            <iframe srcDoc={preview?.content || ""} title={t("Template preview")} className="w-full"
-              style={{ height: 380, border: "none" }} sandbox="allow-same-origin" />
+          <div className="bg-gray-50 rounded-lg p-4 max-h-[60vh] overflow-auto">
+            <DevicePreviewFrame html={preview?.content} device={previewDevice} title={t("Template preview")} height={380} />
           </div>
           <div className="flex items-center justify-between pt-1">
             {preview && !preview.builtin && (
@@ -1932,6 +1936,7 @@ export default function PopUp() {
   const [initialTemplateId, setInitialTemplateId] = useState("");
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [previewTarget, setPreviewTarget] = useState(null);
+  const [previewDevice, setPreviewDevice] = useState("desktop");
   const [statsTarget, setStatsTarget] = useState(null);
   const [templateFormOpen, setTemplateFormOpen] = useState(false);
   const templateActionsRef = useRef(null);
@@ -2297,16 +2302,13 @@ export default function PopUp() {
       <Dialog open={!!previewTarget} onOpenChange={(o) => !o && setPreviewTarget(null)}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{previewTarget?.name} - {t("Preview")}</DialogTitle>
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle>{previewTarget?.name} - {t("Preview")}</DialogTitle>
+              <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} className="flex-shrink-0 mr-6" />
+            </div>
           </DialogHeader>
-          <div className="border border-border rounded-lg overflow-hidden bg-gray-50">
-            <iframe
-              srcDoc={previewTarget?.content || ""}
-              title={t("Pop-up preview")}
-              className="w-full"
-              style={{ height: 380, border: "none" }}
-              sandbox="allow-same-origin"
-            />
+          <div className="bg-gray-50 rounded-lg p-4 max-h-[60vh] overflow-auto">
+            <DevicePreviewFrame html={previewTarget?.content} device={previewDevice} title={t("Pop-up preview")} height={380} />
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" size="sm" onClick={() => setPreviewTarget(null)}>{t("Close")}</Button>

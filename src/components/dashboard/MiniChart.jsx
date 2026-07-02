@@ -1,18 +1,45 @@
+import { useEffect, useState } from "react";
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from "recharts";
 
-// Theme-aware palette: these CSS vars (defined in index.css) flip between light
-// and dark mode, so series stay legible on both backgrounds. In light mode
-// --chart-1 is near-black; in dark mode it's near-white.
-const COLORS = [
-  "hsl(var(--chart-1))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-  "hsl(var(--chart-5))",
-];
+// Theme-aware palette. The CSS vars (defined in index.css) flip between light and
+// dark mode, but recharts writes colors as SVG *presentation attributes* (e.g.
+// fill="hsl(var(--chart-1))"), and browsers do NOT resolve CSS var() inside SVG
+// attributes — it silently falls back to black. In light mode that black matches
+// the intended near-black bars, so it looked fine; in dark mode bars/lines came out
+// black and unreadable. So we resolve the vars to concrete colors at render time and
+// re-resolve whenever the theme (`.dark` class on <html>) toggles.
+const CHART_VARS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"];
+const AXIS_VARS = ["--muted-foreground", "--border"];
+
+// Fallbacks used before getComputedStyle is available (SSR / first paint).
+const FALLBACK = {
+  "--chart-1": "30 10% 12%", "--chart-2": "30 5% 40%", "--chart-3": "30 5% 60%",
+  "--chart-4": "30 5% 75%", "--chart-5": "30 5% 88%",
+  "--muted-foreground": "30 5% 50%", "--border": "30 10% 90%",
+};
+
+function useThemeColors() {
+  const read = () => {
+    const out = {};
+    const cs = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
+    for (const v of [...CHART_VARS, ...AXIS_VARS]) {
+      const raw = cs?.getPropertyValue(v).trim();
+      out[v] = `hsl(${raw || FALLBACK[v]})`;
+    }
+    return out;
+  };
+  const [colors, setColors] = useState(read);
+  useEffect(() => {
+    setColors(read());
+    const obs = new MutationObserver(() => setColors(read()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return colors;
+}
 
 const fmtNum = (v) => {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -42,6 +69,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function MiniChart({ type, config }) {
+  const themeColors = useThemeColors();
+  const COLORS = CHART_VARS.map((v) => themeColors[v]);
   const data = config?.data || [];
   const xKey = config?.xKey || "name";
 
@@ -57,7 +86,7 @@ export default function MiniChart({ type, config }) {
   }
 
   const commonProps = { data, margin: { top: 5, right: 10, left: 0, bottom: 5 } };
-  const tick = { fontSize: 10, fill: "hsl(var(--muted-foreground))" };
+  const tick = { fontSize: 10, fill: themeColors["--muted-foreground"] };
   const xAxisProps = {
     dataKey: xKey,
     tick,
@@ -72,7 +101,7 @@ export default function MiniChart({ type, config }) {
     width: 52,
     tickFormatter: fmtNum,
   };
-  const gridProps = { strokeDasharray: "3 3", stroke: "hsl(var(--border))" };
+  const gridProps = { strokeDasharray: "3 3", stroke: themeColors["--border"] };
   const showLegend = series.length > 1;
 
   if (type === "line") {
