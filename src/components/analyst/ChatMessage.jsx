@@ -568,6 +568,95 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     );
   };
 
+  // Render a single ```chart block as a chart card. Shared by assistant message
+  // rendering and by user messages that carry a chart handed over from a page.
+  const renderChartCard = (jsonStr, key) => {
+    try {
+      const chartConfig = JSON.parse(jsonStr);
+      const chartType = chartConfig.chart_type || "bar";
+      const primaryKey = chartConfig.series?.[0]?.dataKey || chartConfig.dataKey || "value";
+      const isTimeSeries = chartType === "line" || chartType === "area";
+
+      // Coerce string values to numbers; sort descending for categorical charts
+      const sortedData = (() => {
+        if (!chartConfig.data?.length) return chartConfig.data;
+        const coerced = chartConfig.data.map(d => ({ ...d, [primaryKey]: Number(d[primaryKey]) || 0 }));
+        if (isTimeSeries) return coerced;
+        return [...coerced].sort((a, b) => b[primaryKey] - a[primaryKey]);
+      })();
+
+      const displayConfig = { ...chartConfig, data: sortedData };
+
+      // Guard against empty / all-zero chart data - never render a chart on non-data.
+      const hasRealData = Array.isArray(sortedData)
+        && sortedData.length > 0
+        && sortedData.some(d => { const v = Number(d?.[primaryKey]); return Number.isFinite(v) && v !== 0; });
+
+      if (!hasRealData) {
+        return (
+          <div key={key} className="my-4 border border-dashed border-border rounded-lg px-4 py-6 text-center bg-background">
+            <p className="text-xs font-medium text-muted-foreground">No data available for “{chartConfig.title || "this chart"}”</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-1">There aren't any matching records in your database yet, so there's nothing to chart.</p>
+            <Link
+              to="/integrations"
+              className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-medium text-foreground border border-border rounded-md px-2.5 py-1 hover:bg-secondary/50 transition-colors"
+            >
+              <Plug className="w-3 h-3" /> Connect a data source
+            </Link>
+          </div>
+        );
+      }
+
+      return (
+        <div key={key} className="my-4 border border-border rounded-lg overflow-hidden bg-background">
+          <div className="flex items-center justify-between px-4 pt-4 pb-2">
+            <div>
+              <p className="text-xs font-semibold text-foreground">{chartConfig.title || "Chart"}</p>
+              {chartConfig.description && (
+                <p className="text-[11px] text-muted-foreground mt-0.5">{chartConfig.description}</p>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onPinChart?.(displayConfig)}>
+              <Pin className="w-3 h-3" /> Pin
+            </Button>
+          </div>
+          <div className="h-64 px-2 pb-3">
+            <MiniChart type={chartType} config={displayConfig} />
+          </div>
+          {chartConfig.trend && (
+            <div className="flex items-start gap-2 px-4 py-2.5 bg-secondary/40 border-t border-border">
+              <TrendingUp className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{chartConfig.trend}</p>
+            </div>
+          )}
+        </div>
+      );
+    } catch {
+      return <pre key={key} className="text-xs text-destructive">Invalid chart data</pre>;
+    }
+  };
+
+  // Split a user message into ordered text / chart segments so a chart handed over
+  // from a page renders as a real chart card instead of a raw ```chart code fence.
+  const splitUserContent = (content) => {
+    const chartRegex = /```chart\n([\s\S]*?)```/g;
+    const segments = [];
+    let lastIndex = 0;
+    let match;
+    let i = 0;
+    while ((match = chartRegex.exec(content)) !== null) {
+      const before = content.slice(lastIndex, match.index);
+      if (before.trim()) segments.push({ type: "text", value: before.trim(), key: `ut-${i}` });
+      segments.push({ type: "chart", json: match[1], key: `uc-${i}` });
+      lastIndex = match.index + match[0].length;
+      i++;
+    }
+    const rest = content.slice(lastIndex);
+    if (rest.trim()) segments.push({ type: "text", value: rest.trim(), key: "ut-end" });
+    if (segments.length === 0) segments.push({ type: "text", value: content, key: "ut-only" });
+    return segments;
+  };
+
   // Extract chart blocks from content
   const renderContent = (content) => {
     if (!content) return null;
@@ -669,71 +758,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
       }
 
       if (block.type === "chart") {
-        try {
-          const chartConfig = JSON.parse(block.json);
-          const chartType = chartConfig.chart_type || "bar";
-          const primaryKey = chartConfig.series?.[0]?.dataKey || chartConfig.dataKey || "value";
-          const isTimeSeries = chartType === "line" || chartType === "area";
-
-          // Coerce string values to numbers; sort descending for categorical charts
-          const sortedData = (() => {
-            if (!chartConfig.data?.length) return chartConfig.data;
-            const coerced = chartConfig.data.map(d => ({ ...d, [primaryKey]: Number(d[primaryKey]) || 0 }));
-            if (isTimeSeries) return coerced;
-            return [...coerced].sort((a, b) => b[primaryKey] - a[primaryKey]);
-          })();
-
-          const displayConfig = { ...chartConfig, data: sortedData };
-
-          // Guard against empty / all-zero chart data - never render a chart on non-data.
-          const hasRealData = Array.isArray(sortedData)
-            && sortedData.length > 0
-            && sortedData.some(d => { const v = Number(d?.[primaryKey]); return Number.isFinite(v) && v !== 0; });
-
-          if (!hasRealData) {
-            parts.push(
-              <div key={`chart-nodata-${i}`} className="my-4 border border-dashed border-border rounded-lg px-4 py-6 text-center">
-                <p className="text-xs font-medium text-muted-foreground">No data available for “{chartConfig.title || "this chart"}”</p>
-                <p className="text-[11px] text-muted-foreground/70 mt-1">There aren't any matching records in your database yet, so there's nothing to chart.</p>
-                <Link
-                  to="/integrations"
-                  className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-medium text-foreground border border-border rounded-md px-2.5 py-1 hover:bg-secondary/50 transition-colors"
-                >
-                  <Plug className="w-3 h-3" /> Connect a data source
-                </Link>
-              </div>
-            );
-            lastIndex = block.end;
-            return;
-          }
-
-          parts.push(
-            <div key={`chart-${i}`} className="my-4 border border-border rounded-lg overflow-hidden">
-              <div className="flex items-center justify-between px-4 pt-4 pb-2">
-                <div>
-                  <p className="text-xs font-semibold">{chartConfig.title || "Chart"}</p>
-                  {chartConfig.description && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{chartConfig.description}</p>
-                  )}
-                </div>
-                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onPinChart?.(displayConfig)}>
-                  <Pin className="w-3 h-3" /> Pin
-                </Button>
-              </div>
-              <div className="h-64 px-2 pb-3">
-                <MiniChart type={chartType} config={displayConfig} />
-              </div>
-              {chartConfig.trend && (
-                <div className="flex items-start gap-2 px-4 py-2.5 bg-secondary/40 border-t border-border">
-                  <TrendingUp className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">{chartConfig.trend}</p>
-                </div>
-              )}
-            </div>
-          );
-        } catch {
-          parts.push(<pre key={`chart-err-${i}`} className="text-xs text-destructive">Invalid chart data</pre>);
-        }
+        parts.push(renderChartCard(block.json, `chart-${i}`));
       }
 
       if (block.type === "table") {
@@ -799,18 +824,23 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
           <span className="text-[9px] font-semibold text-background">AI</span>
         </div>
       )}
-      <div className={cn("max-w-[85%]", isUser && "flex flex-col items-end")}>
+      <div className={cn("max-w-[85%]", isUser && "flex flex-col items-end gap-1.5 w-full")}>
         {message.content && (
-          <div className={cn(
-            "rounded-2xl px-4 py-3",
-            isUser ? "bg-foreground text-background" : "bg-secondary"
-          )}>
-            {isUser ? (
-              <p className="text-sm leading-relaxed">{message.content}</p>
-            ) : (
-              renderContent(message.content)
-            )}
-          </div>
+          isUser ? (
+            splitUserContent(message.content).map((seg) =>
+              seg.type === "chart" ? (
+                <div key={seg.key} className="w-full">{renderChartCard(seg.json, seg.key)}</div>
+              ) : (
+                <div key={seg.key} className="rounded-2xl px-4 py-3 bg-foreground text-background max-w-full">
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{seg.value}</p>
+                </div>
+              )
+            )
+          ) : (
+            <div className="rounded-2xl px-4 py-3 bg-secondary">
+              {renderContent(message.content)}
+            </div>
+          )
         )}
 
         {message.tool_calls?.length > 0 && (

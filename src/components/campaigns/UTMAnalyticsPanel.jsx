@@ -14,8 +14,10 @@ import TableToolbar from "@/components/ui/TableToolbar";
 import { KpiTile } from "@/components/analytics/AnalyticsKit";
 import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
 import { gaRowKey, gaDeltaPct, distinctValues, rowMatchesFilters } from "@/lib/gaTable";
+import { useChartTheme, opacityFor } from "@/lib/chartTheme";
 
-const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#ccc", "#e0e0e0"];
+// Faded foreground opacity for the comparison ("previous period") series.
+const PREV_OPACITY = 0.32;
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const toDbDate  = (d) => new Date(d).toISOString().slice(0, 10).replace(/-/g, "");
@@ -99,21 +101,23 @@ function mergeChartData(key, current, prev) {
   });
 }
 
-function renderChart(chartType, dataKey, current, prev, showCompare) {
+function renderChart(chartType, dataKey, current, prev, showCompare, theme) {
   const height = 200;
   if (!current?.length) return <p className="text-xs text-muted-foreground py-8 text-center">No data</p>;
 
   const display = mergeChartData(dataKey, current, prev);
+  const fg = theme["--foreground"];
+  const tick = { fontSize: 10, fill: theme["--muted-foreground"] };
 
   if (chartType === "bar") {
     return (
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={display} margin={{ top: 0, right: 0, left: - 20, bottom: 0 }}>
-          <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="value" name="Current" fill="#1a1a1a" radius={[3, 3, 0, 0]} />
-          {showCompare && <Bar dataKey="prev" name="Previous" fill="#aaa" radius={[3, 3, 0, 0]} />}
+          <XAxis dataKey="name" tick={tick} />
+          <YAxis tick={tick} allowDecimals={false} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(128,128,128,0.12)" }} />
+          <Bar dataKey="value" name="Current" fill={fg} radius={[3, 3, 0, 0]} />
+          {showCompare && <Bar dataKey="prev" name="Previous" fill={fg} fillOpacity={PREV_OPACITY} radius={[3, 3, 0, 0]} />}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -122,11 +126,11 @@ function renderChart(chartType, dataKey, current, prev, showCompare) {
     return (
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={display} layout="vertical" margin={{ top: 0, right: 20, left: 5, bottom: 0 }}>
-          <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals />
-          <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={110} />
-          <Tooltip content={<CustomTooltip />} />
-          <Bar dataKey="value" name="Current" fill="#555" radius={[0, 3, 3, 0]} />
-          {showCompare && <Bar dataKey="prev" name="Previous" fill="#ccc" radius={[0, 3, 3, 0]} />}
+          <XAxis type="number" tick={tick} allowDecimals />
+          <YAxis type="category" dataKey="name" tick={tick} width={110} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(128,128,128,0.12)" }} />
+          <Bar dataKey="value" name="Current" fill={fg} radius={[0, 3, 3, 0]} />
+          {showCompare && <Bar dataKey="prev" name="Previous" fill={fg} fillOpacity={PREV_OPACITY} radius={[0, 3, 3, 0]} />}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -136,8 +140,9 @@ function renderChart(chartType, dataKey, current, prev, showCompare) {
       <ResponsiveContainer width="100%" height={height}>
         <PieChart>
           <Pie data={display} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75}
+            stroke={theme["--card"]} strokeWidth={2}
             label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
-            {display.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+            {display.map((_, i) => <Cell key={i} fill={fg} fillOpacity={opacityFor(i)} />)}
           </Pie>
           <Tooltip content={<CustomTooltip />} />
         </PieChart>
@@ -148,11 +153,11 @@ function renderChart(chartType, dataKey, current, prev, showCompare) {
     return (
       <ResponsiveContainer width="100%" height={height}>
         <LineChart data={display} margin={{ top: 0, right: 10, left: - 20, bottom: 0 }}>
-          <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+          <XAxis dataKey="name" tick={tick} />
+          <YAxis tick={tick} allowDecimals={false} />
           <Tooltip content={<CustomTooltip />} />
-          <Line dataKey="value" name="Current" stroke="#1a1a1a" strokeWidth={2} dot={{ r: 3 }} />
-          {showCompare && <Line dataKey="prev" name="Previous" stroke="#aaa" strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="4 2" />}
+          <Line dataKey="value" name="Current" stroke={fg} strokeWidth={2} dot={{ r: 3 }} />
+          {showCompare && <Line dataKey="prev" name="Previous" stroke={fg} strokeOpacity={PREV_OPACITY} strokeWidth={1.5} dot={{ r: 2 }} strokeDasharray="4 2" />}
         </LineChart>
       </ResponsiveContainer>
     );
@@ -161,11 +166,11 @@ function renderChart(chartType, dataKey, current, prev, showCompare) {
     return (
       <ResponsiveContainer width="100%" height={height}>
         <AreaChart data={display} margin={{ top: 0, right: 10, left: - 20, bottom: 0 }}>
-          <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+          <XAxis dataKey="name" tick={tick} />
+          <YAxis tick={tick} allowDecimals={false} />
           <Tooltip content={<CustomTooltip />} />
-          <Area dataKey="value" name="Current" stroke="#1a1a1a" fill="#e8e8e8" strokeWidth={2} />
-          {showCompare && <Area dataKey="prev" name="Previous" stroke="#aaa" fill="transparent" strokeWidth={1.5} strokeDasharray="4 2" />}
+          <Area dataKey="value" name="Current" stroke={fg} fill={fg} fillOpacity={0.12} strokeWidth={2} />
+          {showCompare && <Area dataKey="prev" name="Previous" stroke={fg} strokeOpacity={PREV_OPACITY} fill="transparent" strokeWidth={1.5} strokeDasharray="4 2" />}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -251,6 +256,7 @@ function ChartEditDialog({ chart, onSave, onClose }) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function UTMAnalyticsPanel() {
   const now = new Date();
+  const theme = useChartTheme();
 
   // Period, compare toggle and filters persist across refresh (localStorage).
   const [curStart, setCurStart] = useStickyState(toInput(new Date(now - daysMs(30))), "utmAnalytics.curStart");
@@ -544,7 +550,7 @@ export default function UTMAnalyticsPanel() {
             </div>
             {loading
               ? <div className="h-[200px] flex items-center justify-center"><div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" /></div>
-              : renderChart(chart.chartType, chart.dataKey, curData[chart.dataKey] || [], prevData[chart.dataKey], compare)
+              : renderChart(chart.chartType, chart.dataKey, curData[chart.dataKey] || [], prevData[chart.dataKey], compare, theme)
             }
           </div>
         ))}

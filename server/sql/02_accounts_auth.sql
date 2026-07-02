@@ -417,7 +417,8 @@ CREATE TABLE app.ai_model_pricing (
   updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD');
+  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD'),
+  ('gpt-5-nano',   0.05, 0.010, 0.40, 'USD');
 
 CREATE TABLE app.ai_usage (
   id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),

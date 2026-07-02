@@ -8,7 +8,10 @@ import OpenAI from "openai";
 // Lazy init: env is read on first use, NOT at import time. (This module is
 // imported before index.js calls dotenv.config(), so reading env eagerly here
 // would see empty values and wrongly report "AI not configured".)
-const deployment = () => process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-mini";
+// Attribute tagging/grouping/suggestions are NOT the analyst, so they run on the
+// cheaper FAST model (falls back to the analyst model, then the nano default).
+const deployment = () =>
+  process.env.AZURE_OPENAI_DEPLOYMENT_FAST || process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5-nano";
 
 let _client = null;
 function getClient() {

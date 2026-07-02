@@ -1,47 +1,8 @@
-import { useEffect, useState } from "react";
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from "recharts";
-
-// Monochrome, theme-aware palette. Charts render in the foreground color - near-black
-// in light mode, near-white in dark mode - instead of the multi-hue --chart-* palette.
-// The CSS vars (defined in index.css) flip between light and dark mode, but recharts
-// writes colors as SVG *presentation attributes* (e.g. fill="hsl(var(--foreground))"),
-// and browsers do NOT resolve CSS var() inside SVG attributes - it silently falls back
-// to black. So we resolve the vars to concrete colors at render time and re-resolve
-// whenever the theme (`.dark` class on <html>) toggles.
-const AXIS_VARS = ["--foreground", "--muted-foreground", "--border", "--card"];
-
-// Fallbacks used before getComputedStyle is available (SSR / first paint).
-const FALLBACK = {
-  "--foreground": "30 10% 12%",
-  "--muted-foreground": "30 5% 50%", "--border": "30 10% 90%", "--card": "40 20% 99%",
-};
-
-// Opacity steps let multiple series / pie slices stay distinguishable while remaining
-// a single (foreground) hue. Series 0 is fully opaque; later ones fade progressively.
-const OPACITY_STEPS = [1, 0.72, 0.5, 0.34, 0.22, 0.14];
-
-function useThemeColors() {
-  const read = () => {
-    const out = {};
-    const cs = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
-    for (const v of AXIS_VARS) {
-      const raw = cs?.getPropertyValue(v).trim();
-      out[v] = `hsl(${raw || FALLBACK[v]})`;
-    }
-    return out;
-  };
-  const [colors, setColors] = useState(read);
-  useEffect(() => {
-    setColors(read());
-    const obs = new MutationObserver(() => setColors(read()));
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-    return () => obs.disconnect();
-  }, []);
-  return colors;
-}
+import { useChartTheme, opacityFor } from "@/lib/chartTheme";
 
 const fmtNum = (v) => {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -71,9 +32,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function MiniChart({ type, config }) {
-  const themeColors = useThemeColors();
+  const themeColors = useChartTheme();
   const FG = themeColors["--foreground"];
-  const opacityFor = (i) => OPACITY_STEPS[i % OPACITY_STEPS.length];
   const data = config?.data || [];
   const xKey = config?.xKey || "name";
 

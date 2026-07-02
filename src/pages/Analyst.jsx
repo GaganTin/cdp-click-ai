@@ -66,6 +66,12 @@ export default function Analyst() {
     queryKey: ["pinnedCharts"],
     queryFn: () => appClient.entities.PinnedChart.list("-created_date", 20),
   });
+  // Existing chats - listed in the "Discuss chart" dialog so a chart can be sent
+  // into any chat, not just the current one.
+  const { data: analystConversations = [], refetch: refetchConversations } = useQuery({
+    queryKey: ["analyst-conversations"],
+    queryFn: () => appClient.agents.listConversations({ agent_name: "cdp_analyst" }),
+  });
   // NOTE: EDM (email) campaign data is intentionally NOT loaded into the analyst
   // context - email is a coming-soon feature and the analyst must not access it.
 
@@ -281,13 +287,14 @@ export default function Analyst() {
     if (!canUseFeatures) return;
     isNearBottom.current = true;
     let conv;
-    const isNewConv = opts.forceNew || !conversationId;
+    const targetId = opts.conversationId || conversationId;
+    const isNewConv = opts.forceNew || !targetId;
 
     if (isNewConv) {
-      const chatName = text.length > 50 ? text.slice(0, 50) + "…" : text;
+      const chatName = opts.chatName || (text.length > 50 ? text.slice(0, 50) + "…" : text);
       conv = await startNewConversation(chatName);
     } else {
-      conv = await appClient.agents.getConversation(conversationId);
+      conv = await appClient.agents.getConversation(targetId);
     }
 
     // Inject context on first message of a new conversation only
@@ -482,6 +489,7 @@ export default function Analyst() {
   useEffect(() => {
     if (location.state?.discussChart) {
       setDiscussChart(location.state.discussChart);
+      refetchConversations(); // freshen the chat list shown in the picker
       navigate(location.pathname, { replace: true, state: null });
     }
   }, [location.key]);
@@ -490,31 +498,48 @@ export default function Analyst() {
   // Charts can come from the dashboard or any analytics page (c.source names it).
   const buildDiscussPrompt = (c) => {
     const cfg = parseChartConfig(c.chart_config);
-    const rows = (cfg.data || []).slice(0, 40);
     const source = c.source || "dashboard";
     const deltaLine = c.delta
-      ? `\nChange vs previous period: ${(c.delta.pct * 100).toFixed(1)}% (current ${Math.round(c.delta.current).toLocaleString()} vs previous ${Math.round(c.delta.previous).toLocaleString()}).`
+      ? ` Change vs previous period: ${(c.delta.pct * 100).toFixed(1)}% (current ${Math.round(c.delta.current).toLocaleString()} vs previous ${Math.round(c.delta.previous).toLocaleString()}).`
       : "";
-    return `Let's dig into this chart from my ${source}, beyond a quick summary.
+    // Embed the chart itself (its data already reflects the applied filter/period) as a
+    // ```chart block so the message renders the real chart in-chat instead of raw JSON.
+    // The block still carries the data, so the AI can analyse it.
+    const chartBlock = {
+      ...cfg,
+      title: cfg.title || c.title,
+      chart_type: cfg.chart_type || c.chart_type,
+      data: (cfg.data || []).slice(0, 50),
+    };
+    if (c.description && !chartBlock.description) chartBlock.description = c.description;
+    return `Let's dig into this chart from my ${source}, beyond a quick summary. Time period: ${c.period}.${deltaLine}
 
-Chart: "${c.title}" (${c.chart_type})${c.description ? `\n${c.description}` : ""}
-Time period: ${c.period}.${deltaLine}
-
-Data (filtered to the period shown):
-\`\`\`json
-${JSON.stringify(rows)}
+\`\`\`chart
+${JSON.stringify(chartBlock)}
 \`\`\`
 
 Explain what's driving this, call out any notable patterns or outliers, and suggest concrete next actions. Ask me follow-up questions if useful.`;
   };
 
-  const startChartDiscussion = async (mode) => {
+  // Send the chart into a chat. `target` is "new" (start a fresh chat) or an existing
+  // conversation id picked from the dialog.
+  const startChartDiscussion = async (target) => {
     const c = discussChart;
     setDiscussChart(null);
     if (!c) return;
     const prompt = buildDiscussPrompt(c);
-    await handleSend(prompt, undefined, { forceNew: mode === "new" });
+    if (target === "new") {
+      await handleSend(prompt, undefined, { forceNew: true, chatName: c.title });
+    } else {
+      if (target !== conversationId) await handleSelectConversation(target);
+      await handleSend(prompt, undefined, { conversationId: target });
+    }
   };
+
+  // Chats sorted most-recent-first for the "Discuss chart" picker.
+  const discussChatOptions = [...analystConversations].sort(
+    (a, b) => new Date(b.updated_date || b.created_date) - new Date(a.updated_date || a.created_date)
+  );
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -656,23 +681,37 @@ Explain what's driving this, call out any notable patterns or outliers, and sugg
           <DialogHeader>
             <DialogTitle className="font-heading">Discuss chart</DialogTitle>
             <DialogDescription>
-              Bring “{discussChart?.title}”{discussChart?.period ? ` (${discussChart.period})` : ""} into a chat to explore it beyond the quick AI explanation.
+              Send “{discussChart?.title}”{discussChart?.period ? ` (${discussChart.period})` : ""} to the AI Analyst. The chart is sent with the filters currently applied.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <Button
-              variant="outline"
-              className="justify-start gap-2"
-              disabled={!conversationId}
-              onClick={() => startChartDiscussion("current")}
-            >
-              <MessageSquare className="w-4 h-4" />
-              Add to current chat
-              {!conversationId && <span className="ml-auto text-[10px] text-muted-foreground">No chat open</span>}
-            </Button>
+          <div className="flex flex-col gap-3 pt-2">
             <Button className="justify-start gap-2" onClick={() => startChartDiscussion("new")}>
               <Plus className="w-4 h-4" /> Start a new chat
             </Button>
+            {discussChatOptions.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-0.5">
+                  Or add to an existing chat
+                </p>
+                <div className="max-h-64 overflow-auto flex flex-col gap-1 pr-1">
+                  {discussChatOptions.map((conv) => (
+                    <button
+                      key={conv.id}
+                      onClick={() => startChartDiscussion(conv.id)}
+                      className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-secondary/60 transition-colors"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
+                      <span className="truncate flex-1">
+                        {conv.metadata?.name || `Chat - ${new Date(conv.created_date).toLocaleDateString()}`}
+                      </span>
+                      {conv.id === conversationId && (
+                        <span className="text-[10px] text-muted-foreground flex-shrink-0">current</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

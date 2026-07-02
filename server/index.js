@@ -68,16 +68,22 @@ async function companyGuard(req, res) {
 const azureEndpoint = (process.env.AZURE_OPENAI_ENDPOINT || "").replace(/\/$/, "");
 const azureKey = process.env.AZURE_OPENAI_KEY || "";
 const azureDeployment = process.env.AZURE_OPENAI_DEPLOYMENT || "gpt-5.4-mini";
+// Cheaper model for everything EXCEPT the AI Analyst. Azure routes by the
+// deployment in the URL path, so a different model needs its own client.
+const azureDeploymentFast = process.env.AZURE_OPENAI_DEPLOYMENT_FAST || "gpt-5-nano";
 const azureApiVersion = process.env.AZURE_OPENAI_API_VERSION || "2024-12-01-preview";
 
-const aiClient = azureKey && azureEndpoint
-  ? new OpenAI({
-      baseURL: `${azureEndpoint}/openai/deployments/${azureDeployment}`,
-      apiKey: azureKey,
-      defaultHeaders: { "api-key": azureKey },
-      defaultQuery: { "api-version": azureApiVersion },
-    })
-  : null;
+const makeAzureClient = (deployment) =>
+  new OpenAI({
+    baseURL: `${azureEndpoint}/openai/deployments/${deployment}`,
+    apiKey: azureKey,
+    defaultHeaders: { "api-key": azureKey },
+    defaultQuery: { "api-version": azureApiVersion },
+  });
+
+// Analyst (strong, agentic tool-calling) vs fast (cheap, high-volume simple tasks).
+const aiClient = azureKey && azureEndpoint ? makeAzureClient(azureDeployment) : null;
+const aiClientFast = azureKey && azureEndpoint ? makeAzureClient(azureDeploymentFast) : null;
 
 // ── Data dictionary (loaded from file for AI context) ─────────────────────────
 let dataDictionary = [];
@@ -1219,11 +1225,12 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
 }
 
 // ── Simple LLM call (chart editor, explainers) ────────────────────────────────
-// Pass usageCtx ({ companyId, userId, feature }) to ledger token spend + cost.
+// Runs on the cheaper FAST model (NOT the analyst model). Pass usageCtx
+// ({ companyId, userId, feature }) to ledger token spend + cost.
 async function runSimpleLLM(prompt, jsonMode = false, usageCtx = null) {
-  if (!aiClient) throw new Error("Azure OpenAI is not configured.");
-  const response = await aiClient.chat.completions.create({
-    model: azureDeployment,
+  if (!aiClientFast) throw new Error("Azure OpenAI is not configured.");
+  const response = await aiClientFast.chat.completions.create({
+    model: azureDeploymentFast,
     messages: [{ role: "user", content: prompt }],
     ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
     max_completion_tokens: 2000,
@@ -1232,7 +1239,7 @@ async function runSimpleLLM(prompt, jsonMode = false, usageCtx = null) {
   if (usageCtx && response.usage) {
     recordAiUsage(pool, {
       ...usageCtx,
-      model: azureDeployment,
+      model: azureDeploymentFast,
       inputTokens: response.usage.prompt_tokens,
       cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
       outputTokens: response.usage.completion_tokens,
@@ -3347,7 +3354,7 @@ async function start() {
 
   app.listen(port, () => {
     console.log(`cdp-click-ai server running on http://localhost:${port}`);
-    console.log(`  AI: ${aiClient ? `Azure OpenAI (${azureDeployment})` : "NOT CONFIGURED"}`);
+    console.log(`  AI: ${aiClient ? `Azure OpenAI (analyst: ${azureDeployment}, fast: ${azureDeploymentFast})` : "NOT CONFIGURED"}`);
     console.log(`  DB: ${pool ? "Postgres connected" : "NOT CONFIGURED"}`);
   });
 

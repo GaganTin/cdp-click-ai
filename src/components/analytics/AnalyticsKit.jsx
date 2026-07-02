@@ -10,9 +10,11 @@ import { TrendingUp, TrendingDown, Maximize2, Minimize2, MessageSquare } from "l
 import { Button } from "@/components/ui/button";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
+import { useChartTheme, opacityFor } from "@/lib/chartTheme";
 
-export const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#c4c4c4", "#dcdcdc", "#ebebeb"];
-export const PREV_COLOR = "#c4c4c4";  // muted series for the comparison period
+// Comparison ("previous period") series render as a faded foreground; the current
+// series is fully opaque. See @/lib/chartTheme for the monochrome, theme-aware palette.
+const PREV_OPACITY = 0.32;
 
 const fmt = (n) => Number(n || 0).toLocaleString();
 const DAY_MS = 86_400_000;
@@ -167,37 +169,43 @@ const EmptyChart = ({ height = 220 }) => (
 );
 
 // ── Vertical bar ──────────────────────────────────────────────────────────────
-export function BarBlock({ data = [], height = 220, color = "#1a1a1a", prevData = null }) {
+// `opacity` lets a caller render a lighter (secondary) monochrome series; the color
+// itself always tracks the theme foreground so it stays visible in dark mode.
+export function BarBlock({ data = [], height = 220, opacity = 1, prevData = null }) {
+  const theme = useChartTheme();
   if (!data.length) return <EmptyChart height={height} />;
   const merged = prevData ? mergeByName(data, prevData) : data;
+  const fg = theme["--foreground"];
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={merged} margin={{ top: 4, right: 8, left: -16, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
-        <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} interval={0} angle={merged.length > 6 ? -30 : 0} textAnchor={merged.length > 6 ? "end" : "middle"} height={merged.length > 6 ? 56 : 24} />
-        <YAxis tick={{ fontSize: 10, fill: "#888" }} allowDecimals={false} />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-        {prevData && <Bar dataKey="prev" name="Previous" fill={PREV_COLOR} radius={[3, 3, 0, 0]} maxBarSize={48} />}
-        <Bar dataKey="value" name={prevData ? "Current" : "value"} fill={color} radius={[3, 3, 0, 0]} maxBarSize={48} />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme["--border"]} vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} interval={0} angle={merged.length > 6 ? -30 : 0} textAnchor={merged.length > 6 ? "end" : "middle"} height={merged.length > 6 ? 56 : 24} />
+        <YAxis tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} allowDecimals={false} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(128,128,128,0.12)" }} />
+        {prevData && <Bar dataKey="prev" name="Previous" fill={fg} fillOpacity={PREV_OPACITY} radius={[3, 3, 0, 0]} maxBarSize={48} />}
+        <Bar dataKey="value" name={prevData ? "Current" : "value"} fill={fg} fillOpacity={opacity} radius={[3, 3, 0, 0]} maxBarSize={48} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
 // ── Horizontal bar (good for long category labels) ────────────────────────────
-export function HBarBlock({ data = [], height = 240, color = "#1a1a1a", prevData = null }) {
+export function HBarBlock({ data = [], height = 240, opacity = 1, prevData = null }) {
+  const theme = useChartTheme();
   if (!data.length) return <EmptyChart height={height} />;
   const merged = prevData ? mergeByName(data, prevData) : data;
+  const fg = theme["--foreground"];
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={merged} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#eee" horizontal={false} />
-        <XAxis type="number" tick={{ fontSize: 10, fill: "#888" }} allowDecimals={false} />
-        <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: "#888" }} width={130}
+        <CartesianGrid strokeDasharray="3 3" stroke={theme["--border"]} horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} allowDecimals={false} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} width={130}
           tickFormatter={(v) => (String(v).length > 20 ? String(v).slice(0, 20) + "…" : v)} />
-        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
-        {prevData && <Bar dataKey="prev" name="Previous" fill={PREV_COLOR} radius={[0, 3, 3, 0]} maxBarSize={22} />}
-        <Bar dataKey="value" name={prevData ? "Current" : "value"} fill={color} radius={[0, 3, 3, 0]} maxBarSize={22} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(128,128,128,0.12)" }} />
+        {prevData && <Bar dataKey="prev" name="Previous" fill={fg} fillOpacity={PREV_OPACITY} radius={[0, 3, 3, 0]} maxBarSize={22} />}
+        <Bar dataKey="value" name={prevData ? "Current" : "value"} fill={fg} fillOpacity={opacity} radius={[0, 3, 3, 0]} maxBarSize={22} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -205,13 +213,16 @@ export function HBarBlock({ data = [], height = 240, color = "#1a1a1a", prevData
 
 // ── Pie / donut ───────────────────────────────────────────────────────────────
 export function PieBlock({ data = [], height = 220 }) {
+  const theme = useChartTheme();
   const rows = data.filter((d) => Number(d.value) > 0);
   if (!rows.length) return <EmptyChart height={height} />;
+  const fg = theme["--foreground"];
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
-        <Pie data={rows} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={2}>
-          {rows.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+        <Pie data={rows} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={2}
+          stroke={theme["--card"]} strokeWidth={2}>
+          {rows.map((_, i) => <Cell key={i} fill={fg} fillOpacity={opacityFor(i)} />)}
         </Pie>
         <Tooltip content={<CustomTooltip />} />
       </PieChart>
@@ -221,6 +232,7 @@ export function PieBlock({ data = [], height = 220 }) {
 
 // Legend for a pie (kept separate so cards can place it where they like).
 export function PieLegend({ data = [] }) {
+  const theme = useChartTheme();
   const rows = data.filter((d) => Number(d.value) > 0);
   const total = rows.reduce((s, d) => s + Number(d.value), 0) || 1;
   if (!rows.length) return null;
@@ -228,7 +240,7 @@ export function PieLegend({ data = [] }) {
     <div className="space-y-1.5 mt-2">
       {rows.map((d, i) => (
         <div key={d.name} className="flex items-center gap-2 text-[11px]">
-          <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
+          <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: theme["--foreground"], opacity: opacityFor(i) }} />
           <span className="flex-1 truncate capitalize">{d.name}</span>
           <span className="text-muted-foreground tabular-nums">{fmt(d.value)} · {((d.value / total) * 100).toFixed(0)}%</span>
         </div>
@@ -238,18 +250,20 @@ export function PieLegend({ data = [] }) {
 }
 
 // ── Line (time series) ────────────────────────────────────────────────────────
-export function LineBlock({ data = [], height = 220, color = "#1a1a1a", prevData = null }) {
+export function LineBlock({ data = [], height = 220, opacity = 1, prevData = null }) {
+  const theme = useChartTheme();
   if (!data.length) return <EmptyChart height={height} />;
   const merged = prevData ? mergeByIndex(data, prevData) : data;
+  const fg = theme["--foreground"];
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={merged} margin={{ top: 4, right: 12, left: -16, bottom: 4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#eee" vertical={false} />
-        <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#888" }} />
-        <YAxis tick={{ fontSize: 10, fill: "#888" }} allowDecimals={false} />
+        <CartesianGrid strokeDasharray="3 3" stroke={theme["--border"]} vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} />
+        <YAxis tick={{ fontSize: 10, fill: theme["--muted-foreground"] }} allowDecimals={false} />
         <Tooltip content={<CustomTooltip />} />
-        {prevData && <Line type="monotone" dataKey="prev" name="Previous" stroke={PREV_COLOR} strokeWidth={2} strokeDasharray="4 3" dot={false} />}
-        <Line type="monotone" dataKey="value" name={prevData ? "Current" : "value"} stroke={color} strokeWidth={2} dot={false} />
+        {prevData && <Line type="monotone" dataKey="prev" name="Previous" stroke={fg} strokeOpacity={PREV_OPACITY} strokeWidth={2} strokeDasharray="4 3" dot={false} />}
+        <Line type="monotone" dataKey="value" name={prevData ? "Current" : "value"} stroke={fg} strokeOpacity={opacity} strokeWidth={2} dot={false} />
       </LineChart>
     </ResponsiveContainer>
   );

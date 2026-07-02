@@ -180,7 +180,7 @@ export default function ProfilesAnalyticsPanel() {
 
         <ChartCard title="Anonymous traffic sources" subtitle="Top source / medium for visitors" resizable
           explain={{ key: "profiles_anonymous_sources", type: "horizontal-bar", data: data?.anonymous_sources }}>
-          <HBarBlock data={data?.anonymous_sources} color="#555" prevData={cmp?.anonymous_sources} />
+          <HBarBlock data={data?.anonymous_sources} opacity={0.55} prevData={cmp?.anonymous_sources} />
         </ChartCard>
       </div>
 

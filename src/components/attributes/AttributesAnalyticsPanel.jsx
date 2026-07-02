@@ -92,7 +92,7 @@ export default function AttributesAnalyticsPanel({ onOpenAttribute }) {
 
         <ChartCard title="Review backlog" subtitle="Pending values per attribute" resizable
           explain={{ key: "attr_review_backlog", type: "horizontal-bar", data: data?.review_backlog }}>
-          <HBarBlock data={data?.review_backlog} color="#555" />
+          <HBarBlock data={data?.review_backlog} opacity={0.55} />
         </ChartCard>
 
         <ChartCard title="Tagging activity over time" subtitle="Profile tags first seen, by month" resizable defaultWide
