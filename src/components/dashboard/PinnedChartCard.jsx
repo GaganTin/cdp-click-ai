@@ -1,12 +1,17 @@
 import { useState, useMemo } from "react";
-import { X, Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical } from "lucide-react";
+import { Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuCheckboxItem,
+} from "@/components/ui/dropdown-menu";
 import MiniChart from "./MiniChart";
 import ChartExplainer from "./ChartExplainer";
 import { parseChartConfig } from "@/lib/utils";
-import { normalizeSize, sizeMeta } from "@/lib/chartSizes";
+import { normalizeSize } from "@/lib/chartSizes";
 import { format, subDays, subMonths, parseISO, isAfter, isValid } from "date-fns";
 
 const DATE_FILTERS = [
@@ -210,9 +215,9 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{chart.description}</p>
           )}
         </div>
-        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-          {/* Explain only what's on screen: the filtered/visible data, current type & title.
-              Key is period-aware so toggling date ranges reuses each view's summary. */}
+        <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+          {/* Primary actions stay visible: explain what's on screen + discuss in chat.
+              Explain key is period-aware so toggling date ranges reuses each summary. */}
           <ChartExplainer
             chart={{ ...chart, chart_type: chartType, title }}
             config={filteredConfig}
@@ -229,40 +234,56 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
               <MessageSquare className="w-3.5 h-3.5" />
             </Button>
           )}
-          {onCycleSize && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground"
-              title={`Resize chart (${sizeMeta(sz).name})`}
-              onClick={onCycleSize}
-            >
-              {sz === "large" ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-            </Button>
-          )}
-          <Button
-            variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            title="Remove from this tab" onClick={() => onRemove?.(chart)}
-          >
-            <X className="w-3.5 h-3.5" />
-          </Button>
+
+          {/* Everything else (chart type, size, refresh, remove) lives in one menu
+              so the card header stays uncluttered. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" title="Chart options">
+                <MoreHorizontal className="w-3.5 h-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              {onUpdate && (
+                <>
+                  <DropdownMenuLabel className="text-[11px] text-muted-foreground">Chart type</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup value={chartType} onValueChange={changeType}>
+                    {CHART_TYPES.map(ct => (
+                      <DropdownMenuRadioItem key={ct.value} value={ct.value} className="text-xs">{ct.label}</DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              {onCycleSize && (
+                <DropdownMenuItem className="text-xs" onSelect={onCycleSize}>
+                  {sz === "large" ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                  {sz === "large" ? "Collapse" : "Expand"}
+                </DropdownMenuItem>
+              )}
+              {onToggleAutoRefresh && chart.query && (
+                <DropdownMenuCheckboxItem
+                  className="text-xs"
+                  checked={autoRefresh}
+                  onCheckedChange={toggleAutoRefresh}
+                >
+                  Auto-refresh daily
+                </DropdownMenuCheckboxItem>
+              )}
+              {(onCycleSize || (onToggleAutoRefresh && chart.query)) && <DropdownMenuSeparator />}
+              <DropdownMenuItem
+                className="text-xs text-destructive focus:text-destructive"
+                onSelect={() => onRemove?.(chart)}
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Remove from tab
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {/* Chart type + date filter + delta/compare */}
+      {/* View controls: time period + comparison only - configuration lives in the ⋯ menu */}
       <div className="mb-3 flex-shrink-0 flex items-center gap-2 flex-wrap">
-        {onUpdate && (
-          <Select value={chartType} onValueChange={changeType}>
-            <SelectTrigger className="h-6 text-[11px] w-24 px-2 border-border" title="Chart type">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CHART_TYPES.map(ct => (
-                <SelectItem key={ct.value} value={ct.value} className="text-xs">{ct.label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
         {/* Time-period filter + comparison are available on every chart. On a
             categorical chart the window is simply a no-op (rows are kept). */}
         <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); if (v === "all") setCompare(false); }}>
@@ -322,22 +343,15 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
           <span className="text-[10px] text-muted-foreground">No comparable data</span>
         )}
 
-        {onToggleAutoRefresh && chart.query && (
-          <button
-            type="button"
-            onClick={toggleAutoRefresh}
-            title={autoRefresh
-              ? "Auto-refreshes daily - click to freeze this chart as a snapshot"
-              : "Snapshot (data frozen) - click to auto-refresh daily"}
-            className={`h-6 w-24 px-2 text-[11px] rounded-md border transition-colors inline-flex items-center justify-center gap-1 ml-auto ${
-              autoRefresh
-                ? "bg-foreground text-background border-foreground"
-                : "bg-background border-border text-muted-foreground hover:text-foreground"
-            }`}
+        {/* Snapshot indicator - only when auto-refresh is off, so the user can tell the
+            data is frozen. Toggling lives in the ⋯ menu. */}
+        {onToggleAutoRefresh && chart.query && !autoRefresh && (
+          <span
+            className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+            title="Data is frozen as a snapshot - turn on Auto-refresh daily in the ⋯ menu"
           >
-            <RefreshCw className="w-3 h-3" />
-            {autoRefresh ? "Daily" : "Snapshot"}
-          </button>
+            <RefreshCw className="w-3 h-3" /> Snapshot
+          </span>
         )}
       </div>
 

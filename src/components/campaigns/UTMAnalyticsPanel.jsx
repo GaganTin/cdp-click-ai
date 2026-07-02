@@ -769,30 +769,65 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
   };
 
   // Hand the current (filtered + sorted) table to the AI Analyst, scoped to whatever
-  // time period is selected - the same rows shown here.
+  // time period is selected - the same rows shown here. When comparison is on, each
+  // row also carries its previous-period value and % delta (matching the on-screen
+  // table), plus an aggregate Sessions delta so the chat message states the change.
   const discussTable = () => {
-    const rows = sorted.slice(0, 50).map(r => ({
-      name: [r.session_source, r.session_medium, r.session_campaign_name].filter(Boolean).join(" / ") || "(not set)",
-      sessions: Number(r.sessions) || 0,
-      active_users: Number(r.active_users) || 0,
-      new_users: Number(r.new_users) || 0,
-      bounce_rate: r.bounce_rate,
-      engagement_rate: r.engagement_rate,
-    }));
+    const round1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
+    const METRICS = [
+      { key: "sessions", label: "Sessions" },
+      { key: "active_users", label: "Active users" },
+      { key: "new_users", label: "New users" },
+      { key: "bounce_rate", label: "Bounce rate" },
+      { key: "engagement_rate", label: "Engagement rate" },
+    ];
+
+    const rows = sorted.slice(0, 50).map(r => {
+      const prev = wantCompare && prevByKey ? prevByKey.get(rowKey(r)) : null;
+      const row = {
+        name: [r.session_source, r.session_medium, r.session_campaign_name].filter(Boolean).join(" / ") || "(not set)",
+      };
+      for (const m of METRICS) {
+        row[m.key] = r[m.key];
+        if (wantCompare) {
+          row[`${m.key}_prev`] = prev ? prev[m.key] ?? null : null;
+          row[`${m.key}_delta_pct`] = prev ? round1(gaDeltaPct(r[m.key], prev[m.key])) : null;
+        }
+      }
+      return row;
+    });
+
+    // Columns: each metric, followed by its prev + Δ% when comparing.
+    const columns = [{ key: "name", label: "Source / Medium / Campaign" }];
+    for (const m of METRICS) {
+      columns.push({ key: m.key, label: m.label });
+      if (wantCompare) {
+        columns.push({ key: `${m.key}_prev`, label: `${m.label} (prev)` });
+        columns.push({ key: `${m.key}_delta_pct`, label: `${m.label} Δ%` });
+      }
+    }
+
+    // Aggregate Sessions delta across the sent rows, so buildDiscussPrompt emits the
+    // "Change vs previous period" context line.
+    let delta = null;
+    if (wantCompare && prevByKey) {
+      const sent = sorted.slice(0, 50);
+      const cur = sent.reduce((s, r) => s + (Number(r.sessions) || 0), 0);
+      const prevTotal = sent.reduce((s, r) => {
+        const p = prevByKey.get(rowKey(r));
+        return s + (p ? Number(p.sessions) || 0 : 0);
+      }, 0);
+      if (prevTotal > 0) delta = { pct: (cur - prevTotal) / prevTotal, current: cur, previous: prevTotal };
+    }
+
     discuss(buildDiscussPayload({
-      title: `GA Traffic Performance (${gaPeriodLabel(days)})`,
+      title: `GA Traffic Performance (${gaPeriodLabel(days)}${wantCompare ? " vs previous period" : ""})`,
       description: "GA4 source / medium / campaign performance from the UTM page",
       render: "table",
       data: rows,
-      columns: [
-        { key: "name", label: "Source / Medium / Campaign" },
-        { key: "sessions", label: "Sessions" },
-        { key: "active_users", label: "Active users" },
-        { key: "new_users", label: "New users" },
-        { key: "bounce_rate", label: "Bounce rate" },
-        { key: "engagement_rate", label: "Engagement rate" },
-      ],
+      columns,
       period: `${gaPeriodLabel(days)}${wantCompare ? " vs previous period" : ""}`,
+      delta,
       source: "Campaigns (UTM) page",
     }));
   };
