@@ -28,30 +28,41 @@ const CHART_TYPES = [
   { value: "pie", label: "Pie" },
 ];
 
+// Parse an x-axis value into a Date, or null if it isn't a date. parseISO does
+// NOT throw on bad input - it returns an Invalid Date - so we must check validity
+// explicitly. Handles the ISO shapes our queries emit ("2026-06-23", "2026-06",
+// "2026") plus space-separated timestamps ("2026-06-23 12:00:00"). Anything else
+// (category labels like "Chrome", "United States") returns null.
+function toDate(val) {
+  if (val == null || val === "") return null;
+  const d = parseISO(String(val).trim().replace(" ", "T"));
+  return isValid(d) ? d : null;
+}
+
+function cutoffFor(filterKey, now) {
+  switch (filterKey) {
+    case "7d":  return subDays(now, 7);
+    case "30d": return subDays(now, 30);
+    case "90d": return subDays(now, 90);
+    case "6m":  return subMonths(now, 6);
+    case "1y":  return subMonths(now, 12);
+    default:    return null;
+  }
+}
+
 function applyDateFilter(data, xKey, filterKey) {
   if (filterKey === "all" || !data?.length) return data;
-  const now = new Date();
-  const cutoff =
-    filterKey === "7d" ? subDays(now, 7) :
-    filterKey === "30d" ? subDays(now, 30) :
-    filterKey === "90d" ? subDays(now, 90) :
-    filterKey === "6m" ? subMonths(now, 6) :
-    filterKey === "1y" ? subMonths(now, 12) : null;
+  const cutoff = cutoffFor(filterKey, new Date());
   if (!cutoff) return data;
 
   return data.filter(row => {
-    const val = row[xKey];
-    if (!val) return true;
-    try {
-      const d = parseISO(String(val));
-      return isAfter(d, cutoff);
-    } catch {
-      return true; // non-date x-axis - keep all
-    }
+    const d = toDate(row[xKey]);
+    if (!d) return true; // non-date x-axis (categorical) - keep the row
+    return isAfter(d, cutoff);
   });
 }
 
-export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, onUpdate, onDiscuss, onRefresh, onToggleAutoRefresh, dragHandleProps, size = "small" }) {
+export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, onUpdate, onDiscuss, onToggleAutoRefresh, dragHandleProps, size = "small" }) {
   const sz = normalizeSize(size);
   const [chart] = useState(initialChart);
 
@@ -73,14 +84,6 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
   const [chartType, setChartType] = useState(initialChart.chart_type || config.chart_type || "bar");
   const changeType = (v) => { setChartType(v); onUpdate?.({ ...chart, chart_type: v }); };
 
-  // Manual re-run of the chart's stored query.
-  const [refreshing, setRefreshing] = useState(false);
-  const doRefresh = async () => {
-    if (!onRefresh || refreshing) return;
-    setRefreshing(true);
-    try { await onRefresh(chart.id); } finally { setRefreshing(false); }
-  };
-
   // Time-period filter + delta can be pre-set by the AI (date_filter / show_delta on
   // the chart config) or toggled manually here. Both paths are supported.
   const initialFilter = DATE_FILTERS.some(f => f.key === config.date_filter) ? config.date_filter : "all";
@@ -101,16 +104,24 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
     setEditingTitle(false);
   };
 
-  // Delta/compare only makes sense for a finite period over date-based data.
-  const isDateData = useMemo(
-    () => (config.data || []).some(r => isValid(parseISO(String(r[xKey])))),
-    [chart.chart_config]
-  );
+  // Whether this chart's x-axis is actually time-based. The date filter and
+  // delta/compare only make sense for time series; on categorical charts (browser,
+  // country, segment name…) they'd be meaningless, so we hide the control. Require
+  // most non-empty rows to be dates so a stray parseable label doesn't flip it.
+  const isDateData = useMemo(() => {
+    const rows = (config.data || []).filter(r => r[xKey] != null && r[xKey] !== "");
+    if (!rows.length) return false;
+    const dated = rows.filter(r => toDate(r[xKey])).length;
+    return dated / rows.length >= 0.6;
+  }, [chart.chart_config]);
 
   const filteredConfig = useMemo(() => {
+    // Never apply a time window to a non-time-series chart - it would drop rows
+    // whose x-axis isn't a date and blank the chart.
+    if (!isDateData) return config;
     const filtered = applyDateFilter(config.data, xKey, dateFilter);
     return { ...config, data: filtered };
-  }, [chart.chart_config, dateFilter]);
+  }, [chart.chart_config, dateFilter, isDateData]);
 
   // % change of the primary metric: current window vs the immediately preceding window.
   const delta = useMemo(() => {
@@ -121,8 +132,8 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
     const curStart = subDays(now, days);
     const prevStart = subDays(now, days * 2);
     const sumBetween = (from, to) => (config.data || []).reduce((sum, row) => {
-      const d = parseISO(String(row[xKey]));
-      if (isValid(d) && isAfter(d, from) && !isAfter(d, to)) return sum + (Number(row[primaryKey]) || 0);
+      const d = toDate(row[xKey]);
+      if (d && isAfter(d, from) && !isAfter(d, to)) return sum + (Number(row[primaryKey]) || 0);
       return sum;
     }, 0);
     const cur = sumBetween(curStart, now);
@@ -196,18 +207,6 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             config={filteredConfig}
             chartKey={chart.id ? `pinned_${chart.id}_${dateFilter}` : undefined}
           />
-          {onRefresh && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground"
-              title={chart.query ? "Refresh data now" : "This chart has no saved query to refresh"}
-              disabled={refreshing || !chart.query}
-              onClick={doRefresh}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            </Button>
-          )}
           {onDiscuss && (
             <Button
               variant="ghost"
@@ -253,16 +252,18 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             </SelectContent>
           </Select>
         )}
-        <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); if (v === "all") setCompare(false); }}>
-          <SelectTrigger className="h-6 text-[11px] w-32 px-2 border-border">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {DATE_FILTERS.map(f => (
-              <SelectItem key={f.key} value={f.key} className="text-xs">{f.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {isDateData && (
+          <Select value={dateFilter} onValueChange={(v) => { setDateFilter(v); if (v === "all") setCompare(false); }}>
+            <SelectTrigger className="h-6 text-[11px] w-32 px-2 border-border" title="Filter by time period">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_FILTERS.map(f => (
+                <SelectItem key={f.key} value={f.key} className="text-xs">{f.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
         {isDateData && (
           <button
@@ -298,8 +299,8 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             type="button"
             onClick={toggleAutoRefresh}
             title={autoRefresh
-              ? "Auto-refreshes daily — click to freeze this chart as a snapshot"
-              : "Snapshot (data frozen) — click to auto-refresh daily"}
+              ? "Auto-refreshes daily - click to freeze this chart as a snapshot"
+              : "Snapshot (data frozen) - click to auto-refresh daily"}
             className={`h-6 px-2 text-[11px] rounded-md border transition-colors inline-flex items-center gap-1 ml-auto ${
               autoRefresh
                 ? "bg-foreground text-background border-foreground"

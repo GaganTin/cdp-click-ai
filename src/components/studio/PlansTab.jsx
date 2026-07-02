@@ -166,6 +166,7 @@ function AiPricingCard({ row }) {
 
   const dirty =
     String(form.input_per_1m) !== String(row.input_per_1m) ||
+    String(form.cached_input_per_1m) !== String(row.cached_input_per_1m) ||
     String(form.output_per_1m) !== String(row.output_per_1m);
 
   return (
@@ -174,11 +175,16 @@ function AiPricingCard({ row }) {
         <span className="font-medium text-sm">{row.model}</span>
         <span className="text-xs text-muted-foreground">{row.currency || "USD"} / 1M tokens</span>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div>
           <label className="block text-xs text-muted-foreground mb-1">Input ($ / 1M)</label>
           <Input type="number" min="0" step="0.0001" value={form.input_per_1m ?? ""}
             onChange={(e) => setForm({ ...form, input_per_1m: e.target.value })} />
+        </div>
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">Cached input ($ / 1M)</label>
+          <Input type="number" min="0" step="0.0001" value={form.cached_input_per_1m ?? ""}
+            onChange={(e) => setForm({ ...form, cached_input_per_1m: e.target.value })} />
         </div>
         <div>
           <label className="block text-xs text-muted-foreground mb-1">Output ($ / 1M)</label>
@@ -187,7 +193,7 @@ function AiPricingCard({ row }) {
         </div>
       </div>
       <Button size="sm" className="w-full" disabled={!dirty || save.isPending}
-        onClick={() => save.mutate({ input_per_1m: form.input_per_1m, output_per_1m: form.output_per_1m })}>
+        onClick={() => save.mutate({ input_per_1m: form.input_per_1m, cached_input_per_1m: form.cached_input_per_1m, output_per_1m: form.output_per_1m })}>
         {save.isPending ? "Saving…" : "Save rates"}
       </Button>
     </div>

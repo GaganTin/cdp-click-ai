@@ -13,6 +13,7 @@ import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import TableToolbar from "@/components/ui/TableToolbar";
 import { KpiTile } from "@/components/analytics/AnalyticsKit";
 import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
+import { gaRowKey, gaDeltaPct, distinctValues, rowMatchesFilters } from "@/lib/gaTable";
 
 const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#ccc", "#e0e0e0"];
 
@@ -600,12 +601,12 @@ const fmtNum = (v) => (v != null ? Number(v).toLocaleString() : "-");
 const fmtRate = (v) => (v != null ? `${(Number(v) * 100).toFixed(1)}%` : "-");
 
 const UTM_COLS = [
-  { key: "session_source",        label: "Source",      defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "session_medium",        label: "Medium",      defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "session_campaign_name", label: "Campaign",    defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "session_content",       label: "Content",     defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "session_term",          label: "Term",        defaultVisible: true,  filterable: true,  type: "text" },
-  { key: "session_utm_id",        label: "UTM ID",      defaultVisible: true,  filterable: true,  type: "text" },
+  { key: "session_source",        label: "Source",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
+  { key: "session_medium",        label: "Medium",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
+  { key: "session_campaign_name", label: "Campaign",    defaultVisible: true,  filterable: true,  filterType: "multiselect" },
+  { key: "session_content",       label: "Content",     defaultVisible: true,  filterable: true,  filterType: "multiselect" },
+  { key: "session_term",          label: "Term",        defaultVisible: true,  filterable: true,  filterType: "multiselect" },
+  { key: "session_utm_id",        label: "UTM ID",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
   { key: "sessions",              label: "Sessions",    defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Sessions: the number of sessions that began on your site or app. A session is a period of user engagement that starts when a user opens your site/app in the foreground; it ends after 30 minutes of inactivity (a new session starts on the user's return)." },
   { key: "active_users",          label: "Active Users",defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Active Users: the number of distinct users who had an engaged session (a session lasting 10+ seconds, with a conversion event, or 2+ page/screen views). In GA4 this is the primary 'Users' metric, counting only people who actively engaged rather than every visitor." },
   { key: "new_users",             label: "New Users",   defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 New Users: the number of users who interacted with your site or app for the first time, counted by the first_visit (or first_open) event. Returning users are excluded." },
@@ -627,10 +628,9 @@ const gaPeriodLabel = (days) =>
 
 // Relative % change of a metric vs the comparison period, as a small coloured badge.
 function GADelta({ curr, prev }) {
-  const c = Number(curr), p = Number(prev);
-  if (!isFinite(c) || !isFinite(p) || p === 0) return null;
-  const pct = ((c - p) / Math.abs(p)) * 100;
-  if (!isFinite(pct) || Math.round(pct) === 0) return null;
+  const pct = gaDeltaPct(curr, prev);
+  if (pct == null) return null;
+  const p = Number(prev);
   const up = pct > 0;
   return (
     <span
@@ -687,16 +687,19 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
   const toggleCol  = (k) => setHiddenCols(p => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (colOrder.filter(x => !n.has(x)).length > 1) n.add(k); return n; });
   const moveCol    = (k, d) => setColOrder(p => { const i = p.indexOf(k); if (i < 0) return p; const n = [...p]; if (d === "up" && i > 0) [n[i-1], n[i]] = [n[i], n[i-1]]; else if (d === "down" && i < p.length - 1) [n[i], n[i+1]] = [n[i+1], n[i]]; return n; });
 
+  // Dropdown filter options come from the values actually present in the loaded
+  // rows (which are the DB utm table rows for the selected period) - so every
+  // option maps to at least one visible row, and the list respects the period.
+  const filterCols = UTM_COLS.map(c =>
+    c.filterType === "multiselect" ? { ...c, options: distinctValues(utmLinks, c.key) } : c
+  );
+
   const filtered = utmLinks.filter(row => {
     if (search) {
       const q = search.toLowerCase();
       if (!UTM_COLS.some(c => String(row[c.key] || "").toLowerCase().includes(q))) return false;
     }
-    for (const [key, val] of Object.entries(filters)) {
-      if (!val) continue;
-      if (!String(row[key] || "").toLowerCase().includes(val.toLowerCase())) return false;
-    }
-    return true;
+    return rowMatchesFilters(row, filters);
   });
 
   const sortCol = UTM_COLS.find(c => c.key === sortKey);
@@ -716,8 +719,9 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
 
   const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => UTM_COLS.find(c => c.key === k)).filter(Boolean);
 
-  // Row key for GA rows (no ID - composite key)
-  const rowKey = (row) => `${row.session_source}|${row.session_medium}|${row.session_campaign_name}|${row.session_content}|${row.session_term}`;
+  // Row key for GA rows (no ID - composite key). Includes session_utm_id to match
+  // the /links GROUP BY exactly, so selection and prev-period lookups are 1:1.
+  const rowKey = gaRowKey;
 
   // Previous-period rows keyed for O(1) lookup when rendering per-metric deltas.
   const prevByKey = wantCompare && prevLinks
@@ -759,7 +763,7 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
   };
 
   // Hand the current (filtered + sorted) table to the AI Analyst, scoped to whatever
-  // time period is selected — the same rows shown here.
+  // time period is selected - the same rows shown here.
   const discussTable = () => {
     const rows = sorted.slice(0, 50).map(r => ({
       name: [r.session_source, r.session_medium, r.session_campaign_name].filter(Boolean).join(" / ") || "(not set)",
@@ -779,7 +783,7 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
   };
 
   // Header stays visible in every state (loading / error / empty / table) so the time
-  // period filter is always reachable — including when the current window has no data.
+  // period filter is always reachable - including when the current window has no data.
   const header = (
     <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -852,7 +856,7 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
       {header}
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
-        columns={UTM_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
+        columns={filterCols} colOrder={colOrder} hiddenCols={hiddenCols}
         onToggleCol={toggleCol} onMoveCol={moveCol}
         filters={filters} onFilter={setFilter}
         resultCount={filtered.length} totalCount={utmLinks.length}

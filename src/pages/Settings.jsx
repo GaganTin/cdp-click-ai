@@ -933,7 +933,7 @@ function CompanyTab({ company, onRefresh }) {
 
       <Section title={t("Email sending defaults")} description={t("Default sender used for EDM campaigns when no override is set on the campaign itself.")}>
         <div className="mb-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
-          {t("Coming soon — you'll be able to set these once the Email page launches.")}
+          {t("Coming soon - you'll be able to set these once the Email page launches.")}
         </div>
         <form onSubmit={saveEdm}>
           {/* Disabled until the Email page ships: a native disabled fieldset greys
@@ -1524,7 +1524,7 @@ function BillingTab({ company }) {
   const aiPeriodEnd   = usage?.ai_period_end ? new Date(usage.ai_period_end) : null;
   const fmtDate       = (d) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   const aiCreditsDesc = aiIsTrial
-    ? t("A one-time credit allowance for your free trial — it does not reset.")
+    ? t("A one-time credit allowance for your free trial - it does not reset.")
     : t("Credits reset at the start of every billing month.");
   const aiResetLine = aiIsTrial
     ? (aiPeriodEnd ? `${isTrialExpired ? t("Trial ended") : t("Trial ends")} ${fmtDate(aiPeriodEnd)}` : null)
@@ -1574,7 +1574,7 @@ function BillingTab({ company }) {
         </div>
       </Section>
 
-      {/* AI credits — the period-scoped allowance (trial or billing month) */}
+      {/* AI credits - the period-scoped allowance (trial or billing month) */}
       <Section title={t("AI credits")} description={aiCreditsDesc}>
         {usageLoading ? (
           <div className="h-28 bg-secondary animate-pulse rounded-lg" />
@@ -1610,7 +1610,7 @@ function BillingTab({ company }) {
         )}
       </Section>
 
-      {/* Plan usage — current account totals vs plan caps (not period-scoped) */}
+      {/* Plan usage - current account totals vs plan caps (not period-scoped) */}
       <Section title={t("Plan usage")} description={t("Current totals across your account, measured against your plan limits.")}>
         {usageLoading ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

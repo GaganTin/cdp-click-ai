@@ -504,7 +504,7 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
         </div>
         <div className="text-sm font-semibold flex items-center gap-1.5 flex-shrink-0">
           {previewLoading && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />}
-          {previewCount == null ? "—" : previewCount.toLocaleString()}
+          {previewCount == null ? "-" : previewCount.toLocaleString()}
         </div>
       </div>
 

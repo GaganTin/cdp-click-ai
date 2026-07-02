@@ -22,7 +22,8 @@ BEGIN;
 
 -- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
 --    team_members=null => unlimited; ai_tokens are a generous monthly token
---    budget (gpt-5.4-mini @ $0.15/$0.60 per 1M => Lite 20M ~$4, Standard 100M ~$22).
+--    budget (gpt-5.4-mini @ $0.75/$4.50 per 1M; at a ~80/20 input/output mix that
+--    is roughly Lite 10M ~$15, Standard 30M ~$45 - actual cost tracks real usage).
 INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
@@ -30,14 +31,14 @@ VALUES
   ('lite', 'Lite', '$100', '/month', NULL,
    'Everything you need to get started with AI-powered customer data.',
    'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","200 credits / month"]'::jsonb,
-   '{"profiles":10000,"campaigns":5,"ai_tokens":20000000,"team_members":null,"workspaces":2}'::jsonb,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb,
    true),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
    'For growing teams that need more scale and unlimited campaigns.',
    'Get started', '/register', false, true, 2, NULL, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","1,000 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":100000000,"team_members":null,"workspaces":5}'::jsonb,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb,
    true),
   ('pro', 'Pro', 'Contact sales', '', NULL,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',

@@ -532,7 +532,7 @@ export function createAttributesRouter(pool) {
     try {
       const r = await retagPagesScoped(pool, req.companyId, pageIds, attributeIds, (u) => recordAiUsage(pool, {
         companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
-        model: u.model, inputTokens: u.input, outputTokens: u.output, metadata: { scoped_retag: true },
+        model: u.model, inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output, metadata: { scoped_retag: true },
       }));
       res.json({ ok: true, ...r });
     } catch (err) { fail(res, err); }
@@ -889,7 +889,7 @@ export function createAttributesRouter(pool) {
       const suggestions = await suggestAttributes(pages, existing.map((e) => e.name), (u) =>
         recordAiUsage(pool, {
           companyId: req.companyId, userId: req.user?.id, feature: "attribute_suggest",
-          model: u.model, inputTokens: u.input, outputTokens: u.output,
+          model: u.model, inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output,
         }));
       res.json({ suggestions });
     } catch (err) { fail(res, err); }
@@ -1404,7 +1404,7 @@ export function createAttributesRouter(pool) {
       const mapping = await groupValues(label, vals.map((v) => v.value), (u) =>
         recordAiUsage(pool, {
           companyId: req.companyId, userId: req.user?.id, feature: "attribute_group",
-          model: u.model, inputTokens: u.input, outputTokens: u.output,
+          model: u.model, inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output,
           metadata: { attribute_id: req.params.id },
         }));
       let grouped = 0;
@@ -1641,7 +1641,7 @@ export function createAttributesRouter(pool) {
           try {
             const [r] = await tagPage(page, [attribute], (u) => recordAiUsage(pool, {
               companyId: req.companyId, userId: req.user?.id, feature: "attribute_tag",
-              model: u.model, inputTokens: u.input, outputTokens: u.output,
+              model: u.model, inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output,
               metadata: { attribute_id: attribute.id, test: true },
             }));
             samples[i] = { url: page.url, title: page.title, values: r?.values || [] };

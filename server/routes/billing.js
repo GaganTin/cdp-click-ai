@@ -56,7 +56,7 @@ export function createBillingRouter(pool) {
       const ai = aiRows[0] || {};
 
       // Current billing-period spend: this is what the ai_tokens plan limit is
-      // enforced against (see app.ai_quota — resets on the billing-day anniversary
+      // enforced against (see app.ai_quota - resets on the billing-day anniversary
       // for paid accounts, one flat allowance for the whole trial), so the usage
       // bar uses it rather than calendar-month totals.
       const quota = await getAiQuota(pool, { accountId });

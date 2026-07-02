@@ -34,7 +34,7 @@ const mig = (f) => fs.readFileSync(path.join(__dirname, "..", "server", "sql", "
       await c.query(mig("2026-06-24_attr_unique_name.sql"));
       console.log("      ✓ applied");
     } else {
-      console.log("[2/2] SKIPPED unique-name index — resolve the duplicates above first, then re-run.");
+      console.log("[2/2] SKIPPED unique-name index - resolve the duplicates above first, then re-run.");
     }
 
     // ── Verify ──

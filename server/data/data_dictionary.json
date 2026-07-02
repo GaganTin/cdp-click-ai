@@ -61,7 +61,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "event_list",
@@ -99,7 +100,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "keyword_performance",
@@ -156,7 +158,8 @@
         "type": "string",
         "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "page_metrics",
@@ -226,7 +229,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "page_utm_metrics",
@@ -284,7 +288,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "path_exploration",
@@ -367,7 +372,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "path_exploration_duration",
@@ -445,7 +451,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "utm_ad_performance",
@@ -513,7 +520,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "utm_daily_full_param_performance",
@@ -612,7 +620,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "utm_daily_performance",
@@ -696,7 +705,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "utm_daily_utm_id_performance",
@@ -760,7 +770,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "utm_performance",
@@ -864,7 +875,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "website_metrics",
@@ -946,7 +958,8 @@
         "type": "string",
         "description": "Google Analytics 4 property display name"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "data_integrations",
@@ -1296,7 +1309,8 @@
         "description": "Month of the funnel",
         "format": "YYYY-MM"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "purchase_list",
@@ -1334,7 +1348,8 @@
         "type": "string",
         "description": "Additional identifier"
       }
-    ]
+    ],
+    "schema": "ga_landing"
   },
   {
     "table": "customer",
@@ -1989,6 +2004,1236 @@
         "name": "snapshot_date",
         "type": "timestamptz",
         "description": "When this level was last reported"
+      }
+    ]
+  },
+  {
+    "table": "customer_profiles",
+    "schema": "app",
+    "use_case": "app.customer_profiles - the unified golden-record member list. One row per resolved person per workspace (company_id), stitched from every membership source (manual.membership + commerce.customer). USE THIS for all audience analytics: it pre-aggregates each member's GA web activity, commerce spend, and offline events so you rarely need to join. ALWAYS filter by company_id.",
+    "granularity": "One row per resolved person per workspace (PK: company_id, member_id)",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "Resolved person key, unique per company (part of PK)."
+      },
+      {
+        "name": "member_source",
+        "type": "string",
+        "description": "Where the primary record came from: manual | shopify | ga | mixed."
+      },
+      {
+        "name": "created_date",
+        "type": "timestamp",
+        "description": "When this profile row was created."
+      },
+      {
+        "name": "updated_date",
+        "type": "timestamp",
+        "description": "When this profile row was last updated."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client identifier slug."
+      },
+      {
+        "name": "primary_email",
+        "type": "string",
+        "description": "Primary email. 'email eligible' = is_opt_in_email = true AND primary_email IS NOT NULL."
+      },
+      {
+        "name": "secondary_email",
+        "type": "string",
+        "description": "Secondary email."
+      },
+      {
+        "name": "eng_full_name",
+        "type": "string",
+        "description": "Full name (English)."
+      },
+      {
+        "name": "eng_first_name",
+        "type": "string",
+        "description": "First name (English)."
+      },
+      {
+        "name": "eng_last_name",
+        "type": "string",
+        "description": "Last name (English)."
+      },
+      {
+        "name": "chi_full_name",
+        "type": "string",
+        "description": "Full name (Chinese)."
+      },
+      {
+        "name": "display_name",
+        "type": "string",
+        "description": "Display name."
+      },
+      {
+        "name": "member_no",
+        "type": "string",
+        "description": "Member number / external membership id."
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "description": "Salutation/title."
+      },
+      {
+        "name": "member_join_date",
+        "type": "timestamp",
+        "description": "When the person became a member. Use for cohort/tenure/registration analyses."
+      },
+      {
+        "name": "member_last_update",
+        "type": "timestamp",
+        "description": "Last time the membership record changed."
+      },
+      {
+        "name": "member_reg_channel",
+        "type": "string",
+        "description": "Registration channel - use for channel attribution."
+      },
+      {
+        "name": "member_reg_location",
+        "type": "string",
+        "description": "Registration location."
+      },
+      {
+        "name": "member_type",
+        "type": "string",
+        "description": "Membership tier/type."
+      },
+      {
+        "name": "is_company",
+        "type": "boolean",
+        "description": "True if the member is a company/organisation rather than a person."
+      },
+      {
+        "name": "gender",
+        "type": "string",
+        "description": "Gender."
+      },
+      {
+        "name": "age",
+        "type": "string",
+        "description": "Age (raw)."
+      },
+      {
+        "name": "age_group",
+        "type": "string",
+        "description": "Age bucket."
+      },
+      {
+        "name": "birthday_year",
+        "type": "string",
+        "description": "Birth year."
+      },
+      {
+        "name": "birthday_month",
+        "type": "string",
+        "description": "Birth month."
+      },
+      {
+        "name": "birthday_day",
+        "type": "string",
+        "description": "Birth day."
+      },
+      {
+        "name": "education_level",
+        "type": "string",
+        "description": "Education level."
+      },
+      {
+        "name": "income_level",
+        "type": "string",
+        "description": "Income level."
+      },
+      {
+        "name": "employment_status",
+        "type": "string",
+        "description": "Employment status."
+      },
+      {
+        "name": "marital_status",
+        "type": "string",
+        "description": "Marital status."
+      },
+      {
+        "name": "nationality",
+        "type": "string",
+        "description": "Nationality."
+      },
+      {
+        "name": "has_email",
+        "type": "boolean",
+        "description": "Whether a usable email is on file."
+      },
+      {
+        "name": "has_phone",
+        "type": "boolean",
+        "description": "Whether a usable phone is on file."
+      },
+      {
+        "name": "primary_phone",
+        "type": "string",
+        "description": "Primary phone."
+      },
+      {
+        "name": "preferred_language",
+        "type": "string",
+        "description": "Preferred language."
+      },
+      {
+        "name": "preferred_channel",
+        "type": "string",
+        "description": "Preferred contact channel."
+      },
+      {
+        "name": "is_opt_in_email",
+        "type": "boolean",
+        "description": "Email marketing consent. Allowed for segmentation; NOT for planning email sends (email is a coming-soon feature)."
+      },
+      {
+        "name": "is_opt_in_call",
+        "type": "boolean",
+        "description": "Phone-call marketing consent."
+      },
+      {
+        "name": "is_opt_in_dm",
+        "type": "boolean",
+        "description": "Direct-mail consent."
+      },
+      {
+        "name": "is_opt_in_sms",
+        "type": "boolean",
+        "description": "SMS marketing consent."
+      },
+      {
+        "name": "is_subscriber_only",
+        "type": "boolean",
+        "description": "Subscriber-only (not a full member)."
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Freeform tags."
+      },
+      {
+        "name": "ga_sessions",
+        "type": "int",
+        "description": "Matched GA sessions. 0 = no web activity; > 0 = has web activity; >= 5 = highly active.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_total_events",
+        "type": "int",
+        "description": "Total GA events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_page_views",
+        "type": "int",
+        "description": "GA page-view count.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_first_visits",
+        "type": "int",
+        "description": "GA first-visit events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_form_starts",
+        "type": "int",
+        "description": "GA form-start events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_form_completes",
+        "type": "int",
+        "description": "GA form-submission events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_scroll_events",
+        "type": "int",
+        "description": "GA scroll events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_whatsapp_clicks",
+        "type": "int",
+        "description": "GA WhatsApp-click events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_file_downloads",
+        "type": "int",
+        "description": "GA file-download events.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_first_seen",
+        "type": "date",
+        "description": "First GA activity date.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_last_seen",
+        "type": "date",
+        "description": "Most recent GA activity date. Good proxy for last web activity.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_top_source_medium",
+        "type": "string",
+        "description": "Most common traffic source/medium, e.g. 'google / cpc'.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_top_campaign",
+        "type": "string",
+        "description": "Most common campaign name.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_visitor_ids",
+        "type": "array",
+        "description": "GA anonymous ids (capsuite_apid) belonging to this member - the join key to ga_landing.path_exploration.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_source_mediums",
+        "type": "array",
+        "description": "All source/mediums seen for this member.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_campaigns",
+        "type": "array",
+        "description": "All campaigns seen for this member.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_events_list",
+        "type": "array",
+        "description": "Distinct GA events seen for this member.",
+        "is_derived": true
+      },
+      {
+        "name": "ga_pages_visited",
+        "type": "array",
+        "description": "Distinct pages visited by this member.",
+        "is_derived": true
+      },
+      {
+        "name": "order_count",
+        "type": "int",
+        "description": "Pre-aggregated number of orders (manual + commerce).",
+        "is_derived": true
+      },
+      {
+        "name": "total_spend",
+        "type": "float",
+        "description": "Pre-aggregated lifetime spend.",
+        "is_derived": true
+      },
+      {
+        "name": "first_order_date",
+        "type": "timestamp",
+        "description": "First order date.",
+        "is_derived": true
+      },
+      {
+        "name": "last_order_date",
+        "type": "timestamp",
+        "description": "Most recent order date. Good proxy for last purchase activity.",
+        "is_derived": true
+      },
+      {
+        "name": "seminar_count",
+        "type": "int",
+        "description": "Number of seminar/event registrations. 0 = never attended; 'seminar attendee' = seminar_count > 0.",
+        "is_derived": true
+      },
+      {
+        "name": "seminars",
+        "type": "jsonb",
+        "description": "Array of offline events: {event_name, event_date, action}. Expand with jsonb_array_elements(seminars).",
+        "is_derived": true
+      },
+      {
+        "name": "attribute_count",
+        "type": "int",
+        "description": "Number of custom attributes on the profile (display cache).",
+        "is_derived": true
+      },
+      {
+        "name": "attributes",
+        "type": "jsonb",
+        "description": "Custom attribute values (display cache; source of truth = app.profile_attribute_values).",
+        "is_derived": true
+      },
+      {
+        "name": "is_manual",
+        "type": "boolean",
+        "description": "True if the record was manually created/uploaded."
+      },
+      {
+        "name": "last_refreshed",
+        "type": "timestamp",
+        "description": "When the aggregated caches on this row were last rebuilt.",
+        "is_derived": true
+      }
+    ]
+  },
+  {
+    "table": "anonymous_profiles",
+    "schema": "app",
+    "use_case": "app.anonymous_profiles - unresolved web visitors (not yet linked to a known member). Built from ga_landing.path_exploration. Use for anonymous-audience segments (segment_type = 'anonymous_profile'). When an identity link appears (email capture / manual anonymous_id mapping) resolved_member_id is set and the visitor is linked to a customer_profiles row. ALWAYS filter by company_id.",
+    "granularity": "One row per anonymous visitor per workspace (PK: company_id, visitor_id)",
+    "fields": [
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "visitor_id",
+        "type": "string",
+        "description": "GA anonymous id (capsuite_apid); part of PK."
+      },
+      {
+        "name": "first_seen",
+        "type": "date",
+        "description": "First activity date."
+      },
+      {
+        "name": "last_seen",
+        "type": "date",
+        "description": "Most recent activity date."
+      },
+      {
+        "name": "total_events",
+        "type": "int",
+        "description": "Total events."
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Page views."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions. > 0 = has web activity."
+      },
+      {
+        "name": "first_visits",
+        "type": "int",
+        "description": "First-visit events."
+      },
+      {
+        "name": "form_starts",
+        "type": "int",
+        "description": "Form-start events."
+      },
+      {
+        "name": "form_completes",
+        "type": "int",
+        "description": "Form-completion events."
+      },
+      {
+        "name": "scroll_events",
+        "type": "int",
+        "description": "Scroll events."
+      },
+      {
+        "name": "whatsapp_clicks",
+        "type": "int",
+        "description": "WhatsApp-click events."
+      },
+      {
+        "name": "file_downloads",
+        "type": "int",
+        "description": "File-download events."
+      },
+      {
+        "name": "click_events",
+        "type": "int",
+        "description": "Click events."
+      },
+      {
+        "name": "user_engagement",
+        "type": "int",
+        "description": "Engagement (duration/score)."
+      },
+      {
+        "name": "top_source_medium",
+        "type": "string",
+        "description": "Most common source/medium."
+      },
+      {
+        "name": "top_campaign",
+        "type": "string",
+        "description": "Most common campaign."
+      },
+      {
+        "name": "source_mediums",
+        "type": "array",
+        "description": "All source/mediums seen."
+      },
+      {
+        "name": "campaigns",
+        "type": "array",
+        "description": "All campaigns seen."
+      },
+      {
+        "name": "events",
+        "type": "array",
+        "description": "Distinct events seen."
+      },
+      {
+        "name": "pages_visited",
+        "type": "array",
+        "description": "Distinct pages visited."
+      },
+      {
+        "name": "resolved_member_id",
+        "type": "string",
+        "description": "Set once the visitor is stitched to a known member (else NULL)."
+      },
+      {
+        "name": "resolved_at",
+        "type": "timestamp",
+        "description": "When the visitor was resolved to a member."
+      },
+      {
+        "name": "last_refreshed",
+        "type": "timestamp",
+        "description": "When this row's aggregates were last rebuilt.",
+        "is_derived": true
+      }
+    ]
+  },
+  {
+    "table": "profile_identities",
+    "schema": "app",
+    "use_case": "app.profile_identities - the identity graph. Each row links a customer_profiles member to one contributing identity (an email, phone, source member_id, or GA anonymous_id). Use identity_type = 'anonymous_id' to join members to their GA anonymous ids (identity_value = capsuite_apid) for event-level GA analysis. ALWAYS filter by company_id.",
+    "granularity": "One row per (member, identity) link per workspace",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Row id (PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "→ app.customer_profiles.member_id (same company)."
+      },
+      {
+        "name": "source",
+        "type": "string",
+        "description": "Contributing source: manual | shopify | ga | interaction | popup."
+      },
+      {
+        "name": "source_id",
+        "type": "string",
+        "description": "Natural key in the source table."
+      },
+      {
+        "name": "identity_type",
+        "type": "string",
+        "description": "One of: email | phone | member_id | anonymous_id."
+      },
+      {
+        "name": "identity_value",
+        "type": "string",
+        "description": "The identity value (e.g. the email, phone, or capsuite_apid)."
+      },
+      {
+        "name": "is_primary",
+        "type": "boolean",
+        "description": "Whether this is the member's primary identity of that type."
+      },
+      {
+        "name": "first_seen",
+        "type": "timestamp",
+        "description": "When this identity was first linked."
+      },
+      {
+        "name": "last_seen",
+        "type": "timestamp",
+        "description": "When this identity was last seen."
+      },
+      {
+        "name": "created_date",
+        "type": "timestamp",
+        "description": "Row creation time."
+      },
+      {
+        "name": "updated_date",
+        "type": "timestamp",
+        "description": "Row update time."
+      },
+      {
+        "name": "metadata",
+        "type": "jsonb",
+        "description": "Extra provenance metadata."
+      }
+    ]
+  },
+  {
+    "table": "campaigns",
+    "schema": "app",
+    "use_case": "app.campaigns - UTM campaigns saved by users (the Campaigns/UTM page). Check this before suggesting a new UTM link to match the user's naming conventions and avoid duplicates. ALWAYS filter by company_id.",
+    "granularity": "One row per saved UTM campaign",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Campaign id (PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "created_by",
+        "type": "uuid",
+        "description": "User who created it."
+      },
+      {
+        "name": "visibility",
+        "type": "string",
+        "description": "private | company."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Campaign name."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "description": "draft | active | paused | completed | archived."
+      },
+      {
+        "name": "base_url",
+        "type": "string",
+        "description": "Landing URL the UTM parameters are appended to."
+      },
+      {
+        "name": "utm_source",
+        "type": "string",
+        "description": "utm_source value (e.g. google, facebook)."
+      },
+      {
+        "name": "utm_medium",
+        "type": "string",
+        "description": "utm_medium value (e.g. cpc, email)."
+      },
+      {
+        "name": "utm_campaign",
+        "type": "string",
+        "description": "utm_campaign value (campaign name)."
+      },
+      {
+        "name": "utm_term",
+        "type": "string",
+        "description": "utm_term value (paid keyword)."
+      },
+      {
+        "name": "utm_content",
+        "type": "string",
+        "description": "utm_content value (creative/variant)."
+      },
+      {
+        "name": "created_date",
+        "type": "timestamp",
+        "description": "Creation time."
+      },
+      {
+        "name": "updated_date",
+        "type": "timestamp",
+        "description": "Update time."
+      },
+      {
+        "name": "metadata",
+        "type": "jsonb",
+        "description": "Extra metadata (e.g. is_manual marker)."
+      }
+    ]
+  },
+  {
+    "table": "segments",
+    "schema": "app",
+    "use_case": "app.segments - audience segments saved by users. segment_type = 'customer' targets app.customer_profiles; 'anonymous_profile' targets app.anonymous_profiles. estimated_size is the cached audience count. filter_criteria holds the rule tree (values may be scalar OR array). ALWAYS filter by company_id.",
+    "granularity": "One row per saved segment",
+    "fields": [
+      {
+        "name": "id",
+        "type": "uuid",
+        "description": "Segment id (PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "created_by",
+        "type": "uuid",
+        "description": "User who created it."
+      },
+      {
+        "name": "visibility",
+        "type": "string",
+        "description": "private | company."
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "description": "Segment name."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "Segment description."
+      },
+      {
+        "name": "estimated_size",
+        "type": "int",
+        "description": "Cached audience count (from the last preview/refresh)."
+      },
+      {
+        "name": "status",
+        "type": "string",
+        "description": "draft | active | archived."
+      },
+      {
+        "name": "segment_type",
+        "type": "string",
+        "description": "customer | anonymous_profile - which population it targets."
+      },
+      {
+        "name": "daily_refresh",
+        "type": "boolean",
+        "description": "Whether the size is refreshed daily."
+      },
+      {
+        "name": "last_refreshed",
+        "type": "timestamp",
+        "description": "When estimated_size was last recomputed."
+      },
+      {
+        "name": "filter_criteria",
+        "type": "jsonb",
+        "description": "Rule tree defining membership; values may be scalar or array."
+      },
+      {
+        "name": "created_date",
+        "type": "timestamp",
+        "description": "Creation time."
+      },
+      {
+        "name": "updated_date",
+        "type": "timestamp",
+        "description": "Update time."
+      },
+      {
+        "name": "metadata",
+        "type": "jsonb",
+        "description": "Extra metadata (e.g. cached criteria for popups)."
+      }
+    ]
+  },
+  {
+    "table": "membership",
+    "schema": "manual",
+    "use_case": "manual.membership - CSV-uploaded member records (source of record for the manual source). The profile builder maps these into app.customer_profiles alongside commerce.customer, so for audience analytics prefer app.customer_profiles; query manual.membership directly only to inspect the raw uploaded rows. ALWAYS filter by company_id.",
+    "granularity": "One row per uploaded member per workspace (PK: company_id, member_id)",
+    "fields": [
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "Member key; convention {capsuite_ref}_man_{n} (part of PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "upload_batch_id",
+        "type": "uuid",
+        "description": "→ manual.upload_batches.id (provenance of the CSV import)."
+      },
+      {
+        "name": "is_manual",
+        "type": "boolean",
+        "description": "Always true for this table."
+      },
+      {
+        "name": "member_no",
+        "type": "string",
+        "description": "Member number."
+      },
+      {
+        "name": "member_join_date",
+        "type": "timestamp",
+        "description": "Join date."
+      },
+      {
+        "name": "member_last_update",
+        "type": "timestamp",
+        "description": "Last update."
+      },
+      {
+        "name": "member_reg_channel",
+        "type": "string",
+        "description": "Registration channel (default 'manual')."
+      },
+      {
+        "name": "member_reg_location",
+        "type": "string",
+        "description": "Registration location."
+      },
+      {
+        "name": "member_type",
+        "type": "string",
+        "description": "Membership type."
+      },
+      {
+        "name": "is_company",
+        "type": "boolean",
+        "description": "Company vs person."
+      },
+      {
+        "name": "has_email",
+        "type": "boolean",
+        "description": "Email present."
+      },
+      {
+        "name": "primary_email",
+        "type": "string",
+        "description": "Primary email."
+      },
+      {
+        "name": "secondary_email",
+        "type": "string",
+        "description": "Secondary email."
+      },
+      {
+        "name": "has_phone",
+        "type": "boolean",
+        "description": "Phone present."
+      },
+      {
+        "name": "primary_phone",
+        "type": "string",
+        "description": "Primary phone."
+      },
+      {
+        "name": "secondary_phone",
+        "type": "string",
+        "description": "Secondary phone."
+      },
+      {
+        "name": "gender",
+        "type": "string",
+        "description": "Gender."
+      },
+      {
+        "name": "nationality",
+        "type": "string",
+        "description": "Nationality."
+      },
+      {
+        "name": "age",
+        "type": "string",
+        "description": "Age."
+      },
+      {
+        "name": "age_group",
+        "type": "string",
+        "description": "Age bucket."
+      },
+      {
+        "name": "birthday_year",
+        "type": "string",
+        "description": "Birth year."
+      },
+      {
+        "name": "birthday_month",
+        "type": "string",
+        "description": "Birth month."
+      },
+      {
+        "name": "birthday_day",
+        "type": "string",
+        "description": "Birth day."
+      },
+      {
+        "name": "marital_status",
+        "type": "string",
+        "description": "Marital status."
+      },
+      {
+        "name": "education_level",
+        "type": "string",
+        "description": "Education level."
+      },
+      {
+        "name": "income_level",
+        "type": "string",
+        "description": "Income level."
+      },
+      {
+        "name": "employment_status",
+        "type": "string",
+        "description": "Employment status."
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "description": "Title/salutation."
+      },
+      {
+        "name": "eng_first_name",
+        "type": "string",
+        "description": "First name (English)."
+      },
+      {
+        "name": "eng_last_name",
+        "type": "string",
+        "description": "Last name (English)."
+      },
+      {
+        "name": "eng_full_name",
+        "type": "string",
+        "description": "Full name (English)."
+      },
+      {
+        "name": "chi_first_name",
+        "type": "string",
+        "description": "First name (Chinese)."
+      },
+      {
+        "name": "chi_last_name",
+        "type": "string",
+        "description": "Last name (Chinese)."
+      },
+      {
+        "name": "chi_full_name",
+        "type": "string",
+        "description": "Full name (Chinese)."
+      },
+      {
+        "name": "display_name",
+        "type": "string",
+        "description": "Display name."
+      },
+      {
+        "name": "is_subscriber_only",
+        "type": "boolean",
+        "description": "Subscriber-only flag."
+      },
+      {
+        "name": "is_opt_in_email",
+        "type": "boolean",
+        "description": "Email consent."
+      },
+      {
+        "name": "is_opt_in_call",
+        "type": "boolean",
+        "description": "Call consent."
+      },
+      {
+        "name": "is_opt_in_dm",
+        "type": "boolean",
+        "description": "Direct-mail consent."
+      },
+      {
+        "name": "is_opt_in_sms",
+        "type": "boolean",
+        "description": "SMS consent."
+      },
+      {
+        "name": "preferred_channel",
+        "type": "string",
+        "description": "Preferred channel."
+      },
+      {
+        "name": "preferred_language",
+        "type": "string",
+        "description": "Preferred language."
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Freeform tags."
+      },
+      {
+        "name": "anonymous_id",
+        "type": "string",
+        "description": "Optional GA anonymous id supplied in the CSV - lets manual membership stitch to an anonymous web profile."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client slug."
+      },
+      {
+        "name": "synced_at",
+        "type": "timestamp",
+        "description": "When the row was loaded."
+      }
+    ]
+  },
+  {
+    "table": "sale",
+    "schema": "manual",
+    "use_case": "manual.sale - CSV-uploaded sales/order headers (manual source). Join to manual.sale_order_line on (company_id, trxn_id) for line items, or to a member via member_id. For per-member revenue prefer the pre-aggregated order_count / total_spend on app.customer_profiles. ALWAYS filter by company_id.",
+    "granularity": "One row per uploaded transaction/order header (PK: company_id, trxn_id)",
+    "fields": [
+      {
+        "name": "trxn_id",
+        "type": "string",
+        "description": "Transaction/order id (part of PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "upload_batch_id",
+        "type": "uuid",
+        "description": "→ manual.upload_batches.id."
+      },
+      {
+        "name": "is_manual",
+        "type": "boolean",
+        "description": "Always true for this table."
+      },
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "→ member (may be NULL for guest orders)."
+      },
+      {
+        "name": "trxn_ref",
+        "type": "string",
+        "description": "External order reference."
+      },
+      {
+        "name": "trxn_channel",
+        "type": "string",
+        "description": "Sales channel (default 'manual')."
+      },
+      {
+        "name": "trxn_date",
+        "type": "timestamp",
+        "description": "Order date."
+      },
+      {
+        "name": "trxn_original_net_amt",
+        "type": "float",
+        "description": "Net order amount."
+      },
+      {
+        "name": "trxn_original_net_currency",
+        "type": "string",
+        "description": "Currency of the amount."
+      },
+      {
+        "name": "trxn_order_status",
+        "type": "string",
+        "description": "draft | confirmed | completed | cancelled."
+      },
+      {
+        "name": "subsidiary_name",
+        "type": "string",
+        "description": "Subsidiary/business unit."
+      },
+      {
+        "name": "remark",
+        "type": "string",
+        "description": "Freeform remark."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client slug."
+      },
+      {
+        "name": "synced_at",
+        "type": "timestamp",
+        "description": "When the row was loaded."
+      }
+    ]
+  },
+  {
+    "table": "sale_order_line",
+    "schema": "manual",
+    "use_case": "manual.sale_order_line - line items for manual.sale orders. Join to manual.sale on (company_id, trxn_id). Use for product-level revenue/quantity analysis on manually uploaded sales. ALWAYS filter by company_id.",
+    "granularity": "One row per order line item (PK: company_id, trxn_item_id)",
+    "fields": [
+      {
+        "name": "trxn_item_id",
+        "type": "string",
+        "description": "Line-item id (part of PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "trxn_id",
+        "type": "string",
+        "description": "→ manual.sale.trxn_id (parent order)."
+      },
+      {
+        "name": "member_id",
+        "type": "string",
+        "description": "→ member (denormalised from the order)."
+      },
+      {
+        "name": "trxn_item_qty",
+        "type": "int",
+        "description": "Quantity."
+      },
+      {
+        "name": "trxn_item_net_unit_price",
+        "type": "float",
+        "description": "Net unit price."
+      },
+      {
+        "name": "trxn_item_discount_amt",
+        "type": "float",
+        "description": "Discount amount on the line."
+      },
+      {
+        "name": "trxn_date",
+        "type": "timestamp",
+        "description": "Order date (denormalised)."
+      },
+      {
+        "name": "prod_id",
+        "type": "string",
+        "description": "Product id."
+      },
+      {
+        "name": "prod_sku",
+        "type": "string",
+        "description": "Product SKU."
+      },
+      {
+        "name": "prod_category",
+        "type": "string",
+        "description": "Product category."
+      },
+      {
+        "name": "prod_name",
+        "type": "string",
+        "description": "Product name."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client slug."
+      },
+      {
+        "name": "synced_at",
+        "type": "timestamp",
+        "description": "When the row was loaded."
+      }
+    ]
+  },
+  {
+    "table": "product",
+    "schema": "manual",
+    "use_case": "manual.product - CSV-uploaded product catalogue (manual source). Reference for product names/categories/prices when analysing manual sales (manual.sale_order_line.prod_id). Distinct from commerce.product (synced-store catalogue). ALWAYS filter by company_id.",
+    "granularity": "One row per uploaded product (PK: company_id, prod_id)",
+    "fields": [
+      {
+        "name": "prod_id",
+        "type": "string",
+        "description": "Product id (part of PK)."
+      },
+      {
+        "name": "company_id",
+        "type": "uuid",
+        "description": "Workspace id. ALWAYS filter by this."
+      },
+      {
+        "name": "upload_batch_id",
+        "type": "uuid",
+        "description": "→ manual.upload_batches.id."
+      },
+      {
+        "name": "is_manual",
+        "type": "boolean",
+        "description": "Always true for this table."
+      },
+      {
+        "name": "prod_sku",
+        "type": "string",
+        "description": "SKU."
+      },
+      {
+        "name": "prod_name",
+        "type": "string",
+        "description": "Product name."
+      },
+      {
+        "name": "prod_category",
+        "type": "string",
+        "description": "Category."
+      },
+      {
+        "name": "prod_type",
+        "type": "string",
+        "description": "Product type."
+      },
+      {
+        "name": "prod_price",
+        "type": "float",
+        "description": "List price."
+      },
+      {
+        "name": "tags",
+        "type": "string",
+        "description": "Freeform tags."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Client slug."
+      },
+      {
+        "name": "synced_at",
+        "type": "timestamp",
+        "description": "When the row was loaded."
       }
     ]
   }

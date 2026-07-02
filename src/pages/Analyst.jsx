@@ -67,7 +67,7 @@ export default function Analyst() {
     queryFn: () => appClient.entities.PinnedChart.list("-created_date", 20),
   });
   // NOTE: EDM (email) campaign data is intentionally NOT loaded into the analyst
-  // context — email is a coming-soon feature and the analyst must not access it.
+  // context - email is a coming-soon feature and the analyst must not access it.
 
   const { data: allSettings = {} } = useQuery({
     queryKey: ["app-settings"],
@@ -650,7 +650,7 @@ Explain what's driving this, call out any notable patterns or outliers, and sugg
         initial={campaignEditorInitial}
       />
 
-      {/* Discuss-chart dialog — opened when a chart is sent over from the Dashboard */}
+      {/* Discuss-chart dialog - opened when a chart is sent over from the Dashboard */}
       <Dialog open={!!discussChart} onOpenChange={(o) => { if (!o) setDiscussChart(null); }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

@@ -9,7 +9,7 @@
 // Cost is frozen at insert time from app.ai_model_pricing (rates cached in-process;
 // call clearPricingCache() after an admin edits a rate).
 
-const _priceCache = new Map(); // model -> { input_per_1m, output_per_1m, currency }
+const _priceCache = new Map(); // model -> { input_per_1m, cached_input_per_1m, output_per_1m, currency }
 
 export function clearPricingCache() {
   _priceCache.clear();
@@ -17,14 +17,14 @@ export function clearPricingCache() {
 
 async function getPricing(pool, model) {
   if (_priceCache.has(model)) return _priceCache.get(model);
-  let price = { input_per_1m: 0, output_per_1m: 0, currency: "USD" };
+  let price = { input_per_1m: 0, cached_input_per_1m: 0, output_per_1m: 0, currency: "USD" };
   try {
     const { rows } = await pool.query(
-      "SELECT input_per_1m, output_per_1m, currency FROM app.ai_model_pricing WHERE model = $1",
+      "SELECT input_per_1m, cached_input_per_1m, output_per_1m, currency FROM app.ai_model_pricing WHERE model = $1",
       [model]
     );
     if (rows[0]) price = rows[0];
-  } catch { /* pricing table may not exist yet - cost stays 0 */ }
+  } catch { /* pricing table may not exist yet (or lacks cached column) - cost stays 0 */ }
   _priceCache.set(model, price);
   return price;
 }
@@ -35,7 +35,8 @@ async function getPricing(pool, model) {
  * @param {object} ctx
  * @param {string}  ctx.model         model/deployment name (matches ai_model_pricing.model)
  * @param {string}  ctx.feature       analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
- * @param {number} [ctx.inputTokens]  prompt tokens
+ * @param {number} [ctx.inputTokens]  prompt tokens (INCLUDING any cached prefix)
+ * @param {number} [ctx.cachedTokens] cached prompt tokens (subset of inputTokens; billed at the discounted cached rate)
  * @param {number} [ctx.outputTokens] completion tokens
  * @param {string} [ctx.companyId]    active workspace (resolves the account)
  * @param {string} [ctx.accountId]    account (resolved from companyId when omitted)
@@ -101,6 +102,8 @@ export async function recordAiUsage(pool, ctx = {}) {
   try {
     const input  = Math.max(0, Math.round(Number(ctx.inputTokens)  || 0));
     const output = Math.max(0, Math.round(Number(ctx.outputTokens) || 0));
+    // Cached prompt tokens are a SUBSET of input; clamp so it can never exceed it.
+    const cached = Math.min(input, Math.max(0, Math.round(Number(ctx.cachedTokens) || 0)));
     const total  = input + output;
     if (total === 0) return;
 
@@ -115,16 +118,21 @@ export async function recordAiUsage(pool, ctx = {}) {
 
     if (accountId) {
       const price = await getPricing(pool, model);
+      // Uncached input is billed at the full input rate; the cached prefix at the
+      // (much cheaper) cached rate. Falls back to the input rate if no cached rate set.
+      const uncachedInput = input - cached;
+      const cachedRate = Number(price.cached_input_per_1m ?? price.input_per_1m ?? 0);
       const cost =
-        (input  / 1_000_000) * Number(price.input_per_1m || 0) +
-        (output / 1_000_000) * Number(price.output_per_1m || 0);
+        (uncachedInput / 1_000_000) * Number(price.input_per_1m || 0) +
+        (cached        / 1_000_000) * cachedRate +
+        (output        / 1_000_000) * Number(price.output_per_1m || 0);
       await pool.query(
         `INSERT INTO app.ai_usage
            (account_id, company_id, user_id, feature, model,
-            input_tokens, output_tokens, total_tokens, cost, currency, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            input_tokens, cached_input_tokens, output_tokens, total_tokens, cost, currency, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [accountId, companyId, userId, feature, model,
-         input, output, total, cost, price.currency || "USD", JSON.stringify(metadata)]
+         input, cached, output, total, cost, price.currency || "USD", JSON.stringify(metadata)]
       );
     }
 

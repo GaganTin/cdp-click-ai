@@ -29,7 +29,7 @@ export function ImageUploadField({
     }
     // Guard against oversized uploads (email clients choke on huge inline images).
     if (file.size > 5 * 1024 * 1024) {
-      toast.error("Image is larger than 5 MB — please use a smaller file");
+      toast.error("Image is larger than 5 MB - please use a smaller file");
       e.target.value = "";
       return;
     }

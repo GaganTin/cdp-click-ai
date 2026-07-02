@@ -91,27 +91,39 @@ export async function handleUtmTool(name, args, pool) {
     const days = args.days || 30;
     const groupBy = args.group_by || "source_medium";
 
+    // NOTE: ga_landing.utm_daily_performance stores UTM dimensions under the GA4
+    // column names session_source / session_medium / session_campaign_name (NOT
+    // utm_source / utm_medium / campaign) and has no "conversions" column. We
+    // alias to friendly utm_* names in the output so the analyst reads clean rows.
     const params = [companyId];
     const conditions = ["company_id = $1", `date >= TO_CHAR(NOW() - INTERVAL '${days} days', 'YYYYMMDD')`];
 
-    if (args.utm_source) { params.push(args.utm_source); conditions.push(`utm_source = $${params.length}`); }
-    if (args.utm_medium) { params.push(args.utm_medium); conditions.push(`utm_medium = $${params.length}`); }
-    if (args.utm_campaign) { params.push(args.utm_campaign); conditions.push(`campaign = $${params.length}`); }
+    if (args.utm_source) { params.push(args.utm_source); conditions.push(`session_source = $${params.length}`); }
+    if (args.utm_medium) { params.push(args.utm_medium); conditions.push(`session_medium = $${params.length}`); }
+    if (args.utm_campaign) { params.push(args.utm_campaign); conditions.push(`session_campaign_name = $${params.length}`); }
+
+    const groupCols = groupBy === "campaign"
+      ? "session_campaign_name"
+      : groupBy === "full"
+      ? "session_source, session_medium, session_campaign_name"
+      : "session_source, session_medium";
 
     const selectCols = groupBy === "campaign"
-      ? "campaign"
+      ? "session_campaign_name AS utm_campaign"
       : groupBy === "full"
-      ? "utm_source, utm_medium, campaign"
-      : "utm_source, utm_medium";
+      ? "session_source AS utm_source, session_medium AS utm_medium, session_campaign_name AS utm_campaign"
+      : "session_source AS utm_source, session_medium AS utm_medium";
 
     const sql = `
       SELECT ${selectCols},
-             SUM(sessions)     AS total_sessions,
-             SUM(conversions)  AS total_conversions,
-             ROUND(AVG(bounce_rate)::numeric, 2) AS avg_bounce_rate
+             SUM(sessions)                        AS total_sessions,
+             SUM(active_users)                    AS total_active_users,
+             SUM(new_users)                       AS total_new_users,
+             ROUND(AVG(bounce_rate)::numeric, 2)     AS avg_bounce_rate,
+             ROUND(AVG(engagement_rate)::numeric, 2) AS avg_engagement_rate
       FROM ga_landing.utm_daily_performance
       WHERE ${conditions.join(" AND ")}
-      GROUP BY ${selectCols}
+      GROUP BY ${groupCols}
       ORDER BY total_sessions DESC
       LIMIT 25
     `;
@@ -125,27 +137,7 @@ export async function handleUtmTool(name, args, pool) {
         }],
       };
     } catch (err) {
-      // Try the full-param table as fallback if utm_daily_performance doesn't match
-      const fallbackSql = `
-        SELECT utm_source, utm_medium, campaign,
-               SUM(sessions) AS total_sessions
-        FROM ga_landing.utm_daily_full_param_performance
-        WHERE ${conditions.join(" AND ")}
-        GROUP BY utm_source, utm_medium, campaign
-        ORDER BY total_sessions DESC
-        LIMIT 25
-      `;
-      try {
-        const fallback = await pool.query(fallbackSql, params);
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({ rows: fallback.rows, days_analyzed: days, note: "used utm_daily_full_param_performance" }),
-          }],
-        };
-      } catch (err2) {
-        return { content: [{ type: "text", text: JSON.stringify({ error: err.message }) }] };
-      }
+      return { content: [{ type: "text", text: JSON.stringify({ error: err.message }) }] };
     }
   }
 

@@ -16,8 +16,8 @@
 --   • Trial accounts (plan_expires_at IS NOT NULL, i.e. the Lite 90-day trial):
 --     ONE flat allowance for the WHOLE trial, counted from the account start with
 --     NO monthly reset. period_end is the trial end (plan_expires_at). With the
---     Lite plan's ai_tokens = 20,000,000 (200 credits) the trial therefore grants
---     200 credits total across all 90 days. When spent, is_over stays TRUE until
+--     Lite plan's ai_tokens = 10,000,000 (100 credits) the trial therefore grants
+--     100 credits total across all 90 days. When spent, is_over stays TRUE until
 --     they buy a plan (which clears plan_expires_at and switches the account onto
 --     the paid per-billing-period window above).
 --

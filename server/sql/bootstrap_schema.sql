@@ -178,13 +178,13 @@ VALUES
   ('lite', 'Lite', '$100', '/month', null,
    'Everything you need to get started with AI-powered customer data.',
    'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","200 credits / month"]'::jsonb,
-   '{"profiles":10000,"campaigns":5,"ai_tokens":20000000,"team_members":null,"workspaces":2}'::jsonb),
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
    'For growing teams that need more scale and unlimited campaigns.',
    'Get started', '/register', false, true, 2, null, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","1,000 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":100000000,"team_members":null,"workspaces":5}'::jsonb),
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
   ('pro', 'Pro', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
    'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
@@ -522,14 +522,15 @@ CREATE INDEX usage_events_company_type_idx ON app.usage_events(company_id, event
 --  in Studio. (Mirrored in server/sql/migrations/2026-06-23_ai_usage_cost.sql
 --  for existing databases - keep the two in sync.)
 CREATE TABLE app.ai_model_pricing (
-  model         TEXT          PRIMARY KEY,
-  input_per_1m  NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
-  output_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
-  currency      TEXT          NOT NULL DEFAULT 'USD',
-  updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  model               TEXT          PRIMARY KEY,
+  input_per_1m        NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
+  cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M CACHED input tokens (discounted)
+  output_per_1m       NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
+  currency            TEXT          NOT NULL DEFAULT 'USD',
+  updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
-INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.15, 0.60, 'USD');
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
+  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD');
 
 CREATE TABLE app.ai_usage (
   id            UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -540,6 +541,7 @@ CREATE TABLE app.ai_usage (
   feature       TEXT          NOT NULL,   -- analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
   model         TEXT          NOT NULL,
   input_tokens  INTEGER       NOT NULL DEFAULT 0,
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0,   -- subset of input_tokens billed at the cached rate
   output_tokens INTEGER       NOT NULL DEFAULT 0,
   total_tokens  INTEGER       NOT NULL DEFAULT 0,
   cost          NUMERIC(14,6) NOT NULL DEFAULT 0,    -- frozen at insert time
@@ -2234,7 +2236,7 @@ CREATE TABLE shopify.shopify_sync_control (
 --  Interaction, Activity, Customer). It connects to THIS database and reads/writes
 --  the `interaction` schema directly (GORM NamingStrategy TablePrefix "interaction.",
 --  AutoMigrate DISABLED). Therefore the column names and types below MUST match the
---  GORM models exactly — this file is the single source of truth for the schema.
+--  GORM models exactly - this file is the single source of truth for the schema.
 --
 --  GORM conventions assumed:
 --    - BaseModel → id UUID (gen_random_uuid), created_at, updated_at
@@ -3140,17 +3142,20 @@ ALTER TABLE app.company_report_config
 
 -- ── Editable model pricing (rates are USD per 1,000,000 tokens) ─────────────
 CREATE TABLE IF NOT EXISTS app.ai_model_pricing (
-  model         TEXT          PRIMARY KEY,
-  input_per_1m  NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
-  output_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
-  currency      TEXT          NOT NULL DEFAULT 'USD',
-  updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  model               TEXT          PRIMARY KEY,
+  input_per_1m        NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
+  cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M CACHED input tokens (discounted)
+  output_per_1m       NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
+  currency            TEXT          NOT NULL DEFAULT 'USD',
+  updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
+-- Add the cached-rate column on pre-existing tables.
+ALTER TABLE app.ai_model_pricing ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
 
 -- Seed the deployment in use. Editable later in Studio; ON CONFLICT keeps any
 -- admin-edited rate on re-run.
-INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.15, 0.60, 'USD')
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
+  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD')
 ON CONFLICT (model) DO NOTHING;
 
 -- ── AI usage ledger (per call) ──────────────────────────────────────────────
@@ -3163,6 +3168,7 @@ CREATE TABLE IF NOT EXISTS app.ai_usage (
   feature       TEXT          NOT NULL,   -- analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
   model         TEXT          NOT NULL,
   input_tokens  INTEGER       NOT NULL DEFAULT 0,
+  cached_input_tokens INTEGER NOT NULL DEFAULT 0,   -- subset of input_tokens billed at the cached rate
   output_tokens INTEGER       NOT NULL DEFAULT 0,
   total_tokens  INTEGER       NOT NULL DEFAULT 0,
   cost          NUMERIC(14,6) NOT NULL DEFAULT 0,    -- frozen at insert time
@@ -3170,6 +3176,7 @@ CREATE TABLE IF NOT EXISTS app.ai_usage (
   occurred_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   metadata      JSONB         NOT NULL DEFAULT '{}'
 );
+ALTER TABLE app.ai_usage ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS ai_usage_account_idx ON app.ai_usage(account_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ai_usage_company_idx ON app.ai_usage(company_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ai_usage_user_idx    ON app.ai_usage(user_id, occurred_at DESC);
@@ -3504,7 +3511,8 @@ BEGIN;
 
 -- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
 --    team_members=null => unlimited; ai_tokens are a generous monthly token
---    budget (gpt-5.4-mini @ $0.15/$0.60 per 1M => Lite 20M ~$4, Standard 100M ~$22).
+--    budget (gpt-5.4-mini @ $0.75/$4.50 per 1M; at a ~80/20 input/output mix that
+--    is roughly Lite 10M ~$15, Standard 30M ~$45 - actual cost tracks real usage).
 INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
@@ -3512,14 +3520,14 @@ VALUES
   ('lite', 'Lite', '$100', '/month', NULL,
    'Everything you need to get started with AI-powered customer data.',
    'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","200 credits / month"]'::jsonb,
-   '{"profiles":10000,"campaigns":5,"ai_tokens":20000000,"team_members":null,"workspaces":2}'::jsonb,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb,
    true),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
    'For growing teams that need more scale and unlimited campaigns.',
    'Get started', '/register', false, true, 2, NULL, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","1,000 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":100000000,"team_members":null,"workspaces":5}'::jsonb,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb,
    true),
   ('pro', 'Pro', 'Contact sales', '', NULL,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',

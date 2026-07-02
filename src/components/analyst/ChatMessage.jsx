@@ -685,7 +685,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
 
           const displayConfig = { ...chartConfig, data: sortedData };
 
-          // Guard against empty / all-zero chart data — never render a chart on non-data.
+          // Guard against empty / all-zero chart data - never render a chart on non-data.
           const hasRealData = Array.isArray(sortedData)
             && sortedData.length > 0
             && sortedData.some(d => { const v = Number(d?.[primaryKey]); return Number.isFinite(v) && v !== 0; });

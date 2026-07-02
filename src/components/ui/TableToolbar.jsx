@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Search, Filter, Layout, Download, ChevronUp, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { MultiSelect } from "@/components/ui/multi-select";
+
+// A filter value counts as "active" when it's a non-empty string or a non-empty array.
+const isFilterActive = (v) => (Array.isArray(v) ? v.length > 0 : v != null && v !== "");
+// The empty value for a column's filter, matching its input type.
+const emptyFilter = (col) => (col?.filterType === "multiselect" ? [] : "");
 
 /**
  * Reusable data-table toolbar: search, column-based filters, column visibility+order, CSV export.
@@ -9,10 +15,14 @@ import { Button } from "@/components/ui/button";
  *   key:        string       - field name
  *   label:      string       - display label
  *   filterable: boolean      - show in filter panel (default false)
- *   type:       'text'|'select'|'date'  - filter input type (default 'text')
- *   options:    string[]     - values for select filter
+ *   type:       'text'|'date'            - text/date filter input (default 'text')
+ *   filterType: 'multiselect'            - searchable multi-select (value is string[]); needs options
+ *   options:    string[]     - values for a plain <select> or the multi-select
  *   defaultVisible: boolean  - initial visibility (default true)
  * }]
+ *
+ * Filter values are strings for text/select columns and string[] for multiselect
+ * columns; consumers filtering rows must handle both shapes.
  *
  * colOrder: string[] - current key order (controls column sequence)
  * hiddenCols: Set<string>
@@ -39,9 +49,11 @@ export default function TableToolbar({
   const colRef = useRef(null);
   const filterRef = useRef(null);
 
-  // Close dropdowns on outside click
+  // Close dropdowns on outside click. Clicks inside a portaled MultiSelect popover
+  // are ignored so choosing a filter value doesn't collapse the filter panel.
   useEffect(() => {
     const handler = (e) => {
+      if (e.target.closest?.("[data-multiselect-popover]")) return;
       if (colRef.current && !colRef.current.contains(e.target)) setShowCols(false);
       if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilters(false);
     };
@@ -49,13 +61,13 @@ export default function TableToolbar({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const hasActiveFilters = Object.values(filters).some(v => v != null && v !== "");
-  const activeFilterPills = Object.entries(filters).filter(([, v]) => v != null && v !== "");
+  const hasActiveFilters = Object.values(filters).some(isFilterActive);
+  const activeFilterPills = Object.entries(filters).filter(([, v]) => isFilterActive(v));
   const filterableCols = columns.filter(c => c.filterable);
   const visibleCount = colOrder.filter(k => !hiddenCols.has(k)).length;
 
   const clearAllFilters = () => {
-    filterableCols.forEach(c => onFilter(c.key, ""));
+    filterableCols.forEach(c => onFilter(c.key, emptyFilter(c)));
   };
 
   return (
@@ -95,8 +107,8 @@ export default function TableToolbar({
           </Button>
 
           {showFilters && filterableCols.length > 0 && (
-            <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-80 md:w-[480px]">
-              <div className="flex items-center justify-between mb-3">
+            <div className="absolute left-0 top-full mt-1.5 z-30 bg-popover border border-border rounded-lg shadow-lg p-5 w-80 md:w-[480px]">
+              <div className="flex items-center justify-between mb-4">
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Filter by column</p>
                 {hasActiveFilters && (
                   <button onClick={clearAllFilters} className="text-[11px] text-muted-foreground hover:text-foreground">
@@ -104,13 +116,22 @@ export default function TableToolbar({
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-3 max-h-72 overflow-y-auto">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3.5 max-h-72 overflow-y-auto pr-1 -mr-1">
                 {filterableCols.map(col => {
-                  const val = filters[col.key] ?? "";
+                  const isMulti = col.filterType === "multiselect";
+                  const val = filters[col.key] ?? (isMulti ? [] : "");
                   return (
                     <div key={col.key}>
-                      <p className="text-[10px] text-muted-foreground mb-1 truncate">{col.label}</p>
-                      {col.options ? (
+                      <p className="text-[10px] text-muted-foreground mb-1.5 truncate">{col.label}</p>
+                      {isMulti ? (
+                        <MultiSelect
+                          options={col.options || []}
+                          value={Array.isArray(val) ? val : []}
+                          onChange={next => onFilter(col.key, next)}
+                          placeholder="All"
+                          searchPlaceholder={`Search ${col.label.toLowerCase()}…`}
+                        />
+                      ) : col.options ? (
                         <select
                           value={val}
                           onChange={e => onFilter(col.key, e.target.value)}
@@ -224,15 +245,16 @@ export default function TableToolbar({
         <div className="flex flex-wrap gap-1.5">
           {activeFilterPills.map(([key, val]) => {
             const col = columns.find(c => c.key === key);
+            const display = Array.isArray(val) ? val.join(", ") : val;
             return (
               <span
                 key={key}
-                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40"
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40 max-w-[240px]"
               >
-                {col?.label ?? key}: <strong>{val}</strong>
+                <span className="truncate">{col?.label ?? key}: <strong>{display}</strong></span>
                 <button
-                  onClick={() => onFilter(key, "")}
-                  className="hover:text-foreground text-muted-foreground ml-0.5"
+                  onClick={() => onFilter(key, emptyFilter(col))}
+                  className="hover:text-foreground text-muted-foreground ml-0.5 flex-shrink-0"
                 >
                   <X className="w-3 h-3" />
                 </button>

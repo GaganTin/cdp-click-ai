@@ -241,8 +241,8 @@ def build_card(report):
         body.append({"type": "TextBlock", "weight": "Bolder", "color": "Attention",
                      "text": f"❌ Failed ({len(failed)})", "spacing": "Medium"})
         body.append(_bullet_list([
-            f"**{f['dag_id'].replace('click_cdp_ai_integration_', '')}** — "
-            f"{f['task_id']} — {f['error']}"
+            f"**{f['dag_id'].replace('click_cdp_ai_integration_', '')}** - "
+            f"{f['task_id']} - {f['error']}"
             for f in failed[:25]
         ]))
 
@@ -250,7 +250,7 @@ def build_card(report):
         body.append({"type": "TextBlock", "weight": "Bolder",
                      "text": f"⚠️ Recovered on retry ({len(recovered)})", "spacing": "Medium"})
         body.append(_bullet_list([
-            f"**{r['dag_id'].replace('click_cdp_ai_integration_', '')}** — "
+            f"**{r['dag_id'].replace('click_cdp_ai_integration_', '')}** - "
             f"{r['task_id']} (passed on try {r['tries']})"
             for r in recovered[:25]
         ]))
@@ -258,7 +258,7 @@ def build_card(report):
     if zero_pairs:
         body.append({"type": "TextBlock", "weight": "Bolder",
                      "text": f"🕳️ Synced but 0 rows ({len(zero_pairs)})", "spacing": "Medium"})
-        body.append(_bullet_list([f"{label} — {client}" for label, client in zero_pairs[:25]]))
+        body.append(_bullet_list([f"{label} - {client}" for label, client in zero_pairs[:25]]))
 
     # Per-platform healthy roll-up.
     facts = [

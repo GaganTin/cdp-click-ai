@@ -100,6 +100,8 @@ function OverviewTab({ onOpenAccount }) {
       { key: "user_count", label: "Users" },
       { key: "workspace_count", label: "Workspaces" },
       { label: "AI credits", get: (a) => toCredits(a.ai_tokens) },
+      { label: "AI tokens", get: (a) => Number(a.ai_tokens) || 0 },
+      { label: "Cached tokens", get: (a) => Number(a.cached_tokens) || 0 },
       { label: "AI cost (USD)", get: (a) => (Number(a.ai_cost) || 0).toFixed(6) },
       { label: "Signed up", get: (a) => fmtDate(a.created_date) },
       { label: "Last active", get: (a) => (a.last_activity ? new Date(a.last_activity).toISOString() : "") },
@@ -163,6 +165,8 @@ function OverviewTab({ onOpenAccount }) {
               <th className="text-right font-medium px-4 py-2.5">Users</th>
               <th className="text-right font-medium px-4 py-2.5">Workspaces</th>
               <th className="text-right font-medium px-4 py-2.5">AI cost</th>
+              <th className="text-right font-medium px-4 py-2.5">AI tokens</th>
+              <th className="text-right font-medium px-4 py-2.5">Cached tokens</th>
               <th className="text-left font-medium px-4 py-2.5">Signed up</th>
               <th className="text-left font-medium px-4 py-2.5">Last active</th>
               <th className="text-left font-medium px-4 py-2.5">Status</th>
@@ -170,9 +174,9 @@ function OverviewTab({ onOpenAccount }) {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={8} className="px-4 py-6 text-muted-foreground">Loading…</td></tr>
+              <tr><td colSpan={10} className="px-4 py-6 text-muted-foreground">Loading…</td></tr>
             ) : !shown.length ? (
-              <tr><td colSpan={8} className="px-4 py-6 text-muted-foreground">No clients found.</td></tr>
+              <tr><td colSpan={10} className="px-4 py-6 text-muted-foreground">No clients found.</td></tr>
             ) : shown.map((a) => {
               const trial = trialLabel(a);
               return (
@@ -193,6 +197,11 @@ function OverviewTab({ onOpenAccount }) {
                   <td className="px-4 py-3 text-right tabular-nums">{a.user_count}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{a.workspace_count}</td>
                   <td className="px-4 py-3 text-right tabular-nums" title={`${toCredits(a.ai_tokens).toLocaleString()} credits`}>{fmtCost(a.ai_cost)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{(Number(a.ai_tokens) || 0).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted-foreground"
+                    title={a.ai_tokens ? `${Math.round((a.cached_tokens / a.ai_tokens) * 100)}% of input cached` : ""}>
+                    {(Number(a.cached_tokens) || 0).toLocaleString()}
+                  </td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtDate(a.created_date)}</td>
                   <td className="px-4 py-3 text-muted-foreground">{fmtRelative(a.last_activity)}</td>
                   <td className="px-4 py-3"><StatusPill active={a.is_active !== false} /></td>

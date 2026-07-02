@@ -8,7 +8,7 @@ import { segmentTools, handleSegmentTool } from "./tools/segments.js";
 import { utmTools, handleUtmTool } from "./tools/utm.js";
 import { analyticsTools, handleAnalyticsTool } from "./tools/analytics.js";
 
-// NOTE: EDM (email) tools are intentionally NOT registered — email is a
+// NOTE: EDM (email) tools are intentionally NOT registered - email is a
 // coming-soon feature, so the analyst must have no access to email data and
 // must not suggest email campaigns. Re-add edm.js here when email ships.
 const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...analyticsTools];

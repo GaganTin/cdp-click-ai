@@ -1,8 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { segmentTools, handleSegmentTool } from "../server/mcp/tools/segments.js";
 
+const CO = "00000000-0000-0000-0000-000000000001";
+
 function makePool(rows = []) {
   return { query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }) };
+}
+
+// Every handler call must carry a workspace id (injected by the server as
+// args._company_id); the isolation guard refuses to run without it.
+function call(name, args, pool) {
+  return handleSegmentTool(name, { ...args, _company_id: CO }, pool);
 }
 
 describe("Segments - tool registration", () => {
@@ -38,7 +46,7 @@ describe("Segments - list_segments", () => {
       { id: 2, name: "Seminar visitors", segment_type: "anonymous_profile" },
     ];
     const pool = makePool(rows);
-    const result = await handleSegmentTool("list_segments", {}, pool);
+    const result = await call("list_segments", {}, pool);
     const data = JSON.parse(result.content[0].text);
     expect(data.segments).toHaveLength(2);
     expect(pool.query).toHaveBeenCalledOnce();
@@ -46,15 +54,17 @@ describe("Segments - list_segments", () => {
 
   it("passes segment_type param when filter provided", async () => {
     const pool = makePool([{ id: 1, name: "Test", segment_type: "customer" }]);
-    await handleSegmentTool("list_segments", { segment_type: "customer" }, pool);
+    await call("list_segments", { segment_type: "customer" }, pool);
     const [sql, params] = pool.query.mock.calls[0];
-    expect(sql).toMatch(/WHERE segment_type/);
+    // Workspace scope is ANDed first, then the segment_type filter.
+    expect(sql).toMatch(/company_id = \$1 AND segment_type = \$2/);
     expect(params).toContain("customer");
+    expect(params).toContain(CO);
   });
 
   it("returns error object on DB failure", async () => {
     const pool = { query: vi.fn().mockRejectedValue(new Error("DB error")) };
-    const result = await handleSegmentTool("list_segments", {}, pool);
+    const result = await call("list_segments", {}, pool);
     const data = JSON.parse(result.content[0].text);
     expect(data.error).toBeTruthy();
   });
@@ -63,7 +73,7 @@ describe("Segments - list_segments", () => {
 describe("Segments - preview_segment_size", () => {
   it("queries app.customer_profiles for customer segments", async () => {
     const pool = makePool([{ count: "342" }]);
-    const result = await handleSegmentTool(
+    const result = await call(
       "preview_segment_size",
       { segment_type: "customer", sql_where: "member_reg_channel = 'Seminar'" },
       pool
@@ -77,7 +87,7 @@ describe("Segments - preview_segment_size", () => {
 
   it("queries app.anonymous_profiles for anonymous_profile segments", async () => {
     const pool = makePool([{ count: "1500" }]);
-    const result = await handleSegmentTool(
+    const result = await call(
       "preview_segment_size",
       { segment_type: "anonymous_profile", sql_where: "session_source_medium = 'google / cpc'" },
       pool
@@ -91,7 +101,7 @@ describe("Segments - preview_segment_size", () => {
 
   it("returns error with attempted SQL when DB query fails", async () => {
     const pool = { query: vi.fn().mockRejectedValue(new Error("syntax error")) };
-    const result = await handleSegmentTool(
+    const result = await call(
       "preview_segment_size",
       { segment_type: "customer", sql_where: "1=1" },
       pool
@@ -103,7 +113,7 @@ describe("Segments - preview_segment_size", () => {
 
   it("parses count as integer", async () => {
     const pool = makePool([{ count: "99" }]);
-    const result = await handleSegmentTool(
+    const result = await call(
       "preview_segment_size",
       { segment_type: "customer", sql_where: "1=1" },
       pool
@@ -114,9 +124,19 @@ describe("Segments - preview_segment_size", () => {
   });
 });
 
+describe("Segments - isolation guard", () => {
+  it("refuses to run without a workspace context", async () => {
+    const pool = makePool([]);
+    const result = await handleSegmentTool("list_segments", {}, pool);
+    const data = JSON.parse(result.content[0].text);
+    expect(data.error).toMatch(/workspace/i);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+});
+
 describe("Segments - unknown tool", () => {
   it("returns an error for unrecognised tool name", async () => {
-    const result = await handleSegmentTool("delete_all_segments", {}, makePool());
+    const result = await call("delete_all_segments", {}, makePool());
     const data = JSON.parse(result.content[0].text);
     expect(data.error).toMatch(/Unknown segment tool/);
   });

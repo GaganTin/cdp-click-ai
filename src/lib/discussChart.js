@@ -3,8 +3,8 @@
 // Mirrors the Dashboard flow (PinnedChartCard.handleDiscuss): build a payload the
 // Analyst page understands and navigate to it with the chart in router state. The
 // Analyst page (src/pages/Analyst.jsx) reads `location.state.discussChart`, so any
-// analytics page can reuse this to hand a chart — already filtered to whatever the
-// page is showing — over to the chat.
+// analytics page can reuse this to hand a chart - already filtered to whatever the
+// page is showing - over to the chat.
 import { useNavigate } from "react-router-dom";
 
 // Normalize an AnalyticsKit / panel chart type to a MiniChart-renderable type, so a

@@ -96,7 +96,7 @@ export function KpiTile({ label, value, sub, icon: Icon, curr, prev, prevDisplay
 //   explain={{ key, type, data }} → AI summary popover (Sparkles) AND, since the same
 //                                   {type,data} is enough to hand the chart to the AI
 //                                   Analyst, a "Discuss" button (MessageSquare) that
-//                                   opens the chat with this chart — filtered to
+//                                   opens the chat with this chart - filtered to
 //                                   whatever the page is currently showing.
 //   period                        → human label for the time window (e.g. the page's
 //                                   date range), passed through to the discussion.

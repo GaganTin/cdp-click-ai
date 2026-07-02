@@ -4,11 +4,11 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from "recharts";
 
-// Monochrome, theme-aware palette. Charts render in the foreground color — near-black
-// in light mode, near-white in dark mode — instead of the multi-hue --chart-* palette.
+// Monochrome, theme-aware palette. Charts render in the foreground color - near-black
+// in light mode, near-white in dark mode - instead of the multi-hue --chart-* palette.
 // The CSS vars (defined in index.css) flip between light and dark mode, but recharts
 // writes colors as SVG *presentation attributes* (e.g. fill="hsl(var(--foreground))"),
-// and browsers do NOT resolve CSS var() inside SVG attributes — it silently falls back
+// and browsers do NOT resolve CSS var() inside SVG attributes - it silently falls back
 // to black. So we resolve the vars to concrete colors at render time and re-resolve
 // whenever the theme (`.dark` class on <html>) toggles.
 const AXIS_VARS = ["--foreground", "--muted-foreground", "--border", "--card"];

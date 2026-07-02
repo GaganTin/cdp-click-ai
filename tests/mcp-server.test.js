@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { createAnalystMCPClient, toOpenAITools } from "../server/mcp/server.js";
 
-// Order matches ALL_TOOLS in server/mcp/server.js:
-// database, segments, utm, edm, analytics.
+// Order matches ALL_TOOLS in server/mcp/server.js: database, segments, utm,
+// analytics. EDM (email) tools are intentionally NOT registered - email is a
+// coming-soon feature, so the analyst must have no access to email tools.
 const EXPECTED_TOOLS = [
   "query_data",
   "list_tables",
@@ -11,12 +12,6 @@ const EXPECTED_TOOLS = [
   "preview_segment_size",
   "list_campaigns",
   "analyze_utm_performance",
-  "suggest_edm_opportunities",
-  "get_member_profile_breakdown",
-  "list_edm_campaigns",
-  "preview_edm_recipients",
-  "analyze_edm_performance",
-  "suggest_send_time",
   "score_rfm",
   "estimate_clv",
   "score_churn_risk",
@@ -29,6 +24,8 @@ const EXPECTED_TOOLS = [
   "forecast_registrations",
 ];
 
+const CO = "00000000-0000-0000-0000-000000000001";
+
 function makeMockPool() {
   return {
     query: vi.fn().mockResolvedValue({ rows: [{ count: "0" }], rowCount: 1 }),
@@ -36,7 +33,7 @@ function makeMockPool() {
 }
 
 describe("MCP Server - tool discovery", () => {
-  it("registers all 23 expected tools", async () => {
+  it("registers exactly the expected tools (EDM excluded)", async () => {
     const client = await createAnalystMCPClient(makeMockPool(), []);
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
@@ -70,7 +67,7 @@ describe("MCP Server - tool calls via client", () => {
     const client = await createAnalystMCPClient(pool, []);
     const result = await client.callTool({
       name: "query_data",
-      arguments: { sql: "SELECT sessions FROM ga_landing.website_metrics" },
+      arguments: { sql: `SELECT sessions FROM ga_landing.website_metrics WHERE company_id = '${CO}'`, _company_id: CO },
     });
     const data = JSON.parse(result.content[0].text);
     expect(data.rows[0].sessions).toBe(999);
@@ -90,7 +87,7 @@ describe("MCP Server - tool calls via client", () => {
       query: vi.fn().mockResolvedValue({ rows: [{ name: "Seg A", segment_type: "customer" }], rowCount: 1 }),
     };
     const client = await createAnalystMCPClient(pool, []);
-    const result = await client.callTool({ name: "list_segments", arguments: {} });
+    const result = await client.callTool({ name: "list_segments", arguments: { _company_id: CO } });
     const data = JSON.parse(result.content[0].text);
     expect(data.segments[0].name).toBe("Seg A");
   });
@@ -100,7 +97,7 @@ describe("MCP Server - tool calls via client", () => {
       query: vi.fn().mockResolvedValue({ rows: [{ name: "Google CPC", utm_source: "google" }], rowCount: 1 }),
     };
     const client = await createAnalystMCPClient(pool, []);
-    const result = await client.callTool({ name: "list_campaigns", arguments: {} });
+    const result = await client.callTool({ name: "list_campaigns", arguments: { _company_id: CO } });
     const data = JSON.parse(result.content[0].text);
     expect(data.campaigns[0].name).toBe("Google CPC");
   });

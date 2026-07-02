@@ -31,7 +31,7 @@ export default function Dashboard() {
   const [dragChartId, setDragChartId] = useState(null);
 
   // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
-  // (company-scoped app.settings) via this hook — nothing is stored locally.
+  // (company-scoped app.settings) via this hook - nothing is stored locally.
   const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
 
   const [activeTab, setActiveTab] = useState("main");
@@ -70,12 +70,6 @@ export default function Dashboard() {
     mutationFn: ({ id, data }) => appClient.entities.PinnedChart.update(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] }),
   });
-
-  // Manual per-card refresh: re-run the chart's stored query, then refetch the list.
-  const refreshChart = async (id) => {
-    await appClient.charts.refresh(id);
-    await queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
-  };
 
   // Auto-refresh once per load: charts change daily, so any chart with a stored
   // query that hasn't been refreshed since the start of today is re-run. This
@@ -160,7 +154,7 @@ export default function Dashboard() {
     });
   };
 
-  // Remove a chart from the current tab's display only — keeps it in the chart
+  // Remove a chart from the current tab's display only - keeps it in the chart
   // list (DB) and on any other tabs it's assigned to.
   const removeChartFromTab = (tabId, chartId) => {
     setTabAssignments(prev => ({
@@ -202,7 +196,7 @@ export default function Dashboard() {
     navigate("/", { state: { discussChart: payload } });
   };
 
-  // Charts visible in the active tab — only those explicitly assigned to it,
+  // Charts visible in the active tab - only those explicitly assigned to it,
   // ordered by the assignment array so positions set in the preview are honoured.
   const assignment = tabAssignments[activeTab] || [];
   const visibleCharts = assignment
@@ -227,7 +221,7 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        {/* Tabs — horizontally scrollable when they overflow; drag to reorder */}
+        {/* Tabs - horizontally scrollable when they overflow; drag to reorder */}
         <div className="flex items-end border-b border-border">
           <div className="flex gap-6 flex-1 min-w-0 overflow-x-scroll overflow-y-hidden dashboard-tabs-scroll">
             {tabs.map(tab => (
@@ -316,7 +310,7 @@ export default function Dashboard() {
                   <ChevronDown className="w-3.5 h-3.5 opacity-60" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-72">
+              <DropdownMenuContent align="start" className="w-96">
                 <DropdownMenuLabel className="text-xs text-muted-foreground">
                   {t("Toggle charts on this tab")}
                 </DropdownMenuLabel>
@@ -404,7 +398,6 @@ export default function Dashboard() {
                     onCycleSize={() => cycleSize(chart.id)}
                     onUpdate={(updated) => updateMutation.mutate({ id: updated.id, data: { title: updated.title, description: updated.description, chart_type: updated.chart_type, chart_config: updated.chart_config } })}
                     onDiscuss={discussChart}
-                    onRefresh={refreshChart}
                     onToggleAutoRefresh={toggleAutoRefresh}
                     dragHandleProps={{
                       draggable: true,

@@ -293,7 +293,7 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
       try {
         const results = await tagPage(page, attributes, (u) => recordAiUsage(pool, {
           companyId, feature: "attribute_tag", model: u.model,
-          inputTokens: u.input, outputTokens: u.output,
+          inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output,
           metadata: { page_id: page.id, job_id: job.id },
         }));
         for (const r of results) {

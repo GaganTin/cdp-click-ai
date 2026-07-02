@@ -94,8 +94,9 @@ export function createAdminRouter(pool) {
                ow.email AS owner_email, ow.full_name AS owner_name,
                (SELECT COUNT(*) FROM app.users u     WHERE u.account_id = a.id) AS user_count,
                (SELECT COUNT(*) FROM app.companies c WHERE c.account_id = a.id) AS workspace_count,
-               (SELECT COALESCE(SUM(au.total_tokens), 0) FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_tokens,
-               (SELECT COALESCE(SUM(au.cost), 0)         FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_cost,
+               (SELECT COALESCE(SUM(au.total_tokens), 0)        FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_tokens,
+               (SELECT COALESCE(SUM(au.cached_input_tokens), 0) FROM app.ai_usage au WHERE au.account_id = a.id) AS cached_tokens,
+               (SELECT COALESCE(SUM(au.cost), 0)                FROM app.ai_usage au WHERE au.account_id = a.id) AS ai_cost,
                GREATEST(
                  (SELECT MAX(u.last_login_at) FROM app.users u      WHERE u.account_id = a.id),
                  (SELECT MAX(al.occurred_at)  FROM app.audit_log al WHERE al.account_id = a.id)
@@ -113,6 +114,7 @@ export function createAdminRouter(pool) {
         user_count: parseInt(r.user_count, 10),
         workspace_count: parseInt(r.workspace_count, 10),
         ai_tokens: parseInt(r.ai_tokens, 10) || 0,
+        cached_tokens: parseInt(r.cached_tokens, 10) || 0,
         ai_cost: Math.round((parseFloat(r.ai_cost) || 0) * 1e6) / 1e6,
       })));
     } catch (err) {
@@ -418,26 +420,28 @@ export function createAdminRouter(pool) {
   // Update (or create) a model's rates. New rates apply to FUTURE usage only -
   // already-recorded costs are frozen on their ledger rows.
   router.patch("/ai-pricing/:model", async (req, res) => {
-    const { input_per_1m, output_per_1m, currency } = req.body;
+    const { input_per_1m, cached_input_per_1m, output_per_1m, currency } = req.body;
     const num = (v) => (v === "" || v == null ? null : Number(v));
-    const inP = num(input_per_1m), outP = num(output_per_1m);
-    if ((inP != null && (isNaN(inP) || inP < 0)) || (outP != null && (isNaN(outP) || outP < 0))) {
+    const inP = num(input_per_1m), cachedP = num(cached_input_per_1m), outP = num(output_per_1m);
+    const bad = (v) => v != null && (isNaN(v) || v < 0);
+    if (bad(inP) || bad(cachedP) || bad(outP)) {
       return res.status(400).json({ error: "Rates must be non-negative numbers" });
     }
     try {
       const { rows } = await pool.query(
-        `INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency, updated_date)
-         VALUES ($1, COALESCE($2, 0), COALESCE($3, 0), COALESCE($4, 'USD'), NOW())
+        `INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency, updated_date)
+         VALUES ($1, COALESCE($2, 0), COALESCE($3, 0), COALESCE($4, 0), COALESCE($5, 'USD'), NOW())
          ON CONFLICT (model) DO UPDATE SET
-           input_per_1m  = COALESCE($2, app.ai_model_pricing.input_per_1m),
-           output_per_1m = COALESCE($3, app.ai_model_pricing.output_per_1m),
-           currency      = COALESCE($4, app.ai_model_pricing.currency),
-           updated_date  = NOW()
+           input_per_1m        = COALESCE($2, app.ai_model_pricing.input_per_1m),
+           cached_input_per_1m = COALESCE($3, app.ai_model_pricing.cached_input_per_1m),
+           output_per_1m       = COALESCE($4, app.ai_model_pricing.output_per_1m),
+           currency            = COALESCE($5, app.ai_model_pricing.currency),
+           updated_date        = NOW()
          RETURNING *`,
-        [req.params.model, inP, outP, currency || null]
+        [req.params.model, inP, cachedP, outP, currency || null]
       );
       clearPricingCache();
-      await audit(null, req.user.id, "update", "ai_pricing", req.params.model, { input_per_1m: inP, output_per_1m: outP, currency });
+      await audit(null, req.user.id, "update", "ai_pricing", req.params.model, { input_per_1m: inP, cached_input_per_1m: cachedP, output_per_1m: outP, currency });
       res.json(rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });

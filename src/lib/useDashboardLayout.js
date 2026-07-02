@@ -4,7 +4,7 @@ import { appClient } from "@/api/appClient";
 
 // The dashboard layout (tabs, per-tab chart assignments, per-chart sizes) is
 // persisted server-side in the company-scoped key/value store (app.settings),
-// NOT in localStorage — so it follows the workspace across browsers/devices and
+// NOT in localStorage - so it follows the workspace across browsers/devices and
 // is shared by every member, the same way pinned charts already are.
 const LAYOUT_KEY = "dashboard_layout";
 const LAYOUT_LABEL = "Dashboard layout";

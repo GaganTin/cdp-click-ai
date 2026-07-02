@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS app.ai_model_pricing (
 -- Seed the deployment in use. Editable later in Studio; ON CONFLICT keeps any
 -- admin-edited rate on re-run.
 INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.15, 0.60, 'USD')
+  ('gpt-5.4-mini', 0.75, 4.50, 'USD')
 ON CONFLICT (model) DO NOTHING;
 
 -- ── AI usage ledger (per call) ──────────────────────────────────────────────

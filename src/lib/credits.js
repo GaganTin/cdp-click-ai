@@ -1,7 +1,7 @@
 // AI usage is metered and stored in the backend/DB as raw GPT tokens, but those
-// numbers are large and unfriendly (a 20,000,000-token allowance "looks like a
+// numbers are large and unfriendly (a 10,000,000-token allowance "looks like a
 // lot"). Everywhere in the UI we present them as "credits" instead, at a fixed
-// rate of 100,000 tokens = 1 credit (so 20M => 200 credits, 100M => 1,000).
+// rate of 100,000 tokens = 1 credit (so 10M => 100 credits, 30M => 300).
 // Backend/DB values are always raw tokens; convert at the UI boundary only.
 export const TOKENS_PER_CREDIT = 100_000;
 

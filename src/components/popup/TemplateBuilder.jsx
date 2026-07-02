@@ -57,6 +57,9 @@ function newBlock(type) {
 export const DEFAULT_CONTAINER = {
   background: "#ffffff",
   bgImage: "",
+  bgSize: "cover",
+  bgPosition: "center",
+  bgRepeat: "no-repeat",
   paddingY: "32",
   paddingX: "24",
   borderRadius: "12",
@@ -118,7 +121,7 @@ function blockToHtml(b) {
 export function generateHtml(container, blocks) {
   const shadow = container.shadow ? "box-shadow:0 4px 24px rgba(0,0,0,.12);" : "";
   const bgImage = container.bgImage
-    ? `background-image:url('${esc(container.bgImage)}');background-size:cover;background-position:center;`
+    ? `background-image:url('${esc(container.bgImage)}');background-size:${container.bgSize || "cover"};background-position:${container.bgPosition || "center"};background-repeat:${container.bgRepeat || "no-repeat"};`
     : "";
   const border = container.borderWidth && container.borderWidth !== "0"
     ? `border:${container.borderWidth}px solid ${container.borderColor || "#e5e7eb"};`
@@ -414,8 +417,42 @@ function ContainerProperties({ container, onChange }) {
   return (
     <div className="space-y-3">
       <ColorField label="Background color" value={container.background} onChange={v => set("background", v)} />
-      <ImageUploadField label="Background image" value={container.bgImage} onChange={v => set("bgImage", v)}
+      <ImageUploadField label="Full background design / image" value={container.bgImage} onChange={v => set("bgImage", v)}
         placeholder="Or paste an image URL…" previewClassName="h-16" />
+      {container.bgImage && (
+        <div className="space-y-3 rounded-md border border-border bg-secondary/20 p-2.5">
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Your design fills the whole popup as its background. Add blocks on top, or leave it empty
+            to use the design on its own.
+          </p>
+          <SelectField label="Fit" value={container.bgSize || "cover"} onChange={v => set("bgSize", v)}
+            options={[
+              { value: "cover", label: "Fill (cover, may crop)" },
+              { value: "100% 100%", label: "Stretch to fill exactly" },
+              { value: "contain", label: "Fit inside (no crop)" },
+              { value: "auto", label: "Actual size" },
+            ]} />
+          <SelectField label="Position" value={container.bgPosition || "center"} onChange={v => set("bgPosition", v)}
+            options={[
+              { value: "center", label: "Center" },
+              { value: "top", label: "Top" },
+              { value: "bottom", label: "Bottom" },
+              { value: "left", label: "Left" },
+              { value: "right", label: "Right" },
+              { value: "top left", label: "Top left" },
+              { value: "top right", label: "Top right" },
+              { value: "bottom left", label: "Bottom left" },
+              { value: "bottom right", label: "Bottom right" },
+            ]} />
+          <SelectField label="Repeat" value={container.bgRepeat || "no-repeat"} onChange={v => set("bgRepeat", v)}
+            options={[
+              { value: "no-repeat", label: "No repeat" },
+              { value: "repeat", label: "Tile" },
+              { value: "repeat-x", label: "Tile horizontally" },
+              { value: "repeat-y", label: "Tile vertically" },
+            ]} />
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <NumField label="Padding top/bottom" value={container.paddingY} onChange={v => set("paddingY", v)} min={0} max={80} unit="px" />
         <NumField label="Padding left/right" value={container.paddingX} onChange={v => set("paddingX", v)} min={0} max={80} unit="px" />
@@ -618,7 +655,10 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
 
   const handleSave = () => {
     if (!meta.name.trim()) { toast.error("Template name is required"); return; }
-    if (!blocks.length)    { toast.error("Add at least one block to the template"); return; }
+    if (!blocks.length && !container.bgImage) {
+      toast.error("Add at least one block, or set a full background design");
+      return;
+    }
     onSave({
       name: meta.name.trim(),
       category: meta.category.trim() || "Custom",
@@ -741,11 +781,11 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
 
             {/* Center: canvas ──────────────────────────────────────────────── */}
             <div className="flex-1 overflow-auto bg-gray-100 p-6">
-              {blocks.length === 0 ? (
+              {blocks.length === 0 && !container.bgImage ? (
                 <div className="max-w-md mx-auto border-2 border-dashed border-border rounded-xl p-16 text-center bg-background/60">
                   <Layers className="w-10 h-10 mx-auto mb-3 opacity-20" />
                   <p className="text-sm font-medium text-muted-foreground mb-1">Start building your popup</p>
-                  <p className="text-xs text-muted-foreground">Click any block in the left panel to add it to your template</p>
+                  <p className="text-xs text-muted-foreground">Click any block in the left panel to add it, or set a full background design in the <strong>Container</strong> tab</p>
                 </div>
               ) : (
                 <div className="mx-auto relative" style={{ width: `${container.maxWidth || 480}px`, maxWidth: "100%" }}>
@@ -755,8 +795,9 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
                     style={{
                       background: container.background,
                       backgroundImage: container.bgImage ? `url('${container.bgImage}')` : undefined,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
+                      backgroundSize: container.bgImage ? (container.bgSize || "cover") : undefined,
+                      backgroundPosition: container.bgImage ? (container.bgPosition || "center") : undefined,
+                      backgroundRepeat: container.bgImage ? (container.bgRepeat || "no-repeat") : undefined,
                       padding: `${container.paddingY || 32}px ${container.paddingX || 24}px`,
                       fontFamily: container.fontFamily || "sans-serif",
                       borderRadius: `${container.borderRadius || 12}px`,

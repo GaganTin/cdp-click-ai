@@ -3,7 +3,7 @@
 //   /logo-dark.png   → white mark (for dark surfaces)
 //
 // variant:
-//   "auto"    follows the app theme (.dark class) — black mark in light mode,
+//   "auto"    follows the app theme (.dark class) - black mark in light mode,
 //             white mark in dark mode. Use on normal surfaces (sidebar, pages).
 //   "inverse" the opposite of the theme. Use on surfaces painted with
 //             bg-primary / text-primary-foreground (e.g. the auth side panel),

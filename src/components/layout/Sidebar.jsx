@@ -164,7 +164,7 @@ export default function Sidebar() {
                   <div
                     key={item.path}
                     className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-muted-foreground/40 cursor-not-allowed select-none"
-                    title={collapsed ? `${item.label} — coming soon` : undefined}
+                    title={collapsed ? `${item.label} - coming soon` : undefined}
                   >
                     <item.icon className="w-4 h-4 flex-shrink-0" />
                     {!collapsed && (

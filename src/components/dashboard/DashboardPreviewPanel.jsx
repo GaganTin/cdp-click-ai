@@ -16,7 +16,7 @@ const PREVIEW_HEIGHTS = { small: "h-48", large: "h-72" };
 
 export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedCharts = [], onEditRequest }) {
   // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
-  // are shared with the Dashboard page — nothing is persisted in localStorage.
+  // are shared with the Dashboard page - nothing is persisted in localStorage.
   const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
   const queryClient = useQueryClient();
 
@@ -24,7 +24,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
   const [editingTab, setEditingTab] = useState(null);
   const [editingName, setEditingName] = useState("");
 
-  // Inline chart editor (title + position) — no AI round-trip needed.
+  // Inline chart editor (title + position) - no AI round-trip needed.
   const [editingChart, setEditingChart] = useState(null); // chart id being edited
   const [chartTitleDraft, setChartTitleDraft] = useState("");
 
@@ -234,7 +234,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                   className={`border border-border rounded-lg bg-card p-4 group relative hover:shadow-md transition-shadow ${sizeMeta(size).span}`}
                 >
                   {editingChart === chart.id ? (
-                    /* Inline editor — rename + reposition directly, no AI needed */
+                    /* Inline editor - rename + reposition directly, no AI needed */
                     <div className="mb-2 space-y-2">
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Edit chart</p>
                       <div>

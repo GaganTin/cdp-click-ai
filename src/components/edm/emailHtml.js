@@ -13,7 +13,7 @@
 // so old templates saved without a container still render exactly as before
 // (600px centred white body on a light-grey page).
 export const DEFAULT_EMAIL_CONTAINER = {
-  contentWidth: 600,      // px — the email body column width (draggable on canvas)
+  contentWidth: 600,      // px - the email body column width (draggable on canvas)
   bgColor: "#f9fafb",     // page background behind the email body
   contentBg: "#ffffff",   // the email body background
   fontFamily: "sans-serif",

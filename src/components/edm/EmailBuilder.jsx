@@ -475,7 +475,7 @@ export default function EmailBuilder({
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
 
-  // Container is optional — parents that haven't adopted it fall back to defaults
+  // Container is optional - parents that haven't adopted it fall back to defaults
   // and container edits become no-ops (blocks still render at the 600px default).
   const ct = { ...DEFAULT_EMAIL_CONTAINER, ...(container || {}) };
   const setContainer = (next) => onContainerChange?.(next);

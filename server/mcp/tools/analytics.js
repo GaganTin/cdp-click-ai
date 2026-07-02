@@ -259,7 +259,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             cp.eng_first_name,
             cp.primary_email,
             cp.member_type,
-            EXTRACT(DAY FROM NOW() - COALESCE(cp.last_activity_date, cp.member_join_date))::int AS recency_days,
+            EXTRACT(DAY FROM NOW() - COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date))::int AS recency_days,
             COALESCE(cp.seminar_count, 0) AS frequency,
             COALESCE(cp.ga_sessions, 0)   AS monetary_proxy
           FROM app.customer_profiles cp
@@ -367,7 +367,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             EXTRACT(DAY FROM NOW() - cp.member_join_date)::float        AS tenure_days,
             COALESCE(cp.seminar_count, 0)::float                        AS event_count,
             COALESCE(cp.ga_sessions, 0)::float                          AS web_sessions,
-            EXTRACT(DAY FROM NOW() - COALESCE(cp.last_activity_date, cp.member_join_date))::float AS recency_days
+            EXTRACT(DAY FROM NOW() - COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date))::float AS recency_days
           FROM app.customer_profiles cp
           WHERE cp.company_id = $1
             AND cp.member_join_date IS NOT NULL
@@ -432,14 +432,14 @@ export async function handleAnalyticsTool(name, args, pool) {
             cp.eng_first_name,
             cp.primary_email,
             cp.member_type,
-            EXTRACT(DAY FROM NOW() - COALESCE(cp.last_activity_date, cp.member_join_date))::int AS days_inactive,
+            EXTRACT(DAY FROM NOW() - COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date))::int AS days_inactive,
             EXTRACT(DAY FROM NOW() - cp.member_join_date)::int AS tenure_days,
             COALESCE(cp.seminar_count, 0) AS seminar_count,
             COALESCE(cp.ga_sessions, 0)   AS ga_sessions,
             cp.is_opt_in_email,
             -- Hazard components (weighted, 0-100 scale)
             -- Recency hazard: >180d inactive = max risk
-            LEAST(EXTRACT(DAY FROM NOW() - COALESCE(cp.last_activity_date, cp.member_join_date)) / 1.8, 40)::int AS recency_hazard,
+            LEAST(EXTRACT(DAY FROM NOW() - COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date)) / 1.8, 40)::int AS recency_hazard,
             -- Low engagement hazard: 0 seminars, 0 sessions
             CASE
               WHEN COALESCE(cp.seminar_count, 0) = 0 AND COALESCE(cp.ga_sessions, 0) = 0 THEN 30
@@ -508,7 +508,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             c.cohort_month,
             c.member_id,
             EXTRACT(MONTH FROM AGE(
-              DATE_TRUNC('month', COALESCE(cp.last_activity_date, cp.member_join_date)),
+              DATE_TRUNC('month', COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date)),
               c.cohort_month
             ))::int AS months_since_join
           FROM cohorts c
@@ -939,7 +939,7 @@ export async function handleAnalyticsTool(name, args, pool) {
           ORDER BY day
         `;
       } else {
-        // email_opens was removed — email is a coming-soon feature.
+        // email_opens was removed - email is a coming-soon feature.
         return { content: [{ type: "text", text: JSON.stringify({ error: `Unsupported metric '${metric}'. Use 'registrations' or 'event_attendance'.` }) }] };
       }
 

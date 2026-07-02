@@ -64,7 +64,7 @@ export async function handleDatabaseTool(name, args, pool, dataDictionary) {
     // suppression, templates, automations). is_opt_in_email / primary_email on
     // customer_profiles are member attributes, not email-feature data, so allowed.
     if (/\bedm_[a-z_]+/i.test(sql)) {
-      return { content: [{ type: "text", text: JSON.stringify({ error: "Email campaign data is not available yet — email is a coming-soon feature. Query member, web analytics, commerce, or segment data instead." }) }] };
+      return { content: [{ type: "text", text: JSON.stringify({ error: "Email campaign data is not available yet - email is a coming-soon feature. Query member, web analytics, commerce, or segment data instead." }) }] };
     }
 
     // ── Workspace isolation (fail CLOSED) ────────────────────────────────────
@@ -98,10 +98,14 @@ export async function handleDatabaseTool(name, args, pool, dataDictionary) {
   }
 
   if (name === "list_tables") {
-    // Dictionary entries are { table, use_case, granularity, fields[] }. Schema
-    // prefixes are given in the system prompt (ga_landing.* for GA/GSC reports).
+    // Dictionary entries are { table, schema, use_case, granularity, fields[] }.
+    // Emit both the bare name and the schema-qualified name so the model always
+    // knows the correct prefix to use in query_data (e.g. manual.product vs
+    // commerce.product, which share the bare name "product").
     const tables = dataDictionary.map((t) => ({
       table_name: t.table,
+      schema: t.schema || "",
+      qualified_name: t.schema ? `${t.schema}.${t.table}` : t.table,
       use_case: t.use_case || "",
       granularity: t.granularity || "",
       column_count: Array.isArray(t.fields) ? t.fields.length : 0,
@@ -110,12 +114,53 @@ export async function handleDatabaseTool(name, args, pool, dataDictionary) {
   }
 
   if (name === "describe_table") {
-    const entry = dataDictionary.find((t) => t.table === args.table_name);
-    if (!entry) {
+    // Accept either a schema_name arg or a schema-qualified table_name
+    // ("manual.product"). When neither is given and the bare name is ambiguous
+    // (e.g. commerce.product vs manual.product), ask the model to disambiguate
+    // instead of silently returning the wrong table.
+    let wantTable = (args.table_name || "").trim();
+    let wantSchema = (args.schema_name || "").trim();
+    if (wantTable.includes(".")) {
+      const [s, ...rest] = wantTable.split(".");
+      wantSchema = wantSchema || s;
+      wantTable = rest.join(".");
+    }
+
+    const matches = dataDictionary.filter((t) => t.table === wantTable);
+    if (matches.length === 0) {
       return {
         content: [{
           type: "text",
-          text: JSON.stringify({ error: `Table '${args.table_name}' not found in data dictionary` }),
+          text: JSON.stringify({ error: `Table '${wantTable}' not found in data dictionary` }),
+        }],
+      };
+    }
+
+    // Schema is used ONLY to disambiguate a bare name shared by >1 schema; a
+    // uniquely-named table always resolves (a wrong/absent schema_name never
+    // rejects it).
+    let entry;
+    if (matches.length === 1) {
+      entry = matches[0];
+    } else if (wantSchema) {
+      entry = matches.find((t) => (t.schema || "") === wantSchema);
+      if (!entry) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              error: `Table '${wantTable}' not found in schema '${wantSchema}'. It exists in: ${matches.map((t) => t.schema || "(no schema)").join(", ")}.`,
+            }),
+          }],
+        };
+      }
+    } else {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            error: `Ambiguous table name '${wantTable}' - it exists in multiple schemas: ${matches.map((t) => t.schema).join(", ")}. Re-call with schema_name (or pass "schema.table").`,
+          }),
         }],
       };
     }

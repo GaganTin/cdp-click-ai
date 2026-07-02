@@ -41,6 +41,7 @@ function reportUsage(onUsage, resp) {
   try {
     onUsage({
       input: resp.usage.prompt_tokens || 0,
+      cached: resp.usage.prompt_tokens_details?.cached_tokens || 0,
       output: resp.usage.completion_tokens || 0,
       model: deployment(),
     });

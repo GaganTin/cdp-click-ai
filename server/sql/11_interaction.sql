@@ -5,7 +5,7 @@
 --  Interaction, Activity, Customer). It connects to THIS database and reads/writes
 --  the `interaction` schema directly (GORM NamingStrategy TablePrefix "interaction.",
 --  AutoMigrate DISABLED). Therefore the column names and types below MUST match the
---  GORM models exactly — this file is the single source of truth for the schema.
+--  GORM models exactly - this file is the single source of truth for the schema.
 --
 --  GORM conventions assumed:
 --    - BaseModel → id UUID (gen_random_uuid), created_at, updated_at

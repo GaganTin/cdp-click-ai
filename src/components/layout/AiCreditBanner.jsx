@@ -8,7 +8,7 @@ import { toCredits } from "@/lib/credits";
 
 // Proactive heads-up when the account nears (>=90%) or hits (100%) its billing-
 // period AI credit limit, so users aren't surprised when AI features start getting
-// blocked (enforced server-side via app.ai_quota — paid plans reset on their
+// blocked (enforced server-side via app.ai_quota - paid plans reset on their
 // billing-day anniversary, trials get one flat allowance for the whole trial).
 // Dismissal is keyed by month + severity bucket so: closing the "running low" note
 // doesn't suppress the later "used up" note, and both reappear over time. Mirrors
@@ -52,7 +52,7 @@ export default function AiCreditBanner() {
         <span className="truncate">
           {data.over
             ? (inTrial
-                ? `You've used all ${limitC} of your free trial AI credits (${usedC} / ${limitC}). AI features are paused — purchase a plan to keep using them.`
+                ? `You've used all ${limitC} of your free trial AI credits (${usedC} / ${limitC}). AI features are paused - purchase a plan to keep using them.`
                 : `You've used all your AI credits for this billing period (${usedC} / ${limitC}). AI features are paused until your credits reset next billing month.`)
             : `You've used ${data.pct}% of your AI credits (${usedC} / ${limitC}). ${inTrial ? "Purchase a plan" : "Upgrade"} to avoid interruptions.`}
         </span>
