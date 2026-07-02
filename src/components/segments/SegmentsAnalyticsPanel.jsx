@@ -172,12 +172,14 @@ export default function SegmentsAnalyticsPanel() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <ChartCard title="Segment size distribution" subtitle="Estimated size, top 12" resizable defaultWide
-          explain={{ key: "segments_size_dist", type: "horizontal-bar", data: a.sizeDist }}>
+          explain={{ key: "segments_size_dist", type: "horizontal-bar", data: a.sizeDist }}
+          prevData={pa?.sizeDist}>
           <HBarBlock data={a.sizeDist} height={Math.max(200, a.sizeDist.length * 26)} />
         </ChartCard>
 
         <ChartCard title="By status" subtitle="Lifecycle state" resizable
-          explain={{ key: "segments_by_status", type: "pie", data: a.byStatus }}>
+          explain={{ key: "segments_by_status", type: "pie", data: a.byStatus }}
+          prevData={pa?.byStatus}>
           <div className="grid grid-cols-2 gap-2 items-center">
             <PieBlock data={a.byStatus} />
             <PieLegend data={a.byStatus} />
@@ -185,7 +187,8 @@ export default function SegmentsAnalyticsPanel() {
         </ChartCard>
 
         <ChartCard title="By type" subtitle="Customer vs anonymous" resizable
-          explain={{ key: "segments_by_type", type: "pie", data: a.byType }}>
+          explain={{ key: "segments_by_type", type: "pie", data: a.byType }}
+          prevData={pa?.byType}>
           <div className="grid grid-cols-2 gap-2 items-center">
             <PieBlock data={a.byType} />
             <PieLegend data={a.byType} />
@@ -193,7 +196,8 @@ export default function SegmentsAnalyticsPanel() {
         </ChartCard>
 
         <ChartCard title="Usage" subtitle="Locked vs editable" resizable
-          explain={{ key: "segments_usage", type: "pie", data: a.usage }}>
+          explain={{ key: "segments_usage", type: "pie", data: a.usage }}
+          prevData={pa?.usage}>
           <div className="grid grid-cols-2 gap-2 items-center">
             <PieBlock data={a.usage} />
             <PieLegend data={a.usage} />
@@ -201,12 +205,14 @@ export default function SegmentsAnalyticsPanel() {
         </ChartCard>
 
         <ChartCard title="Refresh freshness" subtitle="Daily-refresh segments by last run" resizable
-          explain={{ key: "segments_freshness", type: "bar", data: a.freshness }}>
+          explain={{ key: "segments_freshness", type: "bar", data: a.freshness }}
+          prevData={pa?.freshness}>
           <BarBlock data={a.freshness} />
         </ChartCard>
 
         <ChartCard title="Segments created over time" subtitle="By month" resizable defaultWide
-          explain={{ key: "segments_created_over_time", type: "line", data: a.createdOverTime }}>
+          explain={{ key: "segments_created_over_time", type: "line", data: a.createdOverTime }}
+          prevData={pa?.createdOverTime}>
           <LineBlock data={a.createdOverTime} />
         </ChartCard>
       </div>
