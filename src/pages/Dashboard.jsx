@@ -279,7 +279,7 @@ export default function Dashboard() {
           </div>
           <button
             onClick={addTab}
-            className="flex items-center gap-1.5 pb-3 mb-1.5 pl-4 flex-shrink-0 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 pb-3 mb-2.5 pl-4 flex-shrink-0 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
           >
             <Plus className="w-3.5 h-3.5" /> {t("New tab")}
           </button>

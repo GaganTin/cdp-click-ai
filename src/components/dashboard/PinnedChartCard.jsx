@@ -301,7 +301,7 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             title={autoRefresh
               ? "Auto-refreshes daily - click to freeze this chart as a snapshot"
               : "Snapshot (data frozen) - click to auto-refresh daily"}
-            className={`h-6 px-2 text-[11px] rounded-md border transition-colors inline-flex items-center gap-1 ml-auto ${
+            className={`h-6 w-24 px-2 text-[11px] rounded-md border transition-colors inline-flex items-center justify-center gap-1 ml-auto ${
               autoRefresh
                 ? "bg-foreground text-background border-foreground"
                 : "bg-background border-border text-muted-foreground hover:text-foreground"
