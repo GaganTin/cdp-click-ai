@@ -46,10 +46,10 @@ async function getPricing(pool, model) {
  * Resolve an account's CURRENT-BILLING-PERIOD AI token quota via the DB function
  * app.ai_quota (the single source of truth). Fails OPEN (over=false) on any
  * error so a quota-check hiccup can never wedge the whole app.
- * @returns {Promise<{accountId:string|null, limit:number|null, used:number, over:boolean, remaining:number|null}>}
+ * @returns {Promise<{accountId:string|null, limit:number|null, used:number, over:boolean, remaining:number|null, periodStart:string|null, periodEnd:string|null, isTrial:boolean}>}
  */
 export async function getAiQuota(pool, { accountId = null, companyId = null } = {}) {
-  const open = { accountId, limit: null, used: 0, over: false, remaining: null };
+  const open = { accountId, limit: null, used: 0, over: false, remaining: null, periodStart: null, periodEnd: null, isTrial: false };
   if (!pool) return open;
   try {
     let acc = accountId;
@@ -58,12 +58,19 @@ export async function getAiQuota(pool, { accountId = null, companyId = null } = 
       acc = rows[0]?.account_id || null;
     }
     if (!acc) return open;
-    const { rows } = await pool.query("SELECT used, token_limit, is_over FROM app.ai_quota($1)", [acc]);
+    const { rows } = await pool.query(
+      "SELECT used, token_limit, is_over, period_start, period_end, is_trial FROM app.ai_quota($1)",
+      [acc]
+    );
     const r = rows[0];
     if (!r) return { ...open, accountId: acc };
     const limit = r.token_limit == null ? null : Number(r.token_limit);
     const used = Number(r.used || 0);
-    return { accountId: acc, limit, used, over: !!r.is_over, remaining: limit == null ? null : Math.max(0, limit - used) };
+    return {
+      accountId: acc, limit, used, over: !!r.is_over,
+      remaining: limit == null ? null : Math.max(0, limit - used),
+      periodStart: r.period_start, periodEnd: r.period_end, isTrial: !!r.is_trial,
+    };
   } catch (err) {
     console.error("getAiQuota failed (allowing):", err.message);
     return open;

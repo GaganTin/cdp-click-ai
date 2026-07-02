@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePlan } from "@/lib/usePlan";
 import { passwordError, PASSWORD_HINT } from "@/lib/password";
-import { TOKENS_PER_CREDIT, toCredits } from "@/lib/credits";
+import { toCredits } from "@/lib/credits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -1500,12 +1500,36 @@ function BillingTab({ company }) {
   // Free upgrades go through sales; surface the paid plan's contact link directly.
   const isContactSales = upgradePlan?.cta_external;
 
+  // Account-wide plan caps (current totals, NOT period-scoped). AI credits are
+  // period-scoped so they get their own dedicated section below.
   const usageItems = [
     { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
-    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
-    { key: "ai_tokens",    label: t("AI credits (this period)"), limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT, usageKey: "ai_tokens_month" },
     { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
+    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
   ];
+
+  // ── AI credits for the current window (the one metric that resets) ──────────
+  // The window + its end come from the server (app.ai_quota) so the label is
+  // always exactly what enforcement uses: a trial gets one allowance through the
+  // trial end; a paid plan resets on ai_period_end (the billing-day anniversary).
+  const aiIsTrial     = usage?.ai_is_trial ?? isFreePlan;
+  const aiLimitRaw    = limits.ai_tokens;
+  const aiUnlimited   = aiLimitRaw === null || aiLimitRaw === undefined;
+  const aiUsedCredits = toCredits(usage?.ai_tokens_month ?? 0);
+  const aiLimitCredits = aiUnlimited ? null : toCredits(aiLimitRaw);
+  const aiRemaining   = aiUnlimited ? null : Math.max(0, aiLimitCredits - aiUsedCredits);
+  const aiPct         = aiUnlimited || aiLimitCredits <= 0
+    ? 0
+    : Math.min(100, Math.round((aiUsedCredits / aiLimitCredits) * 100));
+  const aiPeriodEnd   = usage?.ai_period_end ? new Date(usage.ai_period_end) : null;
+  const fmtDate       = (d) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const aiCreditsDesc = aiIsTrial
+    ? t("A one-time credit allowance for your free trial — it does not reset.")
+    : t("Credits reset at the start of every billing month.");
+  const aiResetLine = aiIsTrial
+    ? (aiPeriodEnd ? `${isTrialExpired ? t("Trial ended") : t("Trial ends")} ${fmtDate(aiPeriodEnd)}` : null)
+    : (aiPeriodEnd ? `${t("Resets on")} ${fmtDate(aiPeriodEnd)}` : null);
+  const aiBarColor = aiPct >= 90 ? "bg-destructive" : aiPct >= 70 ? "bg-yellow-500" : "bg-foreground";
 
   return (
     <div className="space-y-8">
@@ -1550,51 +1574,64 @@ function BillingTab({ company }) {
         </div>
       </Section>
 
-      {/* Detailed usage */}
-      <Section title={t("Usage this period")} description={t("Account-wide totals tracked against your plan limits.")}>
+      {/* AI credits — the period-scoped allowance (trial or billing month) */}
+      <Section title={t("AI credits")} description={aiCreditsDesc}>
         {usageLoading ? (
-          <div className="grid grid-cols-2 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-14 bg-secondary animate-pulse rounded-lg" />)}
+          <div className="h-28 bg-secondary animate-pulse rounded-lg" />
+        ) : aiUnlimited ? (
+          <div className="border border-border rounded-lg px-5 py-4">
+            <p className="text-2xl font-semibold">{t("Unlimited")}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("Your plan includes unlimited AI credits.")}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4">
-            {usageItems.map(({ key, label, limitKey, divisor, usageKey }) => {
+          <div className="border border-border rounded-lg p-5 space-y-3">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-2xl font-semibold tabular-nums">
+                  {num(aiUsedCredits)}
+                  <span className="text-base font-normal text-muted-foreground"> / {num(aiLimitCredits)} {t("credits used")}</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {num(aiRemaining)} {t("credits remaining")}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-lg font-semibold tabular-nums ${aiPct >= 90 ? "text-destructive" : ""}`}>{aiPct}%</p>
+                <p className="text-[11px] text-muted-foreground">{t("used")}</p>
+              </div>
+            </div>
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${aiBarColor}`} style={{ width: `${aiPct}%` }} />
+            </div>
+            {aiResetLine && (
+              <p className="text-xs text-muted-foreground">{aiResetLine}</p>
+            )}
+          </div>
+        )}
+      </Section>
+
+      {/* Plan usage — current account totals vs plan caps (not period-scoped) */}
+      <Section title={t("Plan usage")} description={t("Current totals across your account, measured against your plan limits.")}>
+        {usageLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[1,2,3].map(i => <div key={i} className="h-14 bg-secondary animate-pulse rounded-lg" />)}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {usageItems.map(({ key, label, limitKey }) => {
               const rawLimit = limits[limitKey];
-              const d = divisor || 1;
               const unlimited = rawLimit === null || rawLimit === undefined;
               return (
                 <div key={key} className="border border-border rounded-lg px-5 py-4">
                   <UsageBar
                     label={label}
-                    used={Math.round((usage?.[usageKey || key] ?? 0) / d)}
-                    limit={unlimited ? rawLimit : Math.round(rawLimit / d)}
+                    used={usage?.[key] ?? 0}
+                    limit={rawLimit}
                     unlimited={unlimited}
                   />
                 </div>
               );
             })}
-          </div>
-        )}
-      </Section>
-
-      {/* AI usage */}
-      <Section title={t("AI usage")} description={t("Total AI credits consumed across all your workspaces.")}>
-        {usageLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[1,2,3,4].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: t("Total credits"), value: num(toCredits(usage?.overall?.ai_tokens ?? usage?.ai_tokens ?? 0)) },
-              { label: t("Input credits"), value: num(toCredits(usage?.overall?.ai_input_tokens ?? 0)) },
-              { label: t("Output credits"),value: num(toCredits(usage?.overall?.ai_output_tokens ?? 0)) },
-            ].map(({ label, value }) => (
-              <div key={label} className="border border-border rounded-lg px-5 py-4">
-                <p className="text-xl font-semibold tabular-nums">{value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-              </div>
-            ))}
           </div>
         )}
       </Section>

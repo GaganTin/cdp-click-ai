@@ -3637,15 +3637,22 @@ ALTER TABLE app.chart_summaries
 
 -- ===================== migrations/2026-07-02_ai_quota_billing_period.sql =====================
 
--- Count the AI token quota per BILLING PERIOD, not calendar month. Supersedes
+-- Count the AI token quota per BILLING PERIOD, not calendar month, and return the
+-- window bounds + trial flag so the UI can explain the period. Supersedes
 -- 2026-07-02_ai_quota_enforcement.sql above:
 --   • Paid accounts (plan_expires_at IS NULL) reset on the billing-day anniversary
---     of the upgrade date (plan_upgraded_at, falling back to account creation).
+--     of the upgrade date (plan_upgraded_at, falling back to account creation);
+--     period_end is the next reset.
 --   • Trial accounts (plan_expires_at set) get ONE flat allowance for the whole
 --     trial, counted from account creation with no monthly reset (Lite: 200
---     credits total across the 90-day trial). Idempotent.
-CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
-RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
+--     credits total across the 90-day trial); period_end is the trial end.
+-- Return type gains columns, so DROP first (CREATE OR REPLACE cannot change a
+-- function's return type). Idempotent.
+DROP FUNCTION IF EXISTS app.ai_quota(UUID);
+
+CREATE FUNCTION app.ai_quota(p_account_id UUID)
+RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN,
+              period_start TIMESTAMPTZ, period_end TIMESTAMPTZ, is_trial BOOLEAN)
 LANGUAGE sql STABLE AS $$
   WITH acct AS (
     SELECT a.created_date,
@@ -3661,6 +3668,8 @@ LANGUAGE sql STABLE AS $$
   ),
   win AS (
     SELECT
+      (acct.plan_expires_at IS NOT NULL) AS is_trial,
+      acct.plan_expires_at,
       CASE
         WHEN acct.plan_expires_at IS NOT NULL
           THEN acct.created_date
@@ -3672,17 +3681,27 @@ LANGUAGE sql STABLE AS $$
       END AS period_start
       FROM acct
   ),
+  win2 AS (
+    SELECT is_trial,
+           period_start,
+           CASE WHEN is_trial THEN plan_expires_at
+                ELSE period_start + INTERVAL '1 month' END AS period_end
+      FROM win
+  ),
   u AS (
     SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
-      FROM app.ai_usage, win
+      FROM app.ai_usage, win2
      WHERE account_id  = p_account_id
-       AND occurred_at >= win.period_start
+       AND occurred_at >= win2.period_start
   )
   SELECT u.used,
          acct.token_limit,
-         (acct.token_limit IS NOT NULL AND u.used >= acct.token_limit) AS is_over
-    FROM u CROSS JOIN acct;
+         (acct.token_limit IS NOT NULL AND u.used >= acct.token_limit) AS is_over,
+         win2.period_start,
+         win2.period_end,
+         win2.is_trial
+    FROM u CROSS JOIN acct CROSS JOIN win2;
 $$;
 
 COMMENT ON FUNCTION app.ai_quota(UUID) IS
-  'Per-account AI token quota over the current BILLING PERIOD: paid accounts reset on their billing-day anniversary; trial accounts get one flat allowance for the whole trial. Returns (used this period, effective token limit, is_over). NULL limit = unlimited.';
+  'Per-account AI token quota over the current BILLING PERIOD: paid accounts reset on their billing-day anniversary; trial accounts get one flat allowance for the whole trial. Returns (used, token_limit, is_over, period_start, period_end, is_trial). NULL limit = unlimited.';

@@ -94,6 +94,11 @@ export function createBillingRouter(pool) {
         ai_output_tokens: num(ai.output_tokens),
         ai_cost: money(ai.cost),
         ai_currency: ai.currency || "USD",
+        // Current AI billing window (from app.ai_quota) so the UI can label the
+        // period exactly: trial = one allowance through ai_period_end (the trial
+        // end); paid = resets on ai_period_end (the billing-day anniversary).
+        ai_period_end: quota.periodEnd,
+        ai_is_trial: quota.isTrial,
         profiles: workspaces.reduce((s, w) => s + w.profiles, 0),
         workspaces_count: workspaces.length,
       };
@@ -106,6 +111,8 @@ export function createBillingRouter(pool) {
         ai_tokens_month: overall.ai_tokens_month,
         ai_cost: overall.ai_cost,
         ai_currency: overall.ai_currency,
+        ai_period_end: overall.ai_period_end,
+        ai_is_trial: overall.ai_is_trial,
         profiles: overall.profiles,
         workspaces_count: overall.workspaces_count,
         overall,
