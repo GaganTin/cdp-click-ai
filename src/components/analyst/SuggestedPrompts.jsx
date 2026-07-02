@@ -1,4 +1,4 @@
-import { TrendingUp, Users, Globe, MousePointer, Target, BarChart3, Link, Lightbulb, Mail, Zap, PieChart, Activity } from "lucide-react";
+import { TrendingUp, Users, Globe, MousePointer, Target, BarChart3, Link, Lightbulb, PieChart, Activity } from "lucide-react";
 
 const PROMPT_SETS = [
   // Set 0 - Traffic & growth
@@ -12,18 +12,7 @@ const PROMPT_SETS = [
     { icon: Target, category: "SEO", text: "What are our top organic search keywords and how do they compare to paid traffic performance?" },
     { icon: Lightbulb, category: "Opportunities", text: "What's one growth opportunity hiding in our data that we might be overlooking? Show me the numbers." },
   ],
-  // Set 1 - Email & EDM
-  [
-    { icon: Mail, category: "Email Ideas", text: "What email campaigns should I be running right now? Check my member base and suggest the highest-impact ones." },
-    { icon: Zap, category: "Automation", text: "Which member lifecycle events aren't being captured by email automations? Suggest trigger-based campaigns I'm missing." },
-    { icon: Users, category: "Re-engagement", text: "How many members have gone inactive? Suggest a re-engagement email campaign with a compelling subject and content." },
-    { icon: Mail, category: "Welcome Flow", text: "Draft me a welcome email campaign for new members that joined in the last 30 days - include personalisation and a clear CTA." },
-    { icon: TrendingUp, category: "Email Performance", text: "How are my past email campaigns performing? Show open rates, click rates, and what's working best." },
-    { icon: Target, category: "Segment + Email", text: "Find me a member segment that's never been emailed and suggest a campaign tailored to their profile." },
-    { icon: BarChart3, category: "Seminar Follow-up", text: "Which seminar attendees haven't been followed up with? Create an email campaign to re-engage them." },
-    { icon: Lightbulb, category: "EDM Strategy", text: "What's the best email I could send this week based on current member activity and upcoming events?" },
-  ],
-  // Set 2 - Members & audience
+  // Set 1 - Members & audience
   [
     { icon: Users, category: "Member Analysis", text: "Break down our member base by type and activity level. Who are our most engaged members?" },
     { icon: PieChart, category: "Demographics", text: "What does our membership look like by age group, education, and employment status? Any patterns we should act on?" },
@@ -34,7 +23,7 @@ const PROMPT_SETS = [
     { icon: Globe, category: "New Joiners", text: "Analyse our new member cohort from the last 3 months - where are they coming from and what are they doing?" },
     { icon: Lightbulb, category: "Retention Tip", text: "What's the single biggest retention opportunity in our membership data right now?" },
   ],
-  // Set 3 - UTM & campaign performance
+  // Set 2 - UTM & campaign performance
   [
     { icon: BarChart3, category: "UTM Overview", text: "Give me a full breakdown of UTM campaign performance this month - which sources and mediums are winning?" },
     { icon: Link, category: "UTM Builder", text: "I'm launching a new LinkedIn campaign. Create a UTM link with proper tracking and suggest the best campaign name structure." },

@@ -187,15 +187,15 @@ export const analyticsTools = [
     name: "detect_anomalies",
     description:
       "Detect statistical anomalies in member registration or activity patterns using " +
-      "Z-score and IQR methods. Flags unusual spikes or drops in: daily new registrations, " +
-      "event attendance counts, and email open rates. " +
+      "Z-score and IQR methods. Flags unusual spikes or drops in: daily new registrations " +
+      "and event attendance counts. " +
       "Use this to surface data quality issues, viral events, or campaign outliers.",
     inputSchema: {
       type: "object",
       properties: {
         metric: {
           type: "string",
-          enum: ["registrations", "event_attendance", "email_opens"],
+          enum: ["registrations", "event_attendance"],
           description: "Which metric to scan for anomalies.",
         },
         days: {
@@ -239,6 +239,14 @@ export const analyticsTools = [
 
 export async function handleAnalyticsTool(name, args, pool) {
 
+  // Workspace isolation (fail CLOSED): every analytics query below is scoped to
+  // the active workspace via `cp.company_id = $1`. companyId is injected by the
+  // server (args._company_id) and is not model-controllable.
+  const companyId = args._company_id;
+  if (!companyId) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "No workspace context - refusing to run (isolation guard)." }) }] };
+  }
+
   // ── RFM Scoring (RFM model) ──────────────────────────────────────────────
   if (name === "score_rfm") {
     try {
@@ -255,7 +263,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             COALESCE(cp.seminar_count, 0) AS frequency,
             COALESCE(cp.ga_sessions, 0)   AS monetary_proxy
           FROM app.customer_profiles cp
-          WHERE cp.primary_email IS NOT NULL
+          WHERE cp.company_id = $1 AND cp.primary_email IS NOT NULL
         ),
         percentiles AS (
           SELECT
@@ -320,7 +328,7 @@ export async function handleAnalyticsTool(name, args, pool) {
         ${args.segment_label ? `WHERE rfm_segment = '${args.segment_label}'` : ''}
         ORDER BY rfm_total DESC
         LIMIT ${topN}
-      `);
+      `, [companyId]);
 
       const summary = rows.reduce((acc, r) => {
         acc[r.rfm_segment] = (acc[r.rfm_segment] || 0) + 1;
@@ -361,7 +369,8 @@ export async function handleAnalyticsTool(name, args, pool) {
             COALESCE(cp.ga_sessions, 0)::float                          AS web_sessions,
             EXTRACT(DAY FROM NOW() - COALESCE(cp.last_activity_date, cp.member_join_date))::float AS recency_days
           FROM app.customer_profiles cp
-          WHERE cp.member_join_date IS NOT NULL
+          WHERE cp.company_id = $1
+            AND cp.member_join_date IS NOT NULL
             AND EXTRACT(DAY FROM NOW() - cp.member_join_date) > 0
         ),
         clv_calc AS (
@@ -391,7 +400,7 @@ export async function handleAnalyticsTool(name, args, pool) {
         FROM clv_calc
         ORDER BY clv_index DESC
         LIMIT ${topN}
-      `);
+      `, [companyId]);
 
       return {
         content: [{
@@ -443,7 +452,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             -- Short tenure = still evaluating, some dropout risk
             CASE WHEN EXTRACT(DAY FROM NOW() - cp.member_join_date) < 30 THEN 15 ELSE 0 END AS new_member_hazard
           FROM app.customer_profiles cp
-          WHERE cp.member_join_date IS NOT NULL
+          WHERE cp.company_id = $1 AND cp.member_join_date IS NOT NULL
         )
         SELECT *,
           LEAST(recency_hazard + engagement_hazard + channel_hazard + new_member_hazard, 100) AS churn_risk_score,
@@ -457,7 +466,7 @@ export async function handleAnalyticsTool(name, args, pool) {
         WHERE (recency_hazard + engagement_hazard + channel_hazard + new_member_hazard) >= ${threshold}
         ORDER BY churn_risk_score DESC
         LIMIT ${topN}
-      `);
+      `, [companyId]);
 
       const tierSummary = rows.reduce((acc, r) => {
         acc[r.risk_tier] = (acc[r.risk_tier] || 0) + 1;
@@ -492,7 +501,7 @@ export async function handleAnalyticsTool(name, args, pool) {
             member_id,
             DATE_TRUNC('month', member_join_date) AS cohort_month
           FROM app.customer_profiles
-          WHERE member_join_date >= NOW() - INTERVAL '${cohortMonths + 1} months'
+          WHERE company_id = $1 AND member_join_date >= NOW() - INTERVAL '${cohortMonths + 1} months'
         ),
         activity AS (
           SELECT
@@ -503,7 +512,7 @@ export async function handleAnalyticsTool(name, args, pool) {
               c.cohort_month
             ))::int AS months_since_join
           FROM cohorts c
-          JOIN app.customer_profiles cp ON cp.member_id = c.member_id
+          JOIN app.customer_profiles cp ON cp.member_id = c.member_id AND cp.company_id = $1
         ),
         retention AS (
           SELECT
@@ -528,7 +537,7 @@ export async function handleAnalyticsTool(name, args, pool) {
         FROM retention r
         JOIN cohort_sizes cs ON cs.cohort_month = r.cohort_month
         ORDER BY r.cohort_month, r.months_since_join
-      `);
+      `, [companyId]);
 
       // Build matrix and compute average retention curve
       const matrix = {};
@@ -582,9 +591,9 @@ export async function handleAnalyticsTool(name, args, pool) {
           COALESCE(ga_sessions, 0)::float                         AS sessions,
           CASE WHEN is_opt_in_email = true THEN 1.0 ELSE 0.0 END  AS opted_in
         FROM app.customer_profiles
-        WHERE member_join_date IS NOT NULL
+        WHERE company_id = $1 AND member_join_date IS NOT NULL
         LIMIT 5000
-      `);
+      `, [companyId]);
 
       if (members.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ error: "No member data available for clustering." }) }] };
@@ -679,9 +688,9 @@ export async function handleAnalyticsTool(name, args, pool) {
         SELECT cp.member_id AS membership_id, s->>'event_name' AS event_name
         FROM app.customer_profiles cp
         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(cp.seminars, '[]'::jsonb)) AS s
-        WHERE s->>'event_name' IS NOT NULL
+        WHERE cp.company_id = $1 AND s->>'event_name' IS NOT NULL
         ORDER BY cp.member_id
-      `);
+      `, [companyId]);
 
       if (events.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ rules: [], note: "No custom activity data found." }) }] };
@@ -755,9 +764,9 @@ export async function handleAnalyticsTool(name, args, pool) {
                (s->>'event_date')::timestamptz AS event_date
         FROM app.customer_profiles cp
         CROSS JOIN LATERAL jsonb_array_elements(COALESCE(cp.seminars, '[]'::jsonb)) AS s
-        WHERE s->>'event_name' IS NOT NULL
+        WHERE cp.company_id = $1 AND s->>'event_name' IS NOT NULL
         ORDER BY cp.member_id, event_date
-      `);
+      `, [companyId]);
 
       if (sequences.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ predictions: [], note: "No activity sequence data." }) }] };
@@ -834,10 +843,10 @@ export async function handleAnalyticsTool(name, args, pool) {
           COUNT(*) FILTER (WHERE seminar_count > 0)   AS converted,
           COUNT(*) FILTER (WHERE ga_sessions >= 3)    AS engaged
         FROM app.customer_profiles
-        WHERE member_join_date >= NOW() - INTERVAL '${days} days'
+        WHERE company_id = $1 AND member_join_date >= NOW() - INTERVAL '${days} days'
         GROUP BY member_reg_channel
         ORDER BY member_count DESC
-      `);
+      `, [companyId]);
 
       if (channels.length === 0) {
         return { content: [{ type: "text", text: JSON.stringify({ attribution: [], note: "No registration data in window." }) }] };
@@ -916,7 +925,7 @@ export async function handleAnalyticsTool(name, args, pool) {
         sql = `
           SELECT DATE(member_join_date) AS day, COUNT(*) AS value
           FROM app.customer_profiles
-          WHERE member_join_date >= NOW() - INTERVAL '${days} days'
+          WHERE company_id = $1 AND member_join_date >= NOW() - INTERVAL '${days} days'
           GROUP BY DATE(member_join_date)
           ORDER BY day
         `;
@@ -925,22 +934,16 @@ export async function handleAnalyticsTool(name, args, pool) {
           SELECT DATE((s->>'event_date')::timestamptz) AS day, COUNT(*) AS value
           FROM app.customer_profiles cp
           CROSS JOIN LATERAL jsonb_array_elements(COALESCE(cp.seminars, '[]'::jsonb)) AS s
-          WHERE (s->>'event_date')::timestamptz >= NOW() - INTERVAL '${days} days'
+          WHERE cp.company_id = $1 AND (s->>'event_date')::timestamptz >= NOW() - INTERVAL '${days} days'
           GROUP BY DATE((s->>'event_date')::timestamptz)
           ORDER BY day
         `;
       } else {
-        sql = `
-          SELECT DATE(occurred_at) AS day, COUNT(*) AS value
-          FROM app.edm_events
-          WHERE event_type = 'open'
-            AND occurred_at >= NOW() - INTERVAL '${days} days'
-          GROUP BY DATE(occurred_at)
-          ORDER BY day
-        `;
+        // email_opens was removed — email is a coming-soon feature.
+        return { content: [{ type: "text", text: JSON.stringify({ error: `Unsupported metric '${metric}'. Use 'registrations' or 'event_attendance'.` }) }] };
       }
 
-      const { rows } = await pool.query(sql);
+      const { rows } = await pool.query(sql, [companyId]);
 
       if (rows.length < 5) {
         return { content: [{ type: "text", text: JSON.stringify({ anomalies: [], note: "Insufficient data points for anomaly detection (need ≥5 days)." }) }] };
@@ -1001,10 +1004,10 @@ export async function handleAnalyticsTool(name, args, pool) {
       const { rows } = await pool.query(`
         SELECT DATE(member_join_date) AS day, COUNT(*) AS registrations
         FROM app.customer_profiles
-        WHERE member_join_date >= NOW() - INTERVAL '${historyDays} days'
+        WHERE company_id = $1 AND member_join_date >= NOW() - INTERVAL '${historyDays} days'
         GROUP BY DATE(member_join_date)
         ORDER BY day
-      `);
+      `, [companyId]);
 
       if (rows.length < 14) {
         return { content: [{ type: "text", text: JSON.stringify({ forecast: [], note: "Insufficient data for forecasting (need ≥14 days of history)." }) }] };

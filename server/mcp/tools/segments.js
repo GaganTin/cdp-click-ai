@@ -48,14 +48,21 @@ export const segmentTools = [
 ];
 
 export async function handleSegmentTool(name, args, pool) {
+  // Workspace isolation: every query is scoped to the active workspace. companyId
+  // is injected by the server (args._company_id) and is not model-controllable.
+  const companyId = args._company_id;
+  if (!companyId) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "No workspace context - refusing to run (isolation guard)." }) }] };
+  }
+
   if (name === "list_segments") {
     try {
-      const params = [];
-      const where = args.segment_type ? `WHERE segment_type = $1` : "";
-      if (args.segment_type) params.push(args.segment_type);
+      const params = [companyId];
+      const conditions = ["company_id = $1"];
+      if (args.segment_type) { params.push(args.segment_type); conditions.push(`segment_type = $${params.length}`); }
       const result = await pool.query(
         `SELECT id, name, description, segment_type, estimated_size, status, created_date
-         FROM app.segments ${where}
+         FROM app.segments WHERE ${conditions.join(" AND ")}
          ORDER BY created_date DESC
          LIMIT 50`,
         params
@@ -68,17 +75,20 @@ export async function handleSegmentTool(name, args, pool) {
 
   if (name === "preview_segment_size") {
     const { segment_type, sql_where } = args;
+    // The AI-supplied WHERE is applied ONLY within the current workspace: the
+    // trusted company_id filter is always ANDed first so the fragment can never
+    // widen the scope beyond this workspace.
     let sql;
     if (segment_type === "customer") {
-      sql = `SELECT COUNT(DISTINCT member_id) AS count FROM app.customer_profiles WHERE ${sql_where}`;
+      sql = `SELECT COUNT(DISTINCT member_id) AS count FROM app.customer_profiles WHERE company_id = $1 AND (${sql_where})`;
     } else {
       // anonymous_profile: unresolved web visitors live in app.anonymous_profiles
       sql = `SELECT COUNT(DISTINCT visitor_id) AS count
              FROM app.anonymous_profiles
-             WHERE ${sql_where}`;
+             WHERE company_id = $1 AND (${sql_where})`;
     }
     try {
-      const result = await pool.query(sql);
+      const result = await pool.query(sql, [companyId]);
       const count = parseInt(result.rows[0]?.count ?? 0, 10);
       return { content: [{ type: "text", text: JSON.stringify({ estimated_count: count, segment_type, sql_where }) }] };
     } catch (err) {

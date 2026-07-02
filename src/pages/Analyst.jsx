@@ -66,10 +66,8 @@ export default function Analyst() {
     queryKey: ["pinnedCharts"],
     queryFn: () => appClient.entities.PinnedChart.list("-created_date", 20),
   });
-  const { data: edmCampaigns = [] } = useQuery({
-    queryKey: ["edm-campaigns"],
-    queryFn: () => appClient.edm.listCampaigns({ limit: 10, offset: 0 }).then(r => r.results || r),
-  });
+  // NOTE: EDM (email) campaign data is intentionally NOT loaded into the analyst
+  // context — email is a coming-soon feature and the analyst must not access it.
 
   const { data: allSettings = {} } = useQuery({
     queryKey: ["app-settings"],
@@ -154,12 +152,6 @@ export default function Analyst() {
       lines.push(`\nSAVED REPORTS (${reports.length}):`);
       reports.slice(0, 8).forEach(r => {
         lines.push(`  - "${r.title}" (${r.created_date?.slice(0, 10)})`);
-      });
-    }
-    if (edmCampaigns.length > 0) {
-      lines.push(`\nEDM CAMPAIGNS (${edmCampaigns.length}):`);
-      edmCampaigns.slice(0, 8).forEach(c => {
-        lines.push(`  - "${c.name}" [${c.status}] subject="${c.subject || ""}" sent=${c.sent_count ?? 0} opened=${c.opened_count ?? 0}`);
       });
     }
     lines.push("\n[END APP CONTEXT - user question follows:]\n");

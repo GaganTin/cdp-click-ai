@@ -61,16 +61,22 @@ export const utmTools = [
 ];
 
 export async function handleUtmTool(name, args, pool) {
+  // Workspace isolation: every query is scoped to the active workspace. companyId
+  // is injected by the server (args._company_id) and is not model-controllable.
+  const companyId = args._company_id;
+  if (!companyId) {
+    return { content: [{ type: "text", text: JSON.stringify({ error: "No workspace context - refusing to run (isolation guard)." }) }] };
+  }
+
   if (name === "list_campaigns") {
     try {
-      const params = [];
-      const conditions = [];
-      if (args.status) { conditions.push(`status = $${params.length + 1}`); params.push(args.status); }
-      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const params = [companyId];
+      const conditions = ["company_id = $1"];
+      if (args.status) { params.push(args.status); conditions.push(`status = $${params.length}`); }
       const limit = Math.min(args.limit || 20, 100);
       const result = await pool.query(
         `SELECT id, name, status, base_url, utm_source, utm_medium, utm_campaign, utm_term, utm_content, created_date
-         FROM app.campaigns ${where}
+         FROM app.campaigns WHERE ${conditions.join(" AND ")}
          ORDER BY created_date DESC
          LIMIT ${limit}`,
         params
@@ -85,12 +91,12 @@ export async function handleUtmTool(name, args, pool) {
     const days = args.days || 30;
     const groupBy = args.group_by || "source_medium";
 
-    const conditions = [`date >= TO_CHAR(NOW() - INTERVAL '${days} days', 'YYYYMMDD')`];
-    const params = [];
+    const params = [companyId];
+    const conditions = ["company_id = $1", `date >= TO_CHAR(NOW() - INTERVAL '${days} days', 'YYYYMMDD')`];
 
-    if (args.utm_source) { conditions.push(`utm_source = $${params.length + 1}`); params.push(args.utm_source); }
-    if (args.utm_medium) { conditions.push(`utm_medium = $${params.length + 1}`); params.push(args.utm_medium); }
-    if (args.utm_campaign) { conditions.push(`campaign = $${params.length + 1}`); params.push(args.utm_campaign); }
+    if (args.utm_source) { params.push(args.utm_source); conditions.push(`utm_source = $${params.length}`); }
+    if (args.utm_medium) { params.push(args.utm_medium); conditions.push(`utm_medium = $${params.length}`); }
+    if (args.utm_campaign) { params.push(args.utm_campaign); conditions.push(`campaign = $${params.length}`); }
 
     const selectCols = groupBy === "campaign"
       ? "campaign"

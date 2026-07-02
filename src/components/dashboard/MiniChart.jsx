@@ -4,28 +4,30 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from "recharts";
 
-// Theme-aware palette. The CSS vars (defined in index.css) flip between light and
-// dark mode, but recharts writes colors as SVG *presentation attributes* (e.g.
-// fill="hsl(var(--chart-1))"), and browsers do NOT resolve CSS var() inside SVG
-// attributes — it silently falls back to black. In light mode that black matches
-// the intended near-black bars, so it looked fine; in dark mode bars/lines came out
-// black and unreadable. So we resolve the vars to concrete colors at render time and
-// re-resolve whenever the theme (`.dark` class on <html>) toggles.
-const CHART_VARS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"];
-const AXIS_VARS = ["--muted-foreground", "--border", "--card"];
+// Monochrome, theme-aware palette. Charts render in the foreground color — near-black
+// in light mode, near-white in dark mode — instead of the multi-hue --chart-* palette.
+// The CSS vars (defined in index.css) flip between light and dark mode, but recharts
+// writes colors as SVG *presentation attributes* (e.g. fill="hsl(var(--foreground))"),
+// and browsers do NOT resolve CSS var() inside SVG attributes — it silently falls back
+// to black. So we resolve the vars to concrete colors at render time and re-resolve
+// whenever the theme (`.dark` class on <html>) toggles.
+const AXIS_VARS = ["--foreground", "--muted-foreground", "--border", "--card"];
 
 // Fallbacks used before getComputedStyle is available (SSR / first paint).
 const FALLBACK = {
-  "--chart-1": "25 68% 46%", "--chart-2": "205 72% 43%", "--chart-3": "160 55% 38%",
-  "--chart-4": "275 52% 55%", "--chart-5": "45 85% 46%",
+  "--foreground": "30 10% 12%",
   "--muted-foreground": "30 5% 50%", "--border": "30 10% 90%", "--card": "40 20% 99%",
 };
+
+// Opacity steps let multiple series / pie slices stay distinguishable while remaining
+// a single (foreground) hue. Series 0 is fully opaque; later ones fade progressively.
+const OPACITY_STEPS = [1, 0.72, 0.5, 0.34, 0.22, 0.14];
 
 function useThemeColors() {
   const read = () => {
     const out = {};
     const cs = typeof window !== "undefined" ? getComputedStyle(document.documentElement) : null;
-    for (const v of [...CHART_VARS, ...AXIS_VARS]) {
+    for (const v of AXIS_VARS) {
       const raw = cs?.getPropertyValue(v).trim();
       out[v] = `hsl(${raw || FALLBACK[v]})`;
     }
@@ -70,7 +72,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 export default function MiniChart({ type, config }) {
   const themeColors = useThemeColors();
-  const COLORS = CHART_VARS.map((v) => themeColors[v]);
+  const FG = themeColors["--foreground"];
+  const opacityFor = (i) => OPACITY_STEPS[i % OPACITY_STEPS.length];
   const data = config?.data || [];
   const xKey = config?.xKey || "name";
 
@@ -115,7 +118,7 @@ export default function MiniChart({ type, config }) {
           {showLegend && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {series.map((s, i) => (
             <Line key={s.dataKey} type="monotone" dataKey={s.dataKey} name={s.name || s.dataKey}
-              stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+              stroke={FG} strokeOpacity={opacityFor(i)} strokeWidth={2} dot={false} />
           ))}
         </LineChart>
       </ResponsiveContainer>
@@ -133,7 +136,7 @@ export default function MiniChart({ type, config }) {
           {showLegend && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {series.map((s, i) => (
             <Bar key={s.dataKey} dataKey={s.dataKey} name={s.name || s.dataKey}
-              fill={COLORS[i % COLORS.length]} radius={[3, 3, 0, 0]} />
+              fill={FG} fillOpacity={opacityFor(i)} radius={[3, 3, 0, 0]} />
           ))}
         </BarChart>
       </ResponsiveContainer>
@@ -151,7 +154,7 @@ export default function MiniChart({ type, config }) {
           {showLegend && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {series.map((s, i) => (
             <Area key={s.dataKey} type="monotone" dataKey={s.dataKey} name={s.name || s.dataKey}
-              stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.08} />
+              stroke={FG} strokeOpacity={opacityFor(i)} fill={FG} fillOpacity={0.08} />
           ))}
         </AreaChart>
       </ResponsiveContainer>
@@ -186,7 +189,7 @@ export default function MiniChart({ type, config }) {
             paddingAngle={1.5} stroke={themeColors["--card"]} strokeWidth={2}
           >
             {pieData.map((_, i) => (
-              <Cell key={i} fill={COLORS[i % COLORS.length]} />
+              <Cell key={i} fill={FG} fillOpacity={opacityFor(i)} />
             ))}
           </Pie>
         </PieChart>
