@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lightbulb, Mail, MousePointer2 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
+import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { Input } from "@/components/ui/input";
@@ -795,6 +796,27 @@ export default function Segments() {
             </div>
           )}
         </div>
+      {/* Always-available guide so teammates who join later can still learn the page. */}
+      {activeTab !== "analytics" && segments.length > 0 && (
+        <PageGuide
+          storageKey="guide.segments"
+          title={t("How segments work")}
+          intro={t("Segments are saved audiences - groups of people who share the same behaviour, attributes, or source. You define a segment once and it becomes a live audience you can target again and again.")}
+          uses={[
+            { icon: MousePointer2, title: t("Show pop ups"), desc: t("Trigger on-site messages only for visitors in the segment.") },
+            { icon: Mail, title: t("Send email"), desc: t("Aim an email campaign at exactly this audience.") },
+            { icon: BarChart2, title: t("Track & refine"), desc: t("Watch the segment size change and tune the criteria over time.") },
+          ]}
+          sections={[{
+            title: t("Two kinds of segment"),
+            items: [
+              { icon: UserCheck, label: t("Customer"), desc: t("- known people you already have contact details for - ideal for email.") },
+              { icon: Ghost, label: t("Anonymous"), desc: t("- visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.") },
+            ],
+          }]}
+          footer={t("Build one by hand with filters and criteria, or describe the audience you want and let the AI create it for you.")}
+        />
+      )}
       {isLoading ? (
         <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}</div>
       ) : segments.length === 0 ? (

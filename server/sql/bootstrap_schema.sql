@@ -567,14 +567,22 @@ CREATE OR REPLACE VIEW app.account_ai_costs AS
 
 -- ── AI quota (hard limit enforcement) ───────────────────────────────────────
 -- Single source of truth the app calls before every LLM call to block spend once
--- the account's CURRENT-MONTH usage reaches its plan's ai_tokens limit. Returns
--- (used this calendar month, effective limit, is_over). A per-account settings
--- override wins over the plan catalog; NULL limit = unlimited (never over).
+-- the account's usage reaches its plan's ai_tokens limit, measured over the
+-- current BILLING PERIOD (not the calendar month):
+--   • Paid accounts reset on the billing-day anniversary of the upgrade date
+--     (plan_upgraded_at, falling back to account creation).
+--   • Trial accounts (plan_expires_at set) get ONE flat allowance for the whole
+--     trial, counted from account creation with no monthly reset (Lite: 200
+--     credits total across the 90-day trial).
+-- A per-account settings override wins over the plan catalog; NULL = unlimited.
 CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
 RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
 LANGUAGE sql STABLE AS $$
-  WITH lim AS (
-    SELECT COALESCE(
+  WITH acct AS (
+    SELECT a.created_date,
+           a.plan_expires_at,
+           a.plan_upgraded_at,
+           COALESCE(
              NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
              NULLIF(p.limits->>'ai_tokens', '')::BIGINT
            ) AS token_limit
@@ -582,16 +590,29 @@ LANGUAGE sql STABLE AS $$
       JOIN app.plans    p ON p.id = a.plan
      WHERE a.id = p_account_id
   ),
+  win AS (
+    SELECT
+      CASE
+        WHEN acct.plan_expires_at IS NOT NULL
+          THEN acct.created_date
+        ELSE
+          COALESCE(acct.plan_upgraded_at, acct.created_date)
+          + make_interval(months =>
+              (EXTRACT(YEAR  FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT * 12
+             + EXTRACT(MONTH FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT))
+      END AS period_start
+      FROM acct
+  ),
   u AS (
     SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
-      FROM app.ai_usage
+      FROM app.ai_usage, win
      WHERE account_id  = p_account_id
-       AND occurred_at >= date_trunc('month', now())
+       AND occurred_at >= win.period_start
   )
   SELECT u.used,
-         lim.token_limit,
-         (lim.token_limit IS NOT NULL AND u.used >= lim.token_limit) AS is_over
-    FROM u CROSS JOIN lim;
+         acct.token_limit,
+         (acct.token_limit IS NOT NULL AND u.used >= acct.token_limit) AS is_over
+    FROM u CROSS JOIN acct;
 $$;
 
 -- ── In-app notifications (the bell) ─────────────────────────────────────────
@@ -3612,3 +3633,56 @@ COMMENT ON FUNCTION app.ai_quota(UUID) IS
 -- Matches server/sql/03_app_core.sql. Idempotent.
 ALTER TABLE app.chart_summaries
   ADD COLUMN IF NOT EXISTS data_hash TEXT;
+
+
+-- ===================== migrations/2026-07-02_ai_quota_billing_period.sql =====================
+
+-- Count the AI token quota per BILLING PERIOD, not calendar month. Supersedes
+-- 2026-07-02_ai_quota_enforcement.sql above:
+--   • Paid accounts (plan_expires_at IS NULL) reset on the billing-day anniversary
+--     of the upgrade date (plan_upgraded_at, falling back to account creation).
+--   • Trial accounts (plan_expires_at set) get ONE flat allowance for the whole
+--     trial, counted from account creation with no monthly reset (Lite: 200
+--     credits total across the 90-day trial). Idempotent.
+CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
+RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
+LANGUAGE sql STABLE AS $$
+  WITH acct AS (
+    SELECT a.created_date,
+           a.plan_expires_at,
+           a.plan_upgraded_at,
+           COALESCE(
+             NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
+             NULLIF(p.limits->>'ai_tokens', '')::BIGINT
+           ) AS token_limit
+      FROM app.accounts a
+      JOIN app.plans    p ON p.id = a.plan
+     WHERE a.id = p_account_id
+  ),
+  win AS (
+    SELECT
+      CASE
+        WHEN acct.plan_expires_at IS NOT NULL
+          THEN acct.created_date
+        ELSE
+          COALESCE(acct.plan_upgraded_at, acct.created_date)
+          + make_interval(months =>
+              (EXTRACT(YEAR  FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT * 12
+             + EXTRACT(MONTH FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT))
+      END AS period_start
+      FROM acct
+  ),
+  u AS (
+    SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
+      FROM app.ai_usage, win
+     WHERE account_id  = p_account_id
+       AND occurred_at >= win.period_start
+  )
+  SELECT u.used,
+         acct.token_limit,
+         (acct.token_limit IS NOT NULL AND u.used >= acct.token_limit) AS is_over
+    FROM u CROSS JOIN acct;
+$$;
+
+COMMENT ON FUNCTION app.ai_quota(UUID) IS
+  'Per-account AI token quota over the current BILLING PERIOD: paid accounts reset on their billing-day anniversary; trial accounts get one flat allowance for the whole trial. Returns (used this period, effective token limit, is_over). NULL limit = unlimited.';

@@ -49,14 +49,17 @@ export function createBillingRouter(pool) {
                 COALESCE(SUM(input_tokens), 0)   AS input_tokens,
                 COALESCE(SUM(output_tokens), 0)  AS output_tokens,
                 COALESCE(SUM(cost), 0)           AS cost,
-                COALESCE(MAX(currency), 'USD')   AS currency,
-                -- Current-month spend: this is what the ai_tokens plan limit is
-                -- enforced against (see app.ai_quota), so the usage bar uses it.
-                COALESCE(SUM(total_tokens) FILTER (WHERE occurred_at >= date_trunc('month', now())), 0) AS tokens_month
+                COALESCE(MAX(currency), 'USD')   AS currency
            FROM app.ai_usage WHERE account_id = $1`,
         [accountId]
       );
       const ai = aiRows[0] || {};
+
+      // Current billing-period spend: this is what the ai_tokens plan limit is
+      // enforced against (see app.ai_quota — resets on the billing-day anniversary
+      // for paid accounts, one flat allowance for the whole trial), so the usage
+      // bar uses it rather than calendar-month totals.
+      const quota = await getAiQuota(pool, { accountId });
 
       // Account-wide team members = DISTINCT users across all workspaces (a user
       // who belongs to several workspaces counts once against the team limit).
@@ -86,7 +89,7 @@ export function createBillingRouter(pool) {
         // AI totals come from the cost ledger (account-keyed) so they stay correct
         // even after a workspace is deleted.
         ai_tokens: num(ai.tokens),
-        ai_tokens_month: num(ai.tokens_month),
+        ai_tokens_month: num(quota.used),
         ai_input_tokens: num(ai.input_tokens),
         ai_output_tokens: num(ai.output_tokens),
         ai_cost: money(ai.cost),

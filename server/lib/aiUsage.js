@@ -43,7 +43,7 @@ async function getPricing(pool, model) {
  * @param {object} [ctx.metadata]     extra context stored on the row
  */
 /**
- * Resolve an account's CURRENT-MONTH AI token quota via the DB function
+ * Resolve an account's CURRENT-BILLING-PERIOD AI token quota via the DB function
  * app.ai_quota (the single source of truth). Fails OPEN (over=false) on any
  * error so a quota-check hiccup can never wedge the whole app.
  * @returns {Promise<{accountId:string|null, limit:number|null, used:number, over:boolean, remaining:number|null}>}
@@ -71,7 +71,7 @@ export async function getAiQuota(pool, { accountId = null, companyId = null } = 
 }
 
 /**
- * Express guard: if the account has hit its monthly AI limit, send 402 and
+ * Express guard: if the account has hit its billing-period AI limit, send 402 and
  * return false (caller does `if (!(await enforceAiQuota(...))) return;`).
  * Returns true when the request may proceed.
  */
@@ -79,7 +79,7 @@ export async function enforceAiQuota(pool, req, res, { accountId = null, company
   const q = await getAiQuota(pool, { accountId, companyId });
   if (q.over) {
     res.status(402).json({
-      error: "You've reached your monthly AI credit limit. Upgrade your plan or wait for it to reset at the start of next month.",
+      error: "You've reached your AI credit limit for this billing period. Upgrade or purchase a plan to keep using AI features; paid plans reset your credits each billing month.",
       code: "ai_quota_exceeded",
       used: q.used,
       limit: q.limit,

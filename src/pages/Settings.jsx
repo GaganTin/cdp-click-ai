@@ -932,35 +932,42 @@ function CompanyTab({ company, onRefresh }) {
       </Section>
 
       <Section title={t("Email sending defaults")} description={t("Default sender used for EDM campaigns when no override is set on the campaign itself.")}>
-        <form onSubmit={saveEdm} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label={t("From name")} hint={t("Displayed as the sender name in recipients' inboxes.")}>
-              <Input
-                value={edmForm.edm_from_name}
-                onChange={e => setEdmForm(f => ({ ...f, edm_from_name: e.target.value }))}
-                placeholder="Acme Inc."
-              />
-            </Field>
-            <Field label={t("From email")} hint={t("Must be a verified sender address with your ESP.")}>
+        <div className="mb-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-3 py-1.5 text-xs font-medium text-muted-foreground">
+          {t("Coming soon — you'll be able to set these once the Email page launches.")}
+        </div>
+        <form onSubmit={saveEdm}>
+          {/* Disabled until the Email page ships: a native disabled fieldset greys
+              out and blocks every control inside (inputs + save button). */}
+          <fieldset disabled aria-disabled="true" className="space-y-4 opacity-60 cursor-not-allowed">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label={t("From name")} hint={t("Displayed as the sender name in recipients' inboxes.")}>
+                <Input
+                  value={edmForm.edm_from_name}
+                  onChange={e => setEdmForm(f => ({ ...f, edm_from_name: e.target.value }))}
+                  placeholder="Acme Inc."
+                />
+              </Field>
+              <Field label={t("From email")} hint={t("Must be a verified sender address with your ESP.")}>
+                <Input
+                  type="email"
+                  value={edmForm.edm_from_email}
+                  onChange={e => setEdmForm(f => ({ ...f, edm_from_email: e.target.value }))}
+                  placeholder="hello@yourdomain.com"
+                />
+              </Field>
+            </div>
+            <Field label={t("Reply-to")} hint={t("Optional. Replies will go to this address instead of the from address.")}>
               <Input
                 type="email"
-                value={edmForm.edm_from_email}
-                onChange={e => setEdmForm(f => ({ ...f, edm_from_email: e.target.value }))}
-                placeholder="hello@yourdomain.com"
+                value={edmForm.edm_reply_to}
+                onChange={e => setEdmForm(f => ({ ...f, edm_reply_to: e.target.value }))}
+                placeholder="replies@yourdomain.com"
               />
             </Field>
-          </div>
-          <Field label={t("Reply-to")} hint={t("Optional. Replies will go to this address instead of the from address.")}>
-            <Input
-              type="email"
-              value={edmForm.edm_reply_to}
-              onChange={e => setEdmForm(f => ({ ...f, edm_reply_to: e.target.value }))}
-              placeholder="replies@yourdomain.com"
-            />
-          </Field>
-          <Button type="submit" size="sm" disabled={savingEdm}>
-            {savingEdm ? t("Saving…") : t("Save email defaults")}
-          </Button>
+            <Button type="submit" size="sm">
+              {t("Save email defaults")}
+            </Button>
+          </fieldset>
         </form>
       </Section>
 
@@ -1454,16 +1461,6 @@ function UsageBar({ label, used, limit, unlimited }) {
 // only for qualitative perks, with any limit restatements filtered out so the two
 // can't contradict each other.
 const num = (n) => Number(n).toLocaleString();
-// Money: tiny AI costs need more precision than 2dp (a few cents → $0.0042).
-function fmtCost(v, currency = "USD") {
-  const n = Number(v) || 0;
-  const digits = n > 0 && n < 1 ? 4 : 2;
-  try {
-    return new Intl.NumberFormat(undefined, { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: digits }).format(n);
-  } catch {
-    return `$${n.toFixed(digits)}`;
-  }
-}
 const PLAN_LIMIT_BULLETS = [
   ["workspaces",   (n) => n == null ? "5+ workspaces"               : `${num(n)} workspace${n === 1 ? "" : "s"}`],
   ["team_members", (n) => n == null ? "Unlimited team members"      : `${num(n)} team member${n === 1 ? "" : "s"}`],
@@ -1506,7 +1503,7 @@ function BillingTab({ company }) {
   const usageItems = [
     { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
     { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
-    { key: "ai_tokens",    label: t("AI credits (this month)"), limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT, usageKey: "ai_tokens_month" },
+    { key: "ai_tokens",    label: t("AI credits (this period)"), limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT, usageKey: "ai_tokens_month" },
     { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
   ];
 
@@ -1580,8 +1577,8 @@ function BillingTab({ company }) {
         )}
       </Section>
 
-      {/* AI usage & cost */}
-      <Section title={t("AI usage & cost")} description={t("Total AI credits consumed and their cost across all your workspaces.")}>
+      {/* AI usage */}
+      <Section title={t("AI usage")} description={t("Total AI credits consumed across all your workspaces.")}>
         {usageLoading ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[1,2,3,4].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}
@@ -1589,7 +1586,6 @@ function BillingTab({ company }) {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: t("Total AI cost"), value: fmtCost(usage?.ai_cost ?? usage?.overall?.ai_cost ?? 0, usage?.ai_currency) },
               { label: t("Total credits"), value: num(toCredits(usage?.overall?.ai_tokens ?? usage?.ai_tokens ?? 0)) },
               { label: t("Input credits"), value: num(toCredits(usage?.overall?.ai_input_tokens ?? 0)) },
               { label: t("Output credits"),value: num(toCredits(usage?.overall?.ai_output_tokens ?? 0)) },
@@ -1615,7 +1611,6 @@ function BillingTab({ company }) {
                   <th className="text-right font-medium px-4 py-2.5">{t("Profiles")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("Campaigns")}</th>
                   <th className="text-right font-medium px-4 py-2.5">{t("AI credits")}</th>
-                  <th className="text-right font-medium px-4 py-2.5">{t("AI cost")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1629,7 +1624,6 @@ function BillingTab({ company }) {
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.profiles.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{w.campaigns.toLocaleString()}</td>
                     <td className="px-4 py-2.5 text-right tabular-nums">{toCredits(w.ai_tokens).toLocaleString()}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(w.ai_cost ?? 0, usage?.ai_currency)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1640,7 +1634,6 @@ function BillingTab({ company }) {
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.profiles ?? usage.profiles ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{(usage.overall?.campaigns ?? usage.campaigns ?? 0).toLocaleString()}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{toCredits(usage.overall?.ai_tokens ?? usage.ai_tokens ?? 0).toLocaleString()}</td>
-                  <td className="px-4 py-2.5 text-right tabular-nums">{fmtCost(usage.overall?.ai_cost ?? usage.ai_cost ?? 0, usage?.ai_currency)}</td>
                 </tr>
               </tfoot>
             </table>

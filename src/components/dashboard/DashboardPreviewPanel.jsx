@@ -243,14 +243,14 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                           value={chartTitleDraft}
                           onChange={e => setChartTitleDraft(e.target.value)}
                           onKeyDown={e => { if (e.key === "Enter") saveChartEdit(chart); if (e.key === "Escape") setEditingChart(null); }}
-                          className="h-7 text-xs"
+                          className="h-6 text-[11px]"
                           autoFocus
                         />
                       </div>
                       <div>
                         <label className="text-[10px] text-muted-foreground block mb-0.5">Tab</label>
                         <select
-                          className="w-full max-w-full min-w-0 h-7 text-xs px-1.5 border border-border rounded bg-background text-foreground cursor-pointer"
+                          className="w-full max-w-full min-w-0 h-6 text-[11px] px-1.5 border border-border rounded bg-background text-foreground cursor-pointer"
                           value={activeTab}
                           onChange={e => changeChartTab(chart.id, e.target.value)}
                         >
@@ -260,12 +260,12 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                       <div>
                         <label className="text-[10px] text-muted-foreground block mb-0.5">Position</label>
                         <div className="flex items-center gap-1">
-                          <Button variant="outline" size="icon" className="h-7 w-7"
+                          <Button variant="outline" size="icon" className="h-6 w-6"
                             title="Move up" disabled={activeCharts[0]?.id === chart.id}
                             onClick={() => moveChartWithinTab(chart.id, "up")}>
                             <ArrowUp className="w-3 h-3" />
                           </Button>
-                          <Button variant="outline" size="icon" className="h-7 w-7"
+                          <Button variant="outline" size="icon" className="h-6 w-6"
                             title="Move down" disabled={activeCharts[activeCharts.length - 1]?.id === chart.id}
                             onClick={() => moveChartWithinTab(chart.id, "down")}>
                             <ArrowDown className="w-3 h-3" />
@@ -273,10 +273,10 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 pt-0.5">
-                        <Button size="sm" className="h-7 text-xs px-2.5" onClick={() => saveChartEdit(chart)}>Done</Button>
-                        <Button size="sm" variant="outline" className="h-7 text-xs px-2.5" onClick={() => setEditingChart(null)}>Cancel</Button>
+                        <Button size="sm" className="h-6 text-[11px] px-2" onClick={() => saveChartEdit(chart)}>Done</Button>
+                        <Button size="sm" variant="outline" className="h-6 text-[11px] px-2" onClick={() => setEditingChart(null)}>Cancel</Button>
                         {onEditRequest && (
-                          <Button size="sm" variant="ghost" className="h-7 text-xs px-2 gap-1 ml-auto text-muted-foreground"
+                          <Button size="sm" variant="ghost" className="h-6 text-[11px] px-2 gap-1 ml-auto text-muted-foreground"
                             title="Refine this chart with the AI Analyst"
                             onClick={() => onEditRequest(chart)}>
                             <Sparkles className="w-3 h-3" /> AI

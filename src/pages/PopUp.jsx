@@ -42,6 +42,7 @@ import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 import { usePreferences } from "@/lib/PreferencesContext";
+import PageGuide from "@/components/PageGuide";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -2178,6 +2179,21 @@ export default function PopUp() {
                 </div>
               )}
             </div>
+
+            {/* Always-available guide so teammates who join later can still learn the page. */}
+            {!isLoading && popups.length > 0 && (
+              <PageGuide
+                storageKey="guide.popups"
+                title={t("How pop ups work")}
+                intro={t("Pop ups are on-site messages shown to visitors as they browse your website - served automatically by your WordPress plugin. Use them to greet, convert, or collect details from the right people at the right moment.")}
+                uses={[
+                  { icon: Users, title: t("Target an audience"), desc: t("Show a pop up only to visitors in a chosen segment - or to everyone.") },
+                  { icon: Mail, title: t("Capture emails"), desc: t("Collect email addresses and grow your contactable audience.") },
+                  { icon: BarChart2, title: t("Measure impact"), desc: t("Track impressions and clicks to see what actually converts.") },
+                ]}
+                footer={t("Start from a ready-made template, or build your own from scratch - then target a segment and publish.")}
+              />
+            )}
 
             {isLoading && (
               <div className="flex items-center justify-center py-20">

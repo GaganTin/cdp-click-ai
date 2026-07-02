@@ -73,7 +73,7 @@ export default function ConversationSidebar({ activeConversationId, onSelect, on
   const commitEdit = async (convId) => {
     if (editValue.trim()) {
       await appClient.agents.updateConversation(convId, { metadata: { name: editValue.trim() } });
-      onRename?.();
+      onRename?.(convId, editValue.trim());
       await loadConversations();
     }
     setEditingId(null);

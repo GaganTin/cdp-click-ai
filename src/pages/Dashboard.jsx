@@ -27,6 +27,7 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [dragTabId, setDragTabId] = useState(null);
+  const [dragChartId, setDragChartId] = useState(null);
 
   // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
   // (company-scoped app.settings) via this hook — nothing is stored locally.
@@ -85,7 +86,8 @@ export default function Dashboard() {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
     const stale = pinnedCharts.filter(
-      c => c.query && (!c.last_refreshed || new Date(c.last_refreshed) < startOfToday)
+      c => c.query && c.metadata?.auto_refresh !== false &&
+        (!c.last_refreshed || new Date(c.last_refreshed) < startOfToday)
     );
     if (!stale.length) return;
     (async () => {
@@ -168,6 +170,29 @@ export default function Dashboard() {
 
   const cycleSize = (chartId) => {
     setChartSizes(prev => ({ ...prev, [chartId]: nextSize(prev[chartId]) }));
+  };
+
+  // Drag-and-drop reorder of charts within the active tab. The assignment array
+  // order drives the grid layout, so reordering it repositions the charts.
+  const reorderChartsInTab = (targetId) => {
+    if (!dragChartId || dragChartId === targetId) { setDragChartId(null); return; }
+    setTabAssignments(prev => {
+      const arr = [...(prev[activeTab] || [])];
+      const from = arr.indexOf(dragChartId);
+      const to = arr.indexOf(targetId);
+      if (from < 0 || to < 0) return prev;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      return { ...prev, [activeTab]: arr };
+    });
+    setDragChartId(null);
+  };
+
+  // Persist a chart's daily-refresh vs snapshot choice in its metadata.
+  const toggleAutoRefresh = (id, next) => {
+    const chart = pinnedCharts.find(c => c.id === id);
+    const metadata = { ...(chart?.metadata || {}), auto_refresh: next };
+    updateMutation.mutate({ id, data: { metadata } });
   };
 
   // Send a chart (with its currently-applied filter) to the AI Analyst to discuss.
@@ -351,7 +376,12 @@ export default function Dashboard() {
             {visibleCharts.map(chart => {
               const size = normalizeSize(chartSizes[chart.id]);
               return (
-                <div key={chart.id} className={`${sizeMeta(size).span} ${DASHBOARD_HEIGHTS[size]}`}>
+                <div
+                  key={chart.id}
+                  className={`${sizeMeta(size).span} ${DASHBOARD_HEIGHTS[size]} transition-opacity ${dragChartId === chart.id ? "opacity-40" : ""}`}
+                  onDragOver={e => { if (dragChartId) e.preventDefault(); }}
+                  onDrop={() => reorderChartsInTab(chart.id)}
+                >
                   {/* Include last_refreshed in the key so a refresh remounts the card
                       with the newly-fetched data and updated timestamp. */}
                   <PinnedChartCard
@@ -363,6 +393,12 @@ export default function Dashboard() {
                     onUpdate={(updated) => updateMutation.mutate({ id: updated.id, data: { title: updated.title, description: updated.description, chart_type: updated.chart_type, chart_config: updated.chart_config } })}
                     onDiscuss={discussChart}
                     onRefresh={refreshChart}
+                    onToggleAutoRefresh={toggleAutoRefresh}
+                    dragHandleProps={{
+                      draggable: true,
+                      onDragStart: (e) => { setDragChartId(chart.id); e.dataTransfer.effectAllowed = "move"; },
+                      onDragEnd: () => setDragChartId(null),
+                    }}
                   />
                 </div>
               );

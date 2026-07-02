@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { X, Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw } from "lucide-react";
+import { X, Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -51,9 +51,19 @@ function applyDateFilter(data, xKey, filterKey) {
   });
 }
 
-export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, onUpdate, onDiscuss, onRefresh, size = "small" }) {
+export default function PinnedChartCard({ chart: initialChart, onRemove, onCycleSize, onUpdate, onDiscuss, onRefresh, onToggleAutoRefresh, dragHandleProps, size = "small" }) {
   const sz = normalizeSize(size);
   const [chart] = useState(initialChart);
+
+  // Daily-refresh vs snapshot. Charts auto-refresh daily by default (metadata.auto_refresh
+  // undefined === on); toggling off freezes the current data as a snapshot. Only meaningful
+  // for charts that have a stored query to re-run.
+  const [autoRefresh, setAutoRefresh] = useState(chart.metadata?.auto_refresh !== false);
+  const toggleAutoRefresh = () => {
+    const next = !autoRefresh;
+    setAutoRefresh(next);
+    onToggleAutoRefresh?.(chart.id, next);
+  };
 
   const config = parseChartConfig(chart.chart_config);
   const xKey = config.xKey || "name";
@@ -136,6 +146,15 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
     <div className="bg-card border border-border rounded-lg p-5 hover:shadow-sm transition-shadow h-full flex flex-col">
       {/* Header */}
       <div className="flex items-start justify-between mb-2 flex-shrink-0">
+        {dragHandleProps && (
+          <button
+            {...dragHandleProps}
+            className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground mt-0.5 mr-1 flex-shrink-0"
+            title="Drag to reorder"
+          >
+            <GripVertical className="w-4 h-4" />
+          </button>
+        )}
         <div className="min-w-0 flex-1 group/title">
           {editingTitle ? (
             <div className="flex items-center gap-1">
@@ -272,6 +291,24 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
         )}
         {compare && !delta && dateFilter !== "all" && (
           <span className="text-[10px] text-muted-foreground">No prior-period data</span>
+        )}
+
+        {onToggleAutoRefresh && chart.query && (
+          <button
+            type="button"
+            onClick={toggleAutoRefresh}
+            title={autoRefresh
+              ? "Auto-refreshes daily — click to freeze this chart as a snapshot"
+              : "Snapshot (data frozen) — click to auto-refresh daily"}
+            className={`h-6 px-2 text-[11px] rounded-md border transition-colors inline-flex items-center gap-1 ml-auto ${
+              autoRefresh
+                ? "bg-foreground text-background border-foreground"
+                : "bg-background border-border text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <RefreshCw className="w-3 h-3" />
+            {autoRefresh ? "Daily" : "Snapshot"}
+          </button>
         )}
       </div>
 

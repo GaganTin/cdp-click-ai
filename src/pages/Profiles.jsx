@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { appClient } from "@/api/appClient";
+import PageGuide from "@/components/PageGuide";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
   UserCheck, Ghost, Search, ChevronLeft, ChevronRight,
@@ -1495,6 +1496,20 @@ export default function Profiles() {
               {t("of")} {anonData.anonymous_total.toLocaleString()} {t("visitors identified")}
             </button>
           </div>
+        )}
+
+        {/* Always-available guide so teammates who join later can still learn the page. */}
+        {profiles.length > 0 && (
+          <PageGuide
+            storageKey="guide.profiles"
+            title={t("How profiles work")}
+            intro={t("A profile is a single, unified view of one person - every visit, order, email, and attribute stitched together from all your sources. Meritma builds these automatically as your data flows in, even linking anonymous visitors to customers once they identify themselves.")}
+            uses={[
+              { icon: Eye, title: t("Understand a person"), desc: t("See a customer's full history and interests in one place.") },
+              { icon: Users, title: t("Build segments"), desc: t("Group profiles into audiences to target with pop ups and email.") },
+              { icon: GitMerge, title: t("Follow the journey"), desc: t("Watch anonymous visitors turn into known customers over time.") },
+            ]}
+          />
         )}
 
         {/* Grid */}

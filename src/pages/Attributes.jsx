@@ -15,6 +15,7 @@ import { useStickyState } from "@/lib/useStickyState";
 import { usePreferences } from "@/lib/PreferencesContext";
 import AttributesAnalyticsPanel from "@/components/attributes/AttributesAnalyticsPanel";
 import AttributeImportDialog from "@/components/attributes/AttributeImportDialog";
+import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -3135,6 +3136,28 @@ export default function Attributes() {
           }} />
         ) : (
         <div className="px-8 py-6">
+        {/* Always-available guide so teammates who join later can still learn the page.
+            Shown once a tab has attributes; before that the empty-state guidance covers it. */}
+        {!selectedAttrId && tabAttrs.length > 0 && (activeTab !== "web_content" || contentSub === "attributes") && (
+          <PageGuide
+            storageKey="guide.attributes"
+            title={t("How attributes work")}
+            intro={t("Attributes are custom targeting dimensions you define about your audience - like \"Interested In\", \"Life Stage\", or \"Account Tier\". They turn raw web activity and profile data into labels you can act on, so you can find the right people and reach them with the right message.")}
+            uses={[
+              { icon: Users, title: t("Build segments"), desc: t("Group people by an attribute value to create precise, reusable audiences.") },
+              { icon: MousePointer2, title: t("Target pop ups"), desc: t("Show on-site messages only to visitors who match an attribute.") },
+              { icon: Mail, title: t("Personalise email"), desc: t("Send campaigns tuned to what each attribute tells you about a person.") },
+            ]}
+            sections={[{
+              title: t("Three ways to build an attribute"),
+              items: [
+                { icon: Globe, label: t("Content"), desc: t("- the AI reads your website, tags each page, and every visitor inherits the tags of the pages they viewed. The only type that labels anonymous visitors automatically.") },
+                { icon: UserCog, label: t("Manual"), desc: t("- assign values to specific people yourself, or in bulk from a segment, search, or CSV upload.") },
+                { icon: SlidersHorizontal, label: t("Rule"), desc: t("- compute a value from existing profile fields, e.g. \"Engagement Level\" from GA sessions, or \"Life Stage\" from age.") },
+              ],
+            }]}
+          />
+        )}
         {activeTab === "rule" ? (
           selectedAttrId ? (
             <RuleDetail attributeId={selectedAttrId} onBack={() => setSelectedAttrId(null)} onEdit={(a) => setEditTarget(a)} />

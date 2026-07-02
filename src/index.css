@@ -28,11 +28,14 @@
     --border: 30 10% 90%;
     --input: 30 10% 90%;
     --ring: 30 10% 12%;
-    --chart-1: 30 10% 12%;
-    --chart-2: 30 5% 40%;
-    --chart-3: 30 5% 60%;
-    --chart-4: 30 5% 75%;
-    --chart-5: 30 5% 88%;
+    /* Distinct categorical palette (not grayscale) so pie slices and multi-series
+       charts are tellable apart. Tuned for contrast on the light card background;
+       .dark overrides below lift lightness/saturation for the dark card. */
+    --chart-1: 25 68% 46%;
+    --chart-2: 205 72% 43%;
+    --chart-3: 160 55% 38%;
+    --chart-4: 275 52% 55%;
+    --chart-5: 45 85% 46%;
     --radius: 0.5rem;
     --sidebar-background: 40 20% 99%;
     --sidebar-foreground: 30 10% 20%;
@@ -64,11 +67,12 @@
     --border: 30 8% 18%;
     --input: 30 8% 18%;
     --ring: 40 10% 80%;
-    --chart-1: 40 10% 92%;
-    --chart-2: 30 5% 70%;
-    --chart-3: 30 5% 50%;
-    --chart-4: 30 5% 35%;
-    --chart-5: 30 5% 20%;
+    /* Brighter, more saturated so every series/slice stays legible on the dark card. */
+    --chart-1: 25 82% 62%;
+    --chart-2: 205 78% 62%;
+    --chart-3: 158 58% 52%;
+    --chart-4: 278 66% 71%;
+    --chart-5: 45 88% 60%;
     --radius: 0.5rem;
     --sidebar-background: 30 10% 6%;
     --sidebar-foreground: 40 10% 85%;

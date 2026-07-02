@@ -12,13 +12,13 @@ import {
 // black and unreadable. So we resolve the vars to concrete colors at render time and
 // re-resolve whenever the theme (`.dark` class on <html>) toggles.
 const CHART_VARS = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"];
-const AXIS_VARS = ["--muted-foreground", "--border"];
+const AXIS_VARS = ["--muted-foreground", "--border", "--card"];
 
 // Fallbacks used before getComputedStyle is available (SSR / first paint).
 const FALLBACK = {
-  "--chart-1": "30 10% 12%", "--chart-2": "30 5% 40%", "--chart-3": "30 5% 60%",
-  "--chart-4": "30 5% 75%", "--chart-5": "30 5% 88%",
-  "--muted-foreground": "30 5% 50%", "--border": "30 10% 90%",
+  "--chart-1": "25 68% 46%", "--chart-2": "205 72% 43%", "--chart-3": "160 55% 38%",
+  "--chart-4": "275 52% 55%", "--chart-5": "45 85% 46%",
+  "--muted-foreground": "30 5% 50%", "--border": "30 10% 90%", "--card": "40 20% 99%",
 };
 
 function useThemeColors() {
@@ -160,13 +160,32 @@ export default function MiniChart({ type, config }) {
 
   if (type === "pie") {
     const dataKey = series[0]?.dataKey || "value";
+    // Cap slices so the chart stays legible; fold the smallest into "Other".
+    const MAX_SLICES = 6;
+    let pieData = data;
+    if (data.length > MAX_SLICES) {
+      const sorted = [...data].sort((a, b) => (Number(b[dataKey]) || 0) - (Number(a[dataKey]) || 0));
+      const rest = sorted.slice(MAX_SLICES - 1);
+      const otherVal = rest.reduce((s, r) => s + (Number(r[dataKey]) || 0), 0);
+      pieData = [...sorted.slice(0, MAX_SLICES - 1), { [xKey]: "Other", [dataKey]: otherVal }];
+    }
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
+        {/* Donut with a vertical legend to its right so labels never overlap the
+            slices (the old fixed-radius pie + bottom legend collided on short cards). */}
+        <PieChart margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
           <Tooltip content={<CustomTooltip />} />
-          <Legend wrapperStyle={{ fontSize: 10 }} />
-          <Pie data={data} dataKey={dataKey} nameKey={xKey} cx="50%" cy="50%" outerRadius={75} strokeWidth={1}>
-            {data.map((_, i) => (
+          <Legend
+            layout="vertical" align="right" verticalAlign="middle"
+            iconType="circle" iconSize={8}
+            wrapperStyle={{ fontSize: 10, lineHeight: "15px", paddingLeft: 8, maxWidth: "42%", overflow: "hidden" }}
+          />
+          <Pie
+            data={pieData} dataKey={dataKey} nameKey={xKey}
+            cx="42%" cy="50%" innerRadius="46%" outerRadius="74%"
+            paddingAngle={1.5} stroke={themeColors["--card"]} strokeWidth={2}
+          >
+            {pieData.map((_, i) => (
               <Cell key={i} fill={COLORS[i % COLORS.length]} />
             ))}
           </Pie>

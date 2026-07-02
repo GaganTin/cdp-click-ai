@@ -3,14 +3,24 @@ import { useAuth } from "@/lib/AuthContext";
 import {
   Plug, ContactRound, Mail, MessageSquare, ArrowRight,
   LayoutDashboard, MousePointer2, Target, Users, Tag, Upload, Megaphone,
+  Lightbulb, Check,
 } from "lucide-react";
 
 // ── Onboarding flow - each step links to the pages that complete it ─────────
+// `why`   - the payoff, so people know it's worth doing
+// `points`- concrete "what you can do / how it works" detail per area
 const STEPS = [
   {
     icon: Plug,
     title: "Connect your data",
     desc: "Bring customer and visitor data into Meritma. Sync it automatically from a connected source like Google Analytics or Shopify, upload it yourself from a file, or do both.",
+    why: "Everything else - profiles, segments, campaigns, the AI Analyst - runs on this data, so it's always the first step.",
+    points: [
+      "Connect Google Analytics to see how anonymous visitors browse your site.",
+      "Connect Shopify to bring in customers, orders, and revenue.",
+      "Upload a CSV to import an existing customer or contact list by hand.",
+      "Once connected, data keeps flowing in and updating on its own.",
+    ],
     links: [
       { to: "/integrations",  icon: Plug,   label: "Integrations" },
       { to: "/import-export", icon: Upload, label: "Manual upload" },
@@ -20,6 +30,13 @@ const STEPS = [
     icon: ContactRound,
     title: "Know your audience",
     desc: "Explore unified profiles that merge every touchpoint per person, then enrich them with custom attributes for sharper targeting.",
+    why: "A clear picture of who your audience is and what they care about is what makes your segments and campaigns land.",
+    points: [
+      "Profiles stitch every visit, order, email, and attribute for one person into a single view.",
+      "Anonymous visitors are automatically linked to customers once they identify themselves.",
+      "Attributes are custom targeting dimensions you define - e.g. \"Interested In\", \"Life Stage\", or \"Account Tier\".",
+      "Build attributes three ways: Content (AI reads your site and tags pages - even labels anonymous visitors), Manual (assign values yourself or by CSV), or Rule (compute a value from existing profile fields).",
+    ],
     links: [
       { to: "/profiles",   icon: ContactRound, label: "Profiles" },
       { to: "/attributes", icon: Tag,          label: "Attributes" },
@@ -28,7 +45,14 @@ const STEPS = [
   {
     icon: Users,
     title: "Segment your audience",
-    desc: "Group profiles into targeted segments by behaviour, attributes, or source - these are the audiences you'll send campaigns to.",
+    desc: "Group profiles into targeted segments by behaviour, attributes, or source - these are the reusable audiences you'll send campaigns to.",
+    why: "Segments turn your data into audiences you can act on - define one once and target it again and again.",
+    points: [
+      "Customer segments are known people you can email; anonymous segments are unidentified visitors, ideal for pop ups.",
+      "Filter by behaviour (visits, activity), attributes, source, and more.",
+      "Or just describe the audience you want and let the AI Analyst build the segment for you.",
+      "Segment sizes update over time, so you can watch and refine the criteria.",
+    ],
     links: [
       { to: "/segments", icon: Users, label: "Segments" },
     ],
@@ -37,6 +61,13 @@ const STEPS = [
     icon: Megaphone,
     title: "Engage your audience",
     desc: "Reach a segment in two ways: show on-site pop ups to visitors as they browse, or send targeted email campaigns. Add UTM links to either so you can measure exactly what's working.",
+    why: "This is where the work pays off - the right message reaches the right people at the right moment.",
+    points: [
+      "Pop ups show on-site messages through your WordPress plugin - greet, convert, or capture emails, targeted to a segment.",
+      "Email campaigns go to a customer segment; start from a template or build your own.",
+      "Add UTM links to any campaign so you can track clicks and attribute results.",
+      "Measure impressions, clicks, and conversions to see what actually works.",
+    ],
     links: [
       { to: "/popup", icon: MousePointer2, label: "Pop Up" },
       { to: "/edm",   icon: Mail,          label: "Email" },
@@ -47,6 +78,12 @@ const STEPS = [
     icon: MessageSquare,
     title: "Ask the AI Analyst",
     desc: "Your data AI Assistant - just ask in plain language. Generate graphs and pin them to your dashboard, build segments, draft pop ups and email campaigns, and dig through all of your data. No SQL or spreadsheets needed.",
+    why: "The fastest way to get answers and take action - it ties every step above together in one conversation.",
+    points: [
+      "Ask questions about your data in plain English and get instant answers.",
+      "Generate charts and pin them to your Dashboard.",
+      "Create segments, draft pop ups, and write email campaigns straight from a prompt.",
+    ],
     links: [
       { to: "/", icon: MessageSquare, label: "Open AI Analyst" },
     ],
@@ -117,6 +154,25 @@ export default function GetStarted() {
                       <p className="text-sm font-semibold">{step.title}</p>
                     </div>
                     <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
+                    {step.why && (
+                      <div className="flex items-start gap-2 rounded-md bg-secondary/40 px-3 py-2">
+                        <Lightbulb className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0 mt-0.5" />
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          <span className="font-medium text-foreground">{"Why it matters: "}</span>
+                          {step.why}
+                        </p>
+                      </div>
+                    )}
+                    {step.points && (
+                      <ul className="space-y-1.5 pt-0.5">
+                        {step.points.map((point) => (
+                          <li key={point} className="flex items-start gap-2 text-xs text-muted-foreground leading-relaxed">
+                            <Check className="w-3.5 h-3.5 text-muted-foreground/70 flex-shrink-0 mt-0.5" />
+                            <span>{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     <div className="flex flex-wrap gap-2 pt-0.5">
                       {step.links.map((link) => (
                         <Link

@@ -6,11 +6,13 @@ import { appClient } from "@/api/appClient";
 import { usePlan } from "@/lib/usePlan";
 import { toCredits } from "@/lib/credits";
 
-// Proactive heads-up when the account nears (>=90%) or hits (100%) its monthly AI
-// credit limit, so users aren't surprised when AI features start getting blocked
-// (enforced server-side via app.ai_quota). Dismissal is keyed by month + severity
-// bucket so: closing the "running low" note doesn't suppress the later "used up"
-// note, and both reset automatically each new month. Mirrors TrialBanner.
+// Proactive heads-up when the account nears (>=90%) or hits (100%) its billing-
+// period AI credit limit, so users aren't surprised when AI features start getting
+// blocked (enforced server-side via app.ai_quota — paid plans reset on their
+// billing-day anniversary, trials get one flat allowance for the whole trial).
+// Dismissal is keyed by month + severity bucket so: closing the "running low" note
+// doesn't suppress the later "used up" note, and both reappear over time. Mirrors
+// TrialBanner.
 const WARN_AT = 90;
 const monthKey = () => { try { return new Date().toISOString().slice(0, 7); } catch { return "x"; } };
 const KEY = (bucket) => `ai-credit-banner:${monthKey()}:${bucket}`;
@@ -18,7 +20,7 @@ const isDismissed = (bucket) => { try { return localStorage.getItem(KEY(bucket))
 const dismiss = (bucket) => { try { localStorage.setItem(KEY(bucket), "true"); } catch {} };
 
 export default function AiCreditBanner() {
-  const { isTrialExpired } = usePlan();
+  const { isTrialExpired, inTrial } = usePlan();
   const { data } = useQuery({
     queryKey: ["ai-quota"],
     queryFn: () => appClient.billing.getAiQuota(),
@@ -49,8 +51,10 @@ export default function AiCreditBanner() {
         <AlertTriangle className="w-4 h-4 flex-shrink-0" />
         <span className="truncate">
           {data.over
-            ? `You've used all your monthly AI credits (${usedC} / ${limitC}). AI features are paused until they reset at the start of next month.`
-            : `You've used ${data.pct}% of your monthly AI credits (${usedC} / ${limitC}). Upgrade to avoid interruptions.`}
+            ? (inTrial
+                ? `You've used all ${limitC} of your free trial AI credits (${usedC} / ${limitC}). AI features are paused — purchase a plan to keep using them.`
+                : `You've used all your AI credits for this billing period (${usedC} / ${limitC}). AI features are paused until your credits reset next billing month.`)
+            : `You've used ${data.pct}% of your AI credits (${usedC} / ${limitC}). ${inTrial ? "Purchase a plan" : "Upgrade"} to avoid interruptions.`}
         </span>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">

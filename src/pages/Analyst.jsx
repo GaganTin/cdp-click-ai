@@ -25,6 +25,7 @@ export default function Analyst() {
   const location = useLocation();
   const navigate = useNavigate();
   const [conversationId, setConversationId] = useState(null);
+  const [conversationName, setConversationName] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [showDashboard, setShowDashboard] = useState(false);
@@ -111,6 +112,7 @@ export default function Analyst() {
       setIsStreaming(data.status === "processing");
       if (data.metadata?.token_usage) setTokenUsage(data.metadata.token_usage);
       if (data.metadata?.active_skill_ids) setActiveSkillIds(data.metadata.active_skill_ids);
+      if (data.metadata?.name) setConversationName(data.metadata.name);
     });
     return () => unsubscribe();
   }, [conversationId]);
@@ -171,6 +173,7 @@ export default function Analyst() {
     });
     contextInjectedRef.current = false;
     setConversationId(conv.id);
+    setConversationName(conv.metadata?.name || null);
     setMessages([]);
     setTokenUsage({ input: 0, output: 0, total: 0 });
     setActiveSkillIds([]);
@@ -184,6 +187,7 @@ export default function Analyst() {
     contextInjectedRef.current = true; // existing conv already had context injected
     const conv = await appClient.agents.getConversation(id);
     setConversationId(id);
+    setConversationName(conv.metadata?.name || null);
     setMessages(cleanMessages(conv.messages));
     setTokenUsage(conv.metadata?.token_usage || { input: 0, output: 0, total: 0 });
     setActiveSkillIds(conv.metadata?.active_skill_ids || []);
@@ -192,11 +196,32 @@ export default function Analyst() {
   const handleNewChat = async () => {
     contextInjectedRef.current = false;
     setConversationId(null);
+    setConversationName(null);
     setMessages([]);
     setIsStreaming(false);
     setTokenUsage({ input: 0, output: 0, total: 0 });
     setActiveSkillIds([]);
+    try { localStorage.removeItem("analystActiveConversationId"); } catch {}
   };
+
+  // Reopen the last active conversation on mount so navigating away (e.g. to the
+  // Dashboard to "Discuss" a chart) and back keeps it the "current" chat instead
+  // of resetting to a blank one. Cleans up the pointer if that chat was deleted.
+  useEffect(() => {
+    let saved = null;
+    try { saved = localStorage.getItem("analystActiveConversationId"); } catch {}
+    if (saved) {
+      handleSelectConversation(saved).catch(() => {
+        try { localStorage.removeItem("analystActiveConversationId"); } catch {}
+      });
+    }
+  }, []);
+
+  // Persist the active conversation whenever it changes (new chat clears it above).
+  useEffect(() => {
+    if (!conversationId) return;
+    try { localStorage.setItem("analystActiveConversationId", conversationId); } catch {}
+  }, [conversationId]);
 
   const { canUseFeatures } = usePlan();
 
@@ -504,15 +529,17 @@ Explain what's driving this, call out any notable patterns or outliers, and sugg
         activeConversationId={conversationId}
         onSelect={handleSelectConversation}
         onNew={handleNewChat}
-        onRename={() => {}}
+        onRename={(id, name) => { if (id === conversationId) setConversationName(name); }}
       />
 
       {/* Main chat area */}
       <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
         {/* Header */}
         <div className="h-14 border-b border-border flex items-center justify-between px-6 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-sm font-semibold">AI Analyst</h1>
+          <div className="flex items-center gap-2 min-w-0">
+            <h1 className="text-sm font-semibold truncate" title={conversationName || "AI Analyst"}>
+              {conversationName || "AI Analyst"}
+            </h1>
             {savedPrompt && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-secondary border border-border text-muted-foreground">
                 Company context active

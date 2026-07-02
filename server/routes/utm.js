@@ -212,7 +212,22 @@ export function createUtmRouter(pool) {
     const cid = await companyId(req, res); if (!cid) return;
     const allTime = req.query.days === "all" || parseInt(req.query.days, 10) === 0;
     const days = allTime ? null : Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-    const start = allTime ? null : ymd(new Date(Date.now() - days * 86400000));
+    // prev=1 returns the immediately-preceding window of equal length (for period
+    // comparison). Not available for all-time (there is no prior period).
+    const usePrev = (req.query.prev === "1" || req.query.prev === "true") && !allTime;
+
+    let dateClause = "";
+    let params = [cid];
+    if (usePrev) {
+      const end   = ymd(new Date(Date.now() - days * 86400000));      // = current window's start
+      const start = ymd(new Date(Date.now() - days * 2 * 86400000));  // one window earlier
+      dateClause = " AND date >= $2 AND date < $3";
+      params = [cid, start, end];
+    } else if (!allTime) {
+      dateClause = " AND date >= $2";
+      params = [cid, ymd(new Date(Date.now() - days * 86400000))];
+    }
+
     try {
       const { rows } = await pool.query(
         `SELECT session_source, session_medium, session_campaign_name,
@@ -223,12 +238,12 @@ export function createUtmRouter(pool) {
                 ROUND(AVG(bounce_rate)::numeric, 3) AS bounce_rate,
                 ROUND(AVG(engagement_rate)::numeric, 3) AS engagement_rate
          FROM ${FULL}
-         WHERE company_id = $1${allTime ? "" : " AND date >= $2"}
+         WHERE company_id = $1${dateClause}
          GROUP BY session_source, session_medium, session_campaign_name,
                   session_content, session_term, session_utm_id
          ORDER BY sessions DESC NULLS LAST
          LIMIT 500`,
-        allTime ? [cid] : [cid, start]
+        params
       );
       res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }

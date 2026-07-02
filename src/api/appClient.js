@@ -329,7 +329,7 @@ export const appClient = {
     countries(params)   { return request(`/utm/countries${this._qs(params)}`); },
     utmIds(params)      { return request(`/utm/utm-ids${this._qs(params)}`); },
     paramValues(params) { return request(`/utm/param-values${this._qs(params)}`); },
-    links(days = "all") { return request(`/utm/links?days=${days}`); },
+    links(days = "all", prev = false) { return request(`/utm/links?days=${days}${prev ? "&prev=1" : ""}`); },
     campaignPerformance(names, days = 30) {
       return request(`/utm/campaign-performance`, { method: "POST", body: JSON.stringify({ names, days }) });
     },

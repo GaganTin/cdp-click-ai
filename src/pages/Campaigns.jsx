@@ -77,6 +77,8 @@ export default function Campaigns() {
   const [gaLoading, setGaLoading] = useState(false);
   // Time period for the "GA Traffic Performance" table (all time by default).
   const [gaPeriod, setGaPeriod] = useStickyState("all", "utm.gaPeriod");
+  // Compare the selected period against the immediately-preceding one (delta per metric).
+  const [gaCompare, setGaCompare] = useStickyState(false, "utm.gaCompare");
 
   // Row selection
   const [selected, setSelected] = useState(new Set());
@@ -420,6 +422,16 @@ export default function Campaigns() {
                           className="w-full h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground">
                           {GA_PERIODS.map(p => <option key={p.value} value={p.value}>{t(p.label)}</option>)}
                         </select>
+                        <label
+                          className={`mt-2 flex items-center gap-2 text-xs ${gaPeriod === "all" ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                          title={gaPeriod === "all" ? t("Pick a time period to compare against the previous one") : t("Compare with the previous period")}
+                        >
+                          <input type="checkbox" className="rounded border-input cursor-pointer"
+                            checked={gaCompare && gaPeriod !== "all"}
+                            disabled={gaPeriod === "all"}
+                            onChange={e => setGaCompare(e.target.checked)} />
+                          {t("Compare to previous period")}
+                        </label>
                       </div>
                     </div>
                   )}
@@ -635,7 +647,7 @@ export default function Campaigns() {
             )}
 
             {/* GA distinct UTM links */}
-            <GAUtmLinksSection days={gaPeriod} />
+            <GAUtmLinksSection days={gaPeriod} compare={gaCompare} />
           </div>
         )}
 

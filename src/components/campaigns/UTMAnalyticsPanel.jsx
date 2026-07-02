@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
 } from "recharts";
-import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap, TrendingUp, TrendingDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
@@ -610,8 +610,27 @@ export const GA_PERIODS = [
 const gaPeriodLabel = (days) =>
   (GA_PERIODS.find(p => p.value === String(days))?.label || "All time").toLowerCase();
 
-export function GAUtmLinksSection({ days = "all" }) {
+// Relative % change of a metric vs the comparison period, as a small coloured badge.
+function GADelta({ curr, prev }) {
+  const c = Number(curr), p = Number(prev);
+  if (!isFinite(c) || !isFinite(p) || p === 0) return null;
+  const pct = ((c - p) / Math.abs(p)) * 100;
+  if (!isFinite(pct) || Math.round(pct) === 0) return null;
+  const up = pct > 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 text-[9px] font-medium tabular-nums ${up ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}
+      title={`vs previous period: ${p.toLocaleString()}`}
+    >
+      {up ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+      {up ? "+" : ""}{pct.toFixed(0)}%
+    </span>
+  );
+}
+
+export function GAUtmLinksSection({ days = "all", compare = false }) {
   const [utmLinks, setUtmLinks]     = useState([]);
+  const [prevLinks, setPrevLinks]   = useState(null);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
   const [search, setSearch]         = useState("");
@@ -627,12 +646,26 @@ export function GAUtmLinksSection({ days = "all" }) {
     else { setSortKey(key); setSortDir("asc"); }
   };
 
+  // Comparison is only meaningful for a finite window (all-time has no prior period).
+  const wantCompare = compare && days !== "all";
+
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    appClient.utm.links(days)
-      .then(rows => { setUtmLinks(rows || []); setLoading(false); })
-      .catch(e => { setError(e?.message || "Failed to load GA UTM data"); setLoading(false); });
-  }, [days]);
+    setError(null);
+    Promise.all([
+      appClient.utm.links(days),
+      wantCompare ? appClient.utm.links(days, true) : Promise.resolve(null),
+    ])
+      .then(([rows, prevRows]) => {
+        if (cancelled) return;
+        setUtmLinks(rows || []);
+        setPrevLinks(prevRows || null);
+        setLoading(false);
+      })
+      .catch(e => { if (!cancelled) { setError(e?.message || "Failed to load GA UTM data"); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [days, wantCompare]);
 
   const setFilter  = (k, v) => setFilters(p => ({ ...p, [k]: v }));
   const toggleCol  = (k) => setHiddenCols(p => { const n = new Set(p); if (n.has(k)) n.delete(k); else if (colOrder.filter(x => !n.has(x)).length > 1) n.add(k); return n; });
@@ -669,6 +702,11 @@ export function GAUtmLinksSection({ days = "all" }) {
 
   // Row key for GA rows (no ID - composite key)
   const rowKey = (row) => `${row.session_source}|${row.session_medium}|${row.session_campaign_name}|${row.session_content}|${row.session_term}`;
+
+  // Previous-period rows keyed for O(1) lookup when rendering per-metric deltas.
+  const prevByKey = wantCompare && prevLinks
+    ? new Map(prevLinks.map(r => [rowKey(r), r]))
+    : null;
 
   const allPageIds     = filtered.map(rowKey);
   const allSelected    = allPageIds.length > 0 && allPageIds.every(k => selected.has(k));
@@ -737,7 +775,7 @@ export function GAUtmLinksSection({ days = "all" }) {
   return (
     <div className="mt-8">
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        GA Traffic Performance ({gaPeriodLabel(days)})
+        GA Traffic Performance ({gaPeriodLabel(days)}{wantCompare ? " vs previous period" : ""})
       </h3>
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
@@ -810,11 +848,17 @@ export function GAUtmLinksSection({ days = "all" }) {
                     <input type="checkbox" className="rounded border-border cursor-pointer"
                       checked={isSelected} onChange={() => toggleRow(key)} />
                   </td>
-                  {visibleCols.map(col => (
-                    <td key={col.key} className={`px-3 py-1.5 max-w-[160px] truncate whitespace-nowrap ${col.align === "right" ? "text-right tabular-nums" : ""}`}>
-                      {col.format ? col.format(row[col.key]) : (row[col.key] || "-")}
-                    </td>
-                  ))}
+                  {visibleCols.map(col => {
+                    const prevRow = col.numeric && prevByKey ? prevByKey.get(key) : null;
+                    return (
+                      <td key={col.key} className={`px-3 py-1.5 max-w-[160px] truncate whitespace-nowrap ${col.align === "right" ? "text-right tabular-nums" : ""}`}>
+                        <div className={col.align === "right" ? "flex flex-col items-end leading-tight" : ""}>
+                          <span>{col.format ? col.format(row[col.key]) : (row[col.key] || "-")}</span>
+                          {prevRow && <GADelta curr={row[col.key]} prev={prevRow[col.key]} />}
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
               );
             })}
