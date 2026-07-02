@@ -494,14 +494,16 @@ export default function Analyst() {
     }
   }, [location.key]);
 
-  // Compose a discussion opener from a dashboard chart (its data reflects the applied filter).
+  // Compose a discussion opener from a chart (its data reflects the applied filter).
+  // Charts can come from the dashboard or any analytics page (c.source names it).
   const buildDiscussPrompt = (c) => {
     const cfg = parseChartConfig(c.chart_config);
     const rows = (cfg.data || []).slice(0, 40);
+    const source = c.source || "dashboard";
     const deltaLine = c.delta
       ? `\nChange vs previous period: ${(c.delta.pct * 100).toFixed(1)}% (current ${Math.round(c.delta.current).toLocaleString()} vs previous ${Math.round(c.delta.previous).toLocaleString()}).`
       : "";
-    return `Let's dig into this chart from my dashboard, beyond a quick summary.
+    return `Let's dig into this chart from my ${source}, beyond a quick summary.
 
 Chart: "${c.title}" (${c.chart_type})${c.description ? `\n${c.description}` : ""}
 Time period: ${c.period}.${deltaLine}

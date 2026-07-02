@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { usePreferences } from "@/lib/PreferencesContext";
+import PageGuide from "@/components/PageGuide";
 
 const GA_EDITOR_EMAILS = [
   import.meta.env.VITE_GA_EDITOR_EMAIL_1 || "capsuite.ga@gmail.com",
@@ -971,6 +972,17 @@ export default function Integrations() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
+        <PageGuide
+          storageKey="guide.integrations"
+          title={t("How integrations work")}
+          intro={t("Integrations connect your existing tools to Meritma so your customer, order, and web-analytics data flows in automatically - and stays up to date without manual work.")}
+          uses={[
+            { icon: Plug, title: t("Connect a source"), desc: t("Link Google Analytics, Shopify, and more in a few clicks.") },
+            { icon: RefreshCw, title: t("Sync automatically"), desc: t("Once connected, data keeps syncing on its own - no manual exports.") },
+            { icon: ShieldCheck, title: t("Stay in control"), desc: t("Disconnect or re-authorise a source any time; your data stays yours.") },
+          ]}
+          footer={t("Connected sources feed your Profiles, Segments, and the AI Analyst - so connecting a source is usually the first step to getting value from Meritma.")}
+        />
         <div className="mb-6">
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />

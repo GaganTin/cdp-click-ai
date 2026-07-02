@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ImageUploadField } from "@/components/ui/image-upload-field";
+import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 
 // ── Block palette ──────────────────────────────────────────────────────────────
 
@@ -531,6 +532,7 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
   const [selectedId, setSelectedId] = useState(null);
   const [rightTab, setRightTab] = useState("block");
   const [showPreview, setShowPreview] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState("desktop");
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
   const resizeState = useRef(null);
@@ -674,10 +676,13 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
           />
 
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
-            {blocks.length > 0 && (
+            {blocks.length > 0 && !showPreview && (
               <span className="text-[11px] text-muted-foreground hidden md:inline">
                 {blocks.length} block{blocks.length !== 1 ? "s" : ""}
               </span>
+            )}
+            {showPreview && (
+              <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} className="flex-shrink-0" />
             )}
             <Button
               variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
@@ -696,14 +701,15 @@ export default function TemplateBuilder({ open, onClose, onSave, initial = null,
         {showPreview ? (
           /* ── Preview mode ──────────────────────────────────────────────────── */
           <div className="flex-1 overflow-auto bg-gray-100 p-8">
-            <div className="max-w-xl mx-auto">
-              <p className="text-[11px] text-muted-foreground text-center mb-4">Live preview - this is how your popup will appear</p>
-              <iframe
-                srcDoc={`<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:24px;background:#f3f4f6">${generatedHtml}</body></html>`}
+            <p className="text-[11px] text-muted-foreground text-center mb-4">
+              Live preview - this is how your popup will appear on {previewDevice === "mobile" ? "mobile" : "desktop"}
+            </p>
+            <div className="max-w-2xl mx-auto">
+              <DevicePreviewFrame
+                html={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:24px;background:#f3f4f6">${generatedHtml}</body></html>`}
+                device={previewDevice}
                 title="Template preview"
-                className="w-full rounded-xl border border-border"
-                style={{ minHeight: 500, border: "none" }}
-                sandbox="allow-same-origin"
+                height={560}
               />
             </div>
           </div>

@@ -647,7 +647,9 @@ export default function Campaigns() {
             )}
 
             {/* GA distinct UTM links */}
-            <GAUtmLinksSection days={gaPeriod} compare={gaCompare} />
+            <GAUtmLinksSection days={gaPeriod} compare={gaCompare}
+              onDaysChange={v => { setGaPeriod(v); if (v === "all") setGaCompare(false); }}
+              onCompareChange={setGaCompare} />
           </div>
         )}
 

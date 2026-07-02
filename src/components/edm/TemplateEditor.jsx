@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AlertCircle, Eye, Code2 } from "lucide-react";
+import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
 import { toast } from "sonner";
 
@@ -27,6 +28,7 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
   const [saving, setSaving] = useState(false);
   // "build" | "preview"
   const [viewMode, setViewMode] = useState("build");
+  const [previewDevice, setPreviewDevice] = useState("desktop");
 
   useEffect(() => {
     if (!open) return;
@@ -217,21 +219,16 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
                     <p className="text-sm font-medium">{name || "Untitled"}</p>
                     {subject && <p className="text-xs text-muted-foreground mt-0.5">Subject: {subject}</p>}
                   </div>
-                  <span className="text-[11px] text-muted-foreground bg-background border border-border rounded px-2 py-1">
-                    Desktop - 650px
-                  </span>
+                  <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} className="flex-shrink-0" />
                 </div>
-                <div className="rounded-xl overflow-hidden border border-border shadow-md bg-white">
-                  <iframe
-                    srcDoc={currentHtml || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content yet - switch to Build and add blocks.</p>"}
-                    className="w-full"
-                    style={{ height: "700px", display: "block" }}
-                    title="Template preview"
-                    sandbox="allow-same-origin"
-                  />
-                </div>
+                <DevicePreviewFrame
+                  html={currentHtml || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content yet - switch to Build and add blocks.</p>"}
+                  device={previewDevice}
+                  title="Template preview"
+                  height={700}
+                />
                 <p className="text-[11px] text-muted-foreground text-center mt-3">
-                  This is how your email will look when rendered. Personalisation tokens will be replaced with real values on send.
+                  This is how your email will look on {previewDevice === "mobile" ? "mobile" : "desktop"}. Personalisation tokens will be replaced with real values on send.
                 </p>
               </div>
             </div>

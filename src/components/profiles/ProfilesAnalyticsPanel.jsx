@@ -5,7 +5,7 @@ import { usePreferences } from "@/lib/PreferencesContext";
 import { Users, Ghost, MailCheck, Activity, ShoppingBag, UserPlus, BarChart2, UserCheck } from "lucide-react";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock,
-  DateRangeBar, AnalyticsLoading,
+  DateRangeBar, AnalyticsLoading, AnalyticsPeriodProvider, rangeLabel,
 } from "@/components/analytics/AnalyticsKit";
 
 const DEMO_DIMS = [
@@ -101,6 +101,7 @@ export default function ProfilesAnalyticsPanel() {
   ];
 
   return (
+    <AnalyticsPeriodProvider label={rangeLabel(range)}>
     <div className="px-8 py-6 space-y-6">
       {bar}
 
@@ -213,5 +214,6 @@ export default function ProfilesAnalyticsPanel() {
         )}
       </ChartCard>
     </div>
+    </AnalyticsPeriodProvider>
   );
 }

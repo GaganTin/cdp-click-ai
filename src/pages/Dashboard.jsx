@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil, Trash2, ChevronDown } from "lucide-react";
+import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -293,6 +294,17 @@ export default function Dashboard() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
+        <PageGuide
+          storageKey="guide.dashboard"
+          title={t("How the dashboard works")}
+          intro={t("Your dashboard is built from charts you pin from the AI Analyst. Ask a question in plain language, pin the chart you like, and organise your pinned charts into tabs.")}
+          uses={[
+            { icon: MessageSquare, title: t("Ask & pin"), desc: t("Generate a chart in the AI Analyst, then pin it straight to your dashboard.") },
+            { icon: Plus, title: t("Organise into tabs"), desc: t("Create tabs and assign charts to keep related metrics together.") },
+            { icon: Target, title: t("Track what matters"), desc: t("Keep the KPIs you care about visible at a glance, every time you log in.") },
+          ]}
+          footer={t("No charts yet? Open the AI Analyst, ask for a chart, and choose \"Pin to dashboard\".")}
+        />
         {/* Tab management - assign charts to this tab (dropdown, shown on every tab) */}
         {pinnedCharts.length > 0 && (
           <div className="mb-4">

@@ -221,6 +221,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
   const setRule = (key, val) => setForm(f => ({ ...f, rules: { ...f.rules, [key]: val } }));
+  const [previewDevice, setPreviewDevice] = useState("desktop");
 
   const { data: allSegments = [] } = useQuery({
     queryKey: ["segments-all"],
@@ -393,6 +394,24 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                 {t("Choose a design for this pop-up. To create or edit a template's design, go to the")} <strong>{t("Templates")}</strong> {t("tab.")}
               </p>
             </div>
+
+            {/* Live preview of the selected design, with a desktop / mobile toggle. */}
+            {form.content?.trim() && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">{t("Preview")}</Label>
+                  <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} />
+                </div>
+                <div className="rounded-lg border border-border bg-gray-100 p-4">
+                  <DevicePreviewFrame
+                    html={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0;padding:16px;background:#f3f4f6">${form.content}</body></html>`}
+                    device={previewDevice}
+                    title={t("Pop-up preview")}
+                    height={340}
+                  />
+                </div>
+              </div>
+            )}
           </section>
 
           {/* ── Targeting Rules ── */}
@@ -2181,17 +2200,36 @@ export default function PopUp() {
             </div>
 
             {/* Always-available guide so teammates who join later can still learn the page. */}
-            {!isLoading && popups.length > 0 && (
+            {!isLoading && (
               <PageGuide
                 storageKey="guide.popups"
                 title={t("How pop ups work")}
                 intro={t("Pop ups are on-site messages shown to visitors as they browse your website - served automatically by your WordPress plugin. Use them to greet, convert, or collect details from the right people at the right moment.")}
+                stepsTitle={t("Creating a pop up, step by step")}
+                steps={[
+                  { title: t("Design a template"), desc: t("On the Templates tab, start from a ready-made design or build your own with drag-and-drop blocks - use the device toggle to check mobile and desktop.") },
+                  { title: t("Create the pop up"), desc: t("Click New Pop Up, give it a name, and choose a type - banner, modal, slide-in, or notification.") },
+                  { title: t("Pick the design"), desc: t("Select one of your templates; a live preview shows how it looks on desktop and mobile.") },
+                  { title: t("Set targeting"), desc: t("Choose a visit threshold and daily cap, and target an anonymous and/or customer segment - or leave segments empty to show it to everyone.") },
+                  { title: t("Schedule & publish"), desc: t("Set optional start/end dates, toggle Active, and Save - your WordPress plugin then serves it to matching visitors.") },
+                ]}
                 uses={[
                   { icon: Users, title: t("Target an audience"), desc: t("Show a pop up only to visitors in a chosen segment - or to everyone.") },
                   { icon: Mail, title: t("Capture emails"), desc: t("Collect email addresses and grow your contactable audience.") },
                   { icon: BarChart2, title: t("Measure impact"), desc: t("Track impressions and clicks to see what actually converts.") },
                 ]}
-                footer={t("Start from a ready-made template, or build your own from scratch - then target a segment and publish.")}
+                sections={[{
+                  title: t("What the controls do"),
+                  items: [
+                    { icon: MousePointer2, label: t("Type"), desc: t("- banner, modal, slide-in, or notification; controls how the pop up appears on the page.") },
+                    { icon: Layout, label: t("Template"), desc: t("- the design that's shown; create and edit designs on the Templates tab.") },
+                    { icon: Users, label: t("Segment targeting"), desc: t("- show the pop up only to an anonymous and/or customer segment; leave both empty for all visitors.") },
+                    { icon: Filter, label: t("Visit & exit thresholds"), desc: t("- minimum page visits before showing, and a daily delivery cap per visitor.") },
+                    { icon: Calendar, label: t("Schedule & Default"), desc: t("- start/end dates control when it runs; the Default pop up is the fallback for visitors who match no other.") },
+                    { icon: BarChart2, label: t("Analytics"), desc: t("- track impressions, clicks, and collected emails on the Analytics tab.") },
+                  ],
+                }]}
+                footer={t("Designs live on the Templates tab; pop ups combine a design with targeting and a schedule. Nothing shows to visitors until a pop up is Active.")}
               />
             )}
 

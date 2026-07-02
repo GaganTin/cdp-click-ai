@@ -5,6 +5,7 @@ import {
   Upload, Download, Loader2, UserCheck, Ghost, Link as LinkIcon, Globe, UserCog,
   SlidersHorizontal, ShieldOff, Mail, BarChart2,
 } from "lucide-react";
+import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -360,6 +361,17 @@ export default function ImportData() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto px-8 py-6">
+        <PageGuide
+          storageKey="guide.import-export"
+          title={t("How import & export works")}
+          intro={t("Move data in and out of Meritma from one place. Import a CSV to bring in customers or contacts by hand, or export any dataset to use it elsewhere.")}
+          uses={[
+            { icon: Upload, title: t("Import from a file"), desc: t("Upload a CSV to add or update records - match your columns and go.") },
+            { icon: Download, title: t("Export your data"), desc: t("Download profiles, segments, and more as CSV whenever you need them.") },
+            { icon: LinkIcon, title: t("One place for everything"), desc: t("Every import and export across Meritma is gathered here for convenience.") },
+          ]}
+          footer={t("Prefer an automatic feed instead of manual files? Connect a source on the Integrations page and data syncs on its own.")}
+        />
         {tab === "import" ? (
           <div className="space-y-8">
             {IMPORT_SECTIONS.map((section) => (

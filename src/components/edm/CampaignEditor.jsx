@@ -13,6 +13,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
 
 // ── Default email blocks ──────────────────────────────────────────────────────
@@ -280,6 +281,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
   const [activeTab, setActiveTab] = useState("email");
   // "build" | "preview" - only applies when activeTab === "email"
   const [viewMode, setViewMode] = useState("build");
+  const [previewDevice, setPreviewDevice] = useState("desktop");
 
   // Email builder state
   const [blocks, setBlocks] = useState(DEFAULT_BLOCKS);
@@ -682,21 +684,16 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                             <p className="text-sm font-medium">{form.name || "Untitled"}</p>
                             {form.subject && <p className="text-xs text-muted-foreground mt-0.5">Subject: {form.subject}</p>}
                           </div>
-                          <span className="text-[11px] text-muted-foreground bg-background border border-border rounded px-2 py-1">
-                            Desktop - 650px
-                          </span>
+                          <DevicePreviewToggle device={previewDevice} onChange={setPreviewDevice} className="flex-shrink-0" />
                         </div>
-                        <div className="rounded-xl overflow-hidden border border-border shadow-md bg-white">
-                          <iframe
-                            srcDoc={currentState.html_body || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content yet - switch to Build and add blocks.</p>"}
-                            className="w-full"
-                            style={{ height: "680px", display: "block" }}
-                            title="Email preview"
-                            sandbox="allow-same-origin"
-                          />
-                        </div>
+                        <DevicePreviewFrame
+                          html={currentState.html_body || "<p style='font-family:sans-serif;color:#aaa;padding:32px;text-align:center'>No content yet - switch to Build and add blocks.</p>"}
+                          device={previewDevice}
+                          title="Email preview"
+                          height={680}
+                        />
                         <p className="text-[11px] text-muted-foreground text-center mt-3">
-                          Personalisation tokens will be replaced with real member values on send.
+                          This is how your email will look on {previewDevice === "mobile" ? "mobile" : "desktop"}. Personalisation tokens will be replaced with real member values on send.
                         </p>
                       </div>
                     </div>

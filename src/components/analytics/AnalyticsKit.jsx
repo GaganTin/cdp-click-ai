@@ -1,20 +1,34 @@
 // Shared building blocks for the page-level Analytics tabs (Profiles, Segments,
 // Attributes). Mirrors the look of UTMAnalyticsPanel / EDM / Pop-up analytics:
 // a date-range bar, KPI tiles, and titled chart cards (recharts).
-import { useState } from "react";
+import { useState, createContext, useContext } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, CartesianGrid,
 } from "recharts";
-import { TrendingUp, TrendingDown, Maximize2, Minimize2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Maximize2, Minimize2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
+import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
 
 export const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#c4c4c4", "#dcdcdc", "#ebebeb"];
 export const PREV_COLOR = "#c4c4c4";  // muted series for the comparison period
 
 const fmt = (n) => Number(n || 0).toLocaleString();
 const DAY_MS = 86_400_000;
+
+// Lets a panel label the time window once for all its ChartCards' "Discuss" actions,
+// instead of threading `period` through every card. A card's explicit `period` prop
+// still wins. Wrap a panel's charts in <AnalyticsPeriodProvider label={...}>.
+const AnalyticsPeriodContext = createContext("All time");
+export function AnalyticsPeriodProvider({ label = "All time", children }) {
+  return <AnalyticsPeriodContext.Provider value={label}>{children}</AnalyticsPeriodContext.Provider>;
+}
+// Build a period label from a {from,to} range (as used by DateRangeBar).
+export function rangeLabel(range) {
+  if (!range?.from && !range?.to) return "All time";
+  return `${range.from || "…"} → ${range.to || "…"}`;
+}
 
 // Previous period of equal length, ending the day before the current period starts.
 export function syncPrevPeriod(from, to) {
@@ -79,13 +93,24 @@ export function KpiTile({ label, value, sub, icon: Icon, curr, prev, prevDisplay
 
 // ── Titled chart card ─────────────────────────────────────────────────────────
 // Optional, opt-in extras (matching the UTM analytics cards):
-//   explain={{ key, type, data }} → AI summary popover (Sparkles)
+//   explain={{ key, type, data }} → AI summary popover (Sparkles) AND, since the same
+//                                   {type,data} is enough to hand the chart to the AI
+//                                   Analyst, a "Discuss" button (MessageSquare) that
+//                                   opens the chat with this chart — filtered to
+//                                   whatever the page is currently showing.
+//   period                        → human label for the time window (e.g. the page's
+//                                   date range), passed through to the discussion.
 //   resizable + defaultWide       → Expand/Shrink button toggling col-span in a
 //                                   2-col grid. Use `defaultWide` instead of a
 //                                   hard-coded "lg:col-span-2" so it can shrink.
-export function ChartCard({ title, subtitle, children, right, className = "", explain, resizable = false, defaultWide = false }) {
+export function ChartCard({ title, subtitle, children, right, className = "", explain, period, resizable = false, defaultWide = false }) {
   const [wide, setWide] = useState(defaultWide);
   const span = resizable ? (wide ? "lg:col-span-2" : "lg:col-span-1") : "";
+  const ctxPeriod = useContext(AnalyticsPeriodContext);
+  const discuss = useDiscussChart();
+  const handleDiscuss = () => discuss(buildDiscussPayload({
+    title, description: subtitle, type: explain?.type, data: explain?.data || [], period: period ?? ctxPeriod,
+  }));
   return (
     <div className={`border border-border rounded-lg bg-card p-4 ${span} ${className}`}>
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -101,6 +126,12 @@ export function ChartCard({ title, subtitle, children, right, className = "", ex
               config={{ data: explain.data }}
               chartKey={explain.key}
             />
+          )}
+          {explain && (
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              title="Discuss this chart with the AI Analyst" onClick={handleDiscuss}>
+              <MessageSquare className="w-3.5 h-3.5" />
+            </Button>
           )}
           {resizable && (
             <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"

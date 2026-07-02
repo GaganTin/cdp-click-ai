@@ -243,7 +243,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                           value={chartTitleDraft}
                           onChange={e => setChartTitleDraft(e.target.value)}
                           onKeyDown={e => { if (e.key === "Enter") saveChartEdit(chart); if (e.key === "Escape") setEditingChart(null); }}
-                          className="h-6 text-[11px]"
+                          className="h-6 text-[11px] md:text-[11px]"
                           autoFocus
                         />
                       </div>

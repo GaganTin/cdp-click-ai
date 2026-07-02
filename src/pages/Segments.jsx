@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lightbulb, Mail, MousePointer2 } from "lucide-react";
+import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lightbulb, Mail, MousePointer2, Clock, Tag } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
 import PageGuide from "@/components/PageGuide";
@@ -802,19 +802,38 @@ export default function Segments() {
           storageKey="guide.segments"
           title={t("How segments work")}
           intro={t("Segments are saved audiences - groups of people who share the same behaviour, attributes, or source. You define a segment once and it becomes a live audience you can target again and again.")}
+          stepsTitle={t("Creating a segment, step by step")}
+          steps={[
+            { title: t("Pick the audience type"), desc: t("Choose the Customers or Anonymous tab first - customer segments are known contacts (great for email), anonymous ones are unidentified visitors (great for pop ups).") },
+            { title: t("Name it & click New"), desc: t("Give the segment a clear name and description so your team knows who it targets and why.") },
+            { title: t("Add profile criteria"), desc: t("Open Profile criteria and combine filters - demographics, web activity, purchases, communication - plus any Applied Attributes for richer targeting. Each filter you add narrows the audience.") },
+            { title: t("Watch the live count"), desc: t("As you build, the live preview shows how many profiles currently match, so you can tune the criteria before saving.") },
+            { title: t("Set window, refresh & status"), desc: t("Choose a Time Period, turn on Daily Refresh to keep membership current, set the status to Active, then Save.") },
+          ]}
           uses={[
             { icon: MousePointer2, title: t("Show pop ups"), desc: t("Trigger on-site messages only for visitors in the segment.") },
             { icon: Mail, title: t("Send email"), desc: t("Aim an email campaign at exactly this audience.") },
             { icon: BarChart2, title: t("Track & refine"), desc: t("Watch the segment size change and tune the criteria over time.") },
           ]}
-          sections={[{
-            title: t("Two kinds of segment"),
-            items: [
-              { icon: UserCheck, label: t("Customer"), desc: t("- known people you already have contact details for - ideal for email.") },
-              { icon: Ghost, label: t("Anonymous"), desc: t("- visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.") },
-            ],
-          }]}
-          footer={t("Build one by hand with filters and criteria, or describe the audience you want and let the AI create it for you.")}
+          sections={[
+            {
+              title: t("Two kinds of segment"),
+              items: [
+                { icon: UserCheck, label: t("Customer"), desc: t("- known people you already have contact details for - ideal for email.") },
+                { icon: Ghost, label: t("Anonymous"), desc: t("- visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.") },
+              ],
+            },
+            {
+              title: t("What the builder controls do"),
+              items: [
+                { icon: SlidersHorizontal, label: t("Profile criteria"), desc: t("- filter by demographics, web activity, purchases, and communication; combining filters narrows the audience.") },
+                { icon: Tag, label: t("Applied Attributes"), desc: t("- target on values from your content and rule attributes for detailed, reusable criteria.") },
+                { icon: Clock, label: t("Time Period"), desc: t("- aggregate activity over a window (e.g. last 30 days) instead of all-time.") },
+                { icon: RefreshCw, label: t("Daily Refresh"), desc: t("- re-evaluate nightly so people join and leave as their behaviour changes; off freezes membership between saves.") },
+              ],
+            },
+          ]}
+          footer={t("Build one by hand with filters and criteria, or describe the audience you want and let the AI create it for you. Once saved, a segment can be reused across Pop Up, Email, and Profiles.")}
         />
       )}
       {isLoading ? (

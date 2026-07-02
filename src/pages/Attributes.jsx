@@ -2905,6 +2905,97 @@ function CardGrid({
   );
 }
 
+// Detailed, type-specific "How it works" guide content. Each attribute source
+// gets its own full walkthrough: how to create one end-to-end, what every tab on
+// the detail page does, and how to verify / fix / organise its values.
+function attributeGuide(t, source) {
+  if (source === "manual") {
+    return {
+      storageKey: "guide.attributes.manual",
+      title: t("How manual attributes work"),
+      intro: t("Manual attributes are dimensions you assign by hand - perfect for facts only you know, like \"Account Tier\" (VIP / Standard) or \"Territory\". You define the values, then choose exactly who gets each one. They work for both customers and anonymous visitors."),
+      stepsTitle: t("Creating a manual attribute, step by step"),
+      steps: [
+        { title: t("Create the attribute"), desc: t("On the Manual tab click New Attribute. Name it, pick the audience (customers or anonymous visitors), and choose whether a person can hold one value or multiple.") },
+        { title: t("Add your values"), desc: t("Type each value (e.g. VIP) and click Add value. Values save immediately - no reconstruct needed.") },
+        { title: t("Assign people"), desc: t("On a value's row click Assign, then pick people from a segment, a search, or a pasted list of IDs/emails.") },
+        { title: t("Activate & save"), desc: t("Set the status to Active and click Save - that's what makes the assignments live on Profiles, Segments, and Pop-ups.") },
+      ],
+      sections: [{
+        title: t("What you can do on the detail page"),
+        items: [
+          { icon: Plus, label: t("Add values"), desc: t("- create as many values as you need; each becomes something you can assign people to.") },
+          { icon: Users, label: t("Assign / re-assign"), desc: t("- assign people to a value from a segment, search, or list; the assignment count shows on each row.") },
+          { icon: Trash2, label: t("Remove"), desc: t("- delete a value to remove it and its assignments, or unassign individual people from a value.") },
+          { icon: UserCog, label: t("Single vs multiple"), desc: t("- control whether a person can hold one value or several; switching to single asks you to resolve anyone with duplicates.") },
+        ],
+      }],
+      footer: t("Values and assignments persist as you make them; only the status change is applied when you click Save."),
+    };
+  }
+  if (source === "rule") {
+    return {
+      storageKey: "guide.attributes.rule",
+      title: t("How rule attributes work"),
+      intro: t("Rule attributes are computed automatically from data you already have - no manual tagging or AI. You define conditions over profile fields (and segments, pop-ups, campaigns, or other attributes), and every matching person gets the value."),
+      stepsTitle: t("Creating a rule attribute, step by step"),
+      steps: [
+        { title: t("Create the attribute"), desc: t("On the Rule tab click New Attribute. Name it and choose who it applies to - Customers or Anonymous visitors. You'll build the rules next.") },
+        { title: t("Build your rules"), desc: t("For each value, add condition groups over profile fields (age, location, GA sessions, orders…) or relations to a segment, pop-up, campaign, or attribute. Combine conditions with AND/OR; the first matching rule wins.") },
+        { title: t("Set the window (optional)"), desc: t("Choose a Time period to aggregate activity and purchase metrics over a rolling window, or leave it as lifetime.") },
+        { title: t("Choose refresh"), desc: t("Turn on Daily refresh to re-evaluate nightly (adding and dropping profiles as their data changes), or leave it off to freeze tags between saves.") },
+        { title: t("Activate & save"), desc: t("Set Active and click Save - saving while Active recomputes the rule and tags matching profiles instantly, reporting how many were tagged.") },
+      ],
+      sections: [{
+        title: t("What's on the detail page"),
+        items: [
+          { icon: SlidersHorizontal, label: t("Rules"), desc: t("- each rule is a value plus condition groups; stack multiple rules in priority order and the first match wins.") },
+          { icon: Clock, label: t("Time period"), desc: t("- aggregate metrics like sessions or spend over a rolling window instead of all-time.") },
+          { icon: RefreshCw, label: t("Daily refresh"), desc: t("- nightly re-evaluation keeps values current as people's data changes; off keeps them frozen.") },
+          { icon: Check, label: t("Save & apply"), desc: t("- Save stores the definition; while Active it also recomputes and reports how many profiles were tagged.") },
+        ],
+      }],
+      footer: t("No approval or crawling needed - rule values are derived directly from your data each time you save (or nightly with Daily refresh)."),
+    };
+  }
+  // web_content (default)
+  return {
+    storageKey: "guide.attributes.content",
+    title: t("How content attributes work"),
+    intro: t("Content attributes are targeting dimensions the AI fills in by reading your website. You describe a dimension (e.g. \"Interested In\"), the AI tags each crawled page, and every visitor - even anonymous ones - inherits the tags of the pages they viewed."),
+    stepsTitle: t("Creating a content attribute, step by step"),
+    steps: [
+      { title: t("Connect & sync Google Analytics"), desc: t("In Integrations, connect GA and run a sync so Meritma knows which pages your visitors view.") },
+      { title: t("Crawl your pages"), desc: t("Open the Pages sub-tab and click Crawl - this reads each page's URL and title so the AI has something to tag. Exclude any pages you don't want tagged.") },
+      { title: t("Create the attribute"), desc: t("Click New Attribute (or Suggest with AI). Name the dimension, write a short instruction for the AI, and choose Extract from and Values per page (single or multiple).") },
+      { title: t("Reconstruct"), desc: t("Set it Active and hit Reconstruct (or Activate & Reconstruct). The AI tags your crawled pages and propagates the values onto profiles.") },
+      { title: t("Review the results"), desc: t("Approve, reject, or merge the AI-discovered values in the Review queue - only approved values affect targeting - then group and test as needed.") },
+    ],
+    sections: [
+      {
+        title: t("What each tab on the attribute does"),
+        items: [
+          { icon: ListChecks, label: t("Values"), desc: t("- every value for this dimension. Add known values yourself, and approve / reject / merge AI-discovered ones in the Review queue. Only approved values are used for targeting.") },
+          { icon: FlaskConical, label: t("Test"), desc: t("- dry-run the AI on sample URLs (your GA top pages or an uploaded list) to preview what it would tag, without touching live data.") },
+          { icon: Layers, label: t("Groups"), desc: t("- roll related values up into groups (e.g. England, Scotland → UK). Set a group label, auto-group with AI, or assign groups by hand.") },
+          { icon: FileText, label: t("Tagged pages"), desc: t("- see which page received which value, and untag any that were tagged wrongly.") },
+        ],
+      },
+      {
+        title: t("Verifying, fixing & organising tags"),
+        items: [
+          { icon: Search, label: t("Verify"), desc: t("- use Test to preview tagging on sample URLs, and Tagged pages to confirm real pages got the right values.") },
+          { icon: Trash2, label: t("Remove a tag"), desc: t("- in Tagged pages remove an incorrect page tag; in Values, reject or delete a value to stop it targeting.") },
+          { icon: Plus, label: t("Add manually"), desc: t("- in Values, type a known value to add it yourself instead of waiting for the AI to discover it.") },
+          { icon: GitMerge, label: t("Merge duplicates"), desc: t("- in the Review queue, merge near-duplicate values (amber chips suggest likely matches) so they count as one.") },
+          { icon: RefreshCw, label: t("Re-run"), desc: t("- after crawling new pages or editing the instruction, Reconstruct again to re-tag; use History to see past runs.") },
+        ],
+      },
+    ],
+    footer: t("The Pages and Review sub-tabs at the top apply across all your content attributes - Pages manages what gets crawled, Review gathers every value waiting for approval."),
+  };
+}
+
 export default function Attributes() {
   const { t } = usePreferences();
   const qc = useQueryClient();
@@ -3136,27 +3227,11 @@ export default function Attributes() {
           }} />
         ) : (
         <div className="px-8 py-6">
-        {/* Always-available guide so teammates who join later can still learn the page.
-            Shown once a tab has attributes; before that the empty-state guidance covers it. */}
+        {/* Always-available, type-specific guide so teammates who join later can
+            learn the full workflow. Shown once a tab has attributes; before that
+            the empty-state guidance covers it. */}
         {!selectedAttrId && tabAttrs.length > 0 && (activeTab !== "web_content" || contentSub === "attributes") && (
-          <PageGuide
-            storageKey="guide.attributes"
-            title={t("How attributes work")}
-            intro={t("Attributes are custom targeting dimensions you define about your audience - like \"Interested In\", \"Life Stage\", or \"Account Tier\". They turn raw web activity and profile data into labels you can act on, so you can find the right people and reach them with the right message.")}
-            uses={[
-              { icon: Users, title: t("Build segments"), desc: t("Group people by an attribute value to create precise, reusable audiences.") },
-              { icon: MousePointer2, title: t("Target pop ups"), desc: t("Show on-site messages only to visitors who match an attribute.") },
-              { icon: Mail, title: t("Personalise email"), desc: t("Send campaigns tuned to what each attribute tells you about a person.") },
-            ]}
-            sections={[{
-              title: t("Three ways to build an attribute"),
-              items: [
-                { icon: Globe, label: t("Content"), desc: t("- the AI reads your website, tags each page, and every visitor inherits the tags of the pages they viewed. The only type that labels anonymous visitors automatically.") },
-                { icon: UserCog, label: t("Manual"), desc: t("- assign values to specific people yourself, or in bulk from a segment, search, or CSV upload.") },
-                { icon: SlidersHorizontal, label: t("Rule"), desc: t("- compute a value from existing profile fields, e.g. \"Engagement Level\" from GA sessions, or \"Life Stage\" from age.") },
-              ],
-            }]}
-          />
+          <PageGuide {...attributeGuide(t, activeTab)} />
         )}
         {activeTab === "rule" ? (
           selectedAttrId ? (

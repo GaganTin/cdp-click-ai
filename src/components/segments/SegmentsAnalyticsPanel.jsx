@@ -6,7 +6,7 @@ import { Layers, CheckCircle2, FileEdit, Lock, RefreshCw, Users, BarChart2 } fro
 import { format } from "date-fns";
 import {
   KpiTile, ChartCard, BarBlock, HBarBlock, PieBlock, PieLegend, LineBlock, AnalyticsLoading,
-  DateRangeBar,
+  DateRangeBar, AnalyticsPeriodProvider, rangeLabel,
 } from "@/components/analytics/AnalyticsKit";
 
 const STATUS_OF = (s) => s.status || "draft";
@@ -122,6 +122,7 @@ export default function SegmentsAnalyticsPanel() {
   const pkpi = kpiOf(prevSegs);
 
   return (
+    <AnalyticsPeriodProvider label={rangeLabel({ from: dateFrom, to: dateTo })}>
     <div className="px-8 py-6 space-y-6">
       {/* Date period + compare bar - scopes the whole panel to segments created in range */}
       <DateRangeBar
@@ -235,5 +236,6 @@ export default function SegmentsAnalyticsPanel() {
         </>
       )}
     </div>
+    </AnalyticsPeriodProvider>
   );
 }

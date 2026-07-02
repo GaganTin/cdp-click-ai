@@ -176,6 +176,7 @@ export default function ConversationSidebar({ activeConversationId, onSelect, on
                       ) : (
                         <button
                           onClick={() => onSelect(conv.id)}
+                          title={getTitle(conv)}
                           className="flex items-center gap-2 flex-1 px-2 py-2 text-xs text-left truncate min-w-0"
                         >
                           <MessageSquare className="w-3 h-3 flex-shrink-0 opacity-60" />

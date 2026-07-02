@@ -6,19 +6,21 @@ import { usePreferences } from "@/lib/PreferencesContext";
 //
 // Unlike the empty-state guidance (which disappears once a page has data), this
 // stays available so teammates who sign up later can still learn what a page is
-// for. It defaults to open and remembers a user's collapse choice per browser
-// via `storageKey`.
+// for. It defaults to collapsed (the user clicks to expand) and remembers a
+// user's open/closed choice per browser via `storageKey`.
 //
 // Props:
 //   storageKey - localStorage key for the open/closed state (required, unique per page)
 //   title      - the guide heading (already translated)
 //   intro      - one-paragraph "what this is" (already translated)
 //   uses       - [{ icon, title, desc }]  "what you can do" cards (strings translated)
+//   steps      - [{ title, desc }]  numbered "how to do it" walkthrough (strings translated)
+//   stepsTitle - heading shown above the numbered steps (already translated)
 //   sections   - [{ title, items: [{ icon, label, desc }] }]  extra explainer lists
 //   footer     - optional closing note (already translated)
-export default function PageGuide({ storageKey, title, intro, uses = [], sections = [], footer }) {
+export default function PageGuide({ storageKey, title, intro, uses = [], steps = [], stepsTitle, sections = [], footer }) {
   const { t } = usePreferences();
-  const [open, setOpen] = useStickyState(true, storageKey);
+  const [open, setOpen] = useStickyState(false, storageKey);
 
   return (
     <div className="border border-border rounded-lg mb-6 bg-secondary/10">
@@ -36,6 +38,25 @@ export default function PageGuide({ storageKey, title, intro, uses = [], section
         <div className="px-4 pb-4 space-y-4">
           {intro && (
             <p className="text-xs text-muted-foreground leading-relaxed max-w-2xl">{intro}</p>
+          )}
+
+          {steps.length > 0 && (
+            <div className="space-y-2.5">
+              {stepsTitle && <p className="text-xs font-semibold">{stepsTitle}</p>}
+              <ol className="space-y-2.5">
+                {steps.map((s, i) => (
+                  <li key={s.title} className="flex gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-foreground text-background text-[10px] font-semibold flex items-center justify-center flex-shrink-0 mt-0.5">
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium">{s.title}</p>
+                      {s.desc && <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">{s.desc}</p>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
 
           {uses.length > 0 && (

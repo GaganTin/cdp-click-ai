@@ -39,6 +39,7 @@ import CampaignEditor from "@/components/edm/CampaignEditor";
 import CampaignStats from "@/components/edm/CampaignStats";
 import TemplateEditor from "@/components/edm/TemplateEditor";
 import { blocksToHtml } from "@/components/edm/emailHtml";
+import PageGuide from "@/components/PageGuide";
 
 // Render a template the same way the editor (and the actual send) does: from its
 // saved blocks via blocksToHtml. Falls back to the stored html_body for raw-HTML
@@ -454,6 +455,17 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
 
   return (
     <div className="px-8 py-6">
+      <PageGuide
+        storageKey="guide.email"
+        title={t("How email works")}
+        intro={t("Email campaigns send targeted marketing emails to a customer segment. Design an email once, choose exactly who receives it, and track how it performs after sending.")}
+        uses={[
+          { icon: Layout, title: t("Design fast"), desc: t("Start from a saved template or build your own with drag-and-drop blocks.") },
+          { icon: Users, title: t("Target a segment"), desc: t("Send to exactly the customer segment you pick - no manual lists to manage.") },
+          { icon: BarChart2, title: t("Track results"), desc: t("See opens, clicks, and conversions for every send in the Analytics tab.") },
+        ]}
+        footer={t("Personalisation tokens like {{first_name}} are filled in per recipient on send, and opt-outs are handled automatically via the Suppression list.")}
+      />
       {/* Search + filter row */}
       <div className="mb-6">
         <div className="flex items-center gap-3">

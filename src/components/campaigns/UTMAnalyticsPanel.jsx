@@ -6,12 +6,13 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
 } from "recharts";
-import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap, TrendingUp, TrendingDown } from "lucide-react";
+import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap, TrendingUp, TrendingDown, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import TableToolbar from "@/components/ui/TableToolbar";
 import { KpiTile } from "@/components/analytics/AnalyticsKit";
+import { useDiscussChart, buildDiscussPayload } from "@/lib/discussChart";
 
 const COLORS = ["#1a1a1a", "#555", "#888", "#aaa", "#ccc", "#e0e0e0"];
 
@@ -274,6 +275,16 @@ export default function UTMAnalyticsPanel() {
   const [prevKpis, setPrevKpis] = useState(null);
   const [loading,  setLoading]  = useState(false);
 
+  // Hand a chart over to the AI Analyst, scoped to the period/filters shown here.
+  const discuss = useDiscussChart();
+  const periodLabel = `${curStart} → ${curEnd}${compare ? " (vs previous period)" : ""}`;
+  const discussChart = (chart) => discuss(buildDiscussPayload({
+    title: chart.title,
+    type: chart.chartType,
+    data: curData[chart.dataKey] || [],
+    period: periodLabel,
+  }));
+
   // Use ref so loadAll always sees latest charts without being in its dep array
   const chartsRef = useRef(charts);
   chartsRef.current = charts;
@@ -518,6 +529,10 @@ export default function UTMAnalyticsPanel() {
                   config={{ data: curData[chart.dataKey] || [] }}
                   chartKey={chart.dataKey}
                 />
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  title="Discuss this chart with the AI Analyst" onClick={() => discussChart(chart)}>
+                  <MessageSquare className="w-3 h-3" />
+                </Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleSize(chart.id)}>
                   {chart.size === "wide" ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
                 </Button>
@@ -628,7 +643,8 @@ function GADelta({ curr, prev }) {
   );
 }
 
-export function GAUtmLinksSection({ days = "all", compare = false }) {
+export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange, onCompareChange }) {
+  const discuss = useDiscussChart();
   const [utmLinks, setUtmLinks]     = useState([]);
   const [prevLinks, setPrevLinks]   = useState(null);
   const [loading, setLoading]       = useState(true);
@@ -742,41 +758,98 @@ export function GAUtmLinksSection({ days = "all", compare = false }) {
     navigator.clipboard.writeText(`${header}\n${rows}`);
   };
 
+  // Hand the current (filtered + sorted) table to the AI Analyst, scoped to whatever
+  // time period is selected — the same rows shown here.
+  const discussTable = () => {
+    const rows = sorted.slice(0, 50).map(r => ({
+      name: [r.session_source, r.session_medium, r.session_campaign_name].filter(Boolean).join(" / ") || "(not set)",
+      sessions: Number(r.sessions) || 0,
+      active_users: Number(r.active_users) || 0,
+      new_users: Number(r.new_users) || 0,
+      bounce_rate: r.bounce_rate,
+      engagement_rate: r.engagement_rate,
+    }));
+    discuss(buildDiscussPayload({
+      title: `GA Traffic Performance (${gaPeriodLabel(days)})`,
+      description: "GA4 source / medium / campaign performance from the UTM page",
+      type: "bar", data: rows, xKey: "name", dataKey: "sessions",
+      period: `${gaPeriodLabel(days)}${wantCompare ? " vs previous period" : ""}`,
+      source: "Campaigns (UTM) page",
+    }));
+  };
+
+  // Header stays visible in every state (loading / error / empty / table) so the time
+  // period filter is always reachable — including when the current window has no data.
+  const header = (
+    <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        GA Traffic Performance ({gaPeriodLabel(days)}{wantCompare ? " vs previous period" : ""})
+      </h3>
+      <div className="flex items-center gap-1.5">
+        {onDaysChange && (
+          <select value={String(days)} onChange={e => onDaysChange(e.target.value)}
+            title="Filter this table by time period"
+            className="h-7 px-2 text-[11px] bg-background border border-input rounded-md text-foreground">
+            {GA_PERIODS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        )}
+        {onCompareChange && (
+          <button type="button" onClick={() => onCompareChange(!compare)} disabled={days === "all"}
+            title={days === "all" ? "Pick a time period to compare against the previous one" : "Compare with the previous period"}
+            className={`h-7 px-2 text-[11px] rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              wantCompare ? "bg-foreground text-background border-foreground" : "bg-background border-border text-muted-foreground hover:text-foreground"
+            }`}>
+            Δ Compare
+          </button>
+        )}
+        <button type="button" onClick={discussTable} disabled={!sorted.length}
+          title="Discuss this table with the AI Analyst"
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border bg-background text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+          <MessageSquare className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-        <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
-        Loading GA UTM data…
+      <div className="mt-8">
+        {header}
+        <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+          <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
+          Loading GA UTM data…
+        </div>
       </div>
     );
   }
 
-  // A genuine fetch failure is surfaced (so it isn't mistaken for "no data");
-  // a successful-but-empty result still hides the section to keep the tab clean.
+  // A genuine fetch failure is surfaced (so it isn't mistaken for "no data").
   if (error) {
     return (
-      <p className="mt-8 text-xs text-muted-foreground">
-        Couldn't load GA UTM data: {error}
-      </p>
+      <div className="mt-8">
+        {header}
+        <p className="text-xs text-muted-foreground">Couldn't load GA UTM data: {error}</p>
+      </div>
     );
   }
-  // Loaded but nothing to show: the GA data has no traffic in the window yet.
-  // Say so rather than rendering nothing, which reads as "broken".
+  // Loaded but nothing to show: the GA data has no traffic in the selected window.
+  // Say so (and keep the period filter above) rather than rendering nothing.
   if (utmLinks.length === 0) {
     return (
-      <p className="mt-8 text-xs text-muted-foreground">
-        No Google Analytics traffic found for {gaPeriodLabel(days)}. Connect and sync
-        Google Analytics, and this table will list the source / medium / campaign
-        combinations seen in your data.
-      </p>
+      <div className="mt-8">
+        {header}
+        <p className="text-xs text-muted-foreground">
+          No Google Analytics traffic found for {gaPeriodLabel(days)}. Connect and sync
+          Google Analytics, and this table will list the source / medium / campaign
+          combinations seen in your data.
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="mt-8">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-        GA Traffic Performance ({gaPeriodLabel(days)}{wantCompare ? " vs previous period" : ""})
-      </h3>
+      {header}
       <TableToolbar
         search={search} onSearch={v => { setSearch(v); setSelected(new Set()); }}
         columns={UTM_COLS} colOrder={colOrder} hiddenCols={hiddenCols}
