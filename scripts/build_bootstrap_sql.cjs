@@ -20,7 +20,14 @@ const MIG = path.join(SQL, "migrations");
 const base = fs.readdirSync(SQL)
   .filter((f) => /^\d\d_.*\.sql$/.test(f) && !f.startsWith("00_"))
   .sort();
-const migs = fs.readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort();
+// The numbered base files (01..NN) are the complete source of truth for a fresh
+// database - every migration's final state has been folded back into them. The
+// dated files under migrations/ are OPTIONAL idempotent catch-ups for upgrading
+// pre-existing databases; a fresh build does not need them. So tolerate the
+// folder being emptied or removed entirely.
+const migs = fs.existsSync(MIG)
+  ? fs.readdirSync(MIG).filter((f) => f.endsWith(".sql")).sort()
+  : [];
 
 // ── 1. consolidated schema ──────────────────────────────────────────────────
 const header = `-- ============================================================================
@@ -50,10 +57,12 @@ for (const f of base) {
   parts.push(`\n-- ========================= ${f} =========================\n`);
   parts.push(fs.readFileSync(path.join(SQL, f), "utf8"));
 }
-parts.push("\n\n-- ######################### MIGRATIONS #########################\n");
-for (const f of migs) {
-  parts.push(`\n-- ===================== migrations/${f} =====================\n`);
-  parts.push(fs.readFileSync(path.join(MIG, f), "utf8"));
+if (migs.length) {
+  parts.push("\n\n-- ######################### MIGRATIONS (idempotent catch-ups; base files above are already complete) #########################\n");
+  for (const f of migs) {
+    parts.push(`\n-- ===================== migrations/${f} =====================\n`);
+    parts.push(fs.readFileSync(path.join(MIG, f), "utf8"));
+  }
 }
 fs.writeFileSync(path.join(SQL, "bootstrap_schema.sql"), parts.join("\n"));
 console.log(`wrote server/sql/bootstrap_schema.sql  (${base.length} base + ${migs.length} migrations)`);

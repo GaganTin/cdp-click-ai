@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Link } from "react-router-dom";
 import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import {
@@ -9,7 +10,7 @@ import {
   TrendingUp, CheckSquare, ChevronDown, ChevronUp, Users,
   Upload, Trash2,
   ShoppingBag, Hash, BarChart2, ArrowUp, ArrowDown,
-  ChevronsDownUp, ChevronsUpDown, GitMerge, ArrowRight,
+  ChevronsDownUp, ChevronsUpDown, GitMerge, ArrowRight, Lightbulb,
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import ProfilesAnalyticsPanel from "@/components/profiles/ProfilesAnalyticsPanel";
@@ -1504,13 +1505,57 @@ export default function Profiles() {
             ))}
           </div>
         ) : profiles.length === 0 ? (
-          <div className="border border-dashed border-border rounded-lg p-12 text-center">
-            {isCustomer ? <UserCheck className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" /> : <Ghost className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />}
-            <p className="text-sm font-medium mb-1">{t("No profiles found")}</p>
-            <p className="text-xs text-muted-foreground">
-              {isCustomer ? t("Try adjusting your filters.") : t("No anonymous visitors matched the current filters.")}
-            </p>
-          </div>
+          (!hasActiveFilters && !search) ? (
+            /* No data at all - full get-started explainer */
+            <div className="border border-dashed border-border rounded-lg p-8 max-w-2xl mx-auto space-y-6">
+              {/* What a profile is */}
+              <div className="text-center space-y-2">
+                {isCustomer ? <UserCheck className="w-8 h-8 text-muted-foreground mx-auto opacity-40" /> : <Ghost className="w-8 h-8 text-muted-foreground mx-auto opacity-40" />}
+                <p className="text-base font-semibold">{isCustomer ? t("No customer profiles yet") : t("No anonymous visitors yet")}</p>
+                <p className="text-xs text-muted-foreground leading-relaxed max-w-lg mx-auto">
+                  {t("A profile is a single, unified view of one person - every visit, order, email, and attribute stitched together from all your sources. Meritma builds these automatically as your data flows in, even linking anonymous visitors to customers once they identify themselves.")}
+                </p>
+              </div>
+
+              {/* What you can do with them */}
+              <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+                <p className="text-xs font-semibold flex items-center gap-1.5">
+                  <Lightbulb className="w-3.5 h-3.5 text-muted-foreground" /> {t("What you can do with profiles")}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                  {[
+                    [Eye, t("Understand a person"), t("See a customer's full history and interests in one place.")],
+                    [Users, t("Build segments"), t("Group profiles into audiences to target with pop ups and email.")],
+                    [GitMerge, t("Follow the journey"), t("Watch anonymous visitors turn into known customers over time.")],
+                  ].map(([Icon, title, desc]) => (
+                    <div key={title} className="space-y-1">
+                      <Icon className="w-4 h-4 text-muted-foreground" />
+                      <p className="text-xs font-medium">{title}</p>
+                      <p className="text-[11px] text-muted-foreground leading-snug">{desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* How to start */}
+              <div className="border-t border-border pt-4 text-center space-y-3">
+                <p className="text-xs text-muted-foreground">{t("Profiles appear here once your data is flowing. Connect a source like Google Analytics or Shopify, or upload a customer list to get started.")}</p>
+                <div className="flex items-center justify-center gap-2">
+                  <Link to="/integrations"><Button variant="outline" size="sm" className="gap-1.5"><Globe className="w-3.5 h-3.5" /> {t("Connect a source")}</Button></Link>
+                  <Link to="/import-export"><Button variant="outline" size="sm" className="gap-1.5"><Upload className="w-3.5 h-3.5" /> {t("Upload data")}</Button></Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Data exists, but filters/search exclude everything */
+            <div className="border border-dashed border-border rounded-lg p-12 text-center">
+              {isCustomer ? <UserCheck className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" /> : <Ghost className="w-8 h-8 text-muted-foreground mx-auto mb-3 opacity-40" />}
+              <p className="text-sm font-medium mb-1">{t("No profiles found")}</p>
+              <p className="text-xs text-muted-foreground">
+                {isCustomer ? t("Try adjusting your filters.") : t("No anonymous visitors matched the current filters.")}
+              </p>
+            </div>
+          )
         ) : groupedProfiles ? (
           <div className="space-y-6">
             {groupedProfiles.length > 1 && (

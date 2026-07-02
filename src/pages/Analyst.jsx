@@ -289,7 +289,15 @@ export default function Analyst() {
 
     const sendPayload = { role: "user", content: fullText };
     if (fileUrls?.length) sendPayload.file_urls = fileUrls;
-    await appClient.agents.addMessage(conv, sendPayload);
+    try {
+      await appClient.agents.addMessage(conv, sendPayload);
+    } catch (err) {
+      // e.g. the monthly AI credit limit is reached (402). Stop the loading state,
+      // roll back the optimistic user bubble, and tell the user why.
+      setIsStreaming(false);
+      setMessages((prev) => prev.filter((m) => m !== msgPayload));
+      toast.error(err.message || "Failed to send message");
+    }
   };
 
   const handlePinChart = async (chartConfig) => {

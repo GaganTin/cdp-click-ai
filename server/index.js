@@ -32,7 +32,7 @@ import { createPopupRouter } from "./routes/popup.js";
 import { createUtmRouter } from "./routes/utm.js";
 import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } from "./middleware/auth.js";
 import { resolveSegmentEntities, countSegmentEntities, customerWhere, anonWhere } from "./lib/attributeManual.js";
-import { recordAiUsage } from "./lib/aiUsage.js";
+import { recordAiUsage, enforceAiQuota } from "./lib/aiUsage.js";
 
 dotenv.config();
 
@@ -1569,6 +1569,9 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
 
+    // Block once the account has spent its monthly AI allowance (no new spend).
+    if (!(await enforceAiQuota(p, req, res, { companyId }))) return;
+
     // Fetch current conversation
     const { rows: convRows } = await p.query(
       "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2",
@@ -1825,6 +1828,7 @@ app.post("/api/integrations/llm", authenticate, async (req, res) => {
   // its token spend is attributed to a workspace (recorded via runSimpleLLM).
   const companyId = await companyGuard(req, res);
   if (!companyId) return;
+  if (!(await enforceAiQuota(pool, req, res, { companyId }))) return;
   try {
     const content = await runSimpleLLM(
       String(req.body.prompt || ""),
@@ -1866,6 +1870,9 @@ app.post("/api/chart-summaries/explain", authenticate, async (req, res) => {
     if (existing.rows.length > 0 && existing.rows[0].data_hash === fingerprint) {
       return res.json({ summary: existing.rows[0].summary });
     }
+
+    // A cache miss means a real LLM call - block it if the monthly AI limit is hit.
+    if (!(await enforceAiQuota(p, req, res, { companyId }))) return;
 
     const prompt = `You are a digital marketing analyst. Explain the following chart clearly and concisely to a business user.
 

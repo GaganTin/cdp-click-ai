@@ -452,6 +452,35 @@ CREATE OR REPLACE VIEW app.account_ai_costs AS
     LEFT JOIN app.ai_usage u ON u.account_id = a.id
    GROUP BY a.id, a.name, a.plan;
 
+-- ── AI quota (hard limit enforcement) ───────────────────────────────────────
+-- Single source of truth the app calls before every LLM call to block spend once
+-- the account's CURRENT-MONTH usage reaches its plan's ai_tokens limit. Returns
+-- (used this calendar month, effective limit, is_over). A per-account settings
+-- override wins over the plan catalog; NULL limit = unlimited (never over).
+CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
+RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
+LANGUAGE sql STABLE AS $$
+  WITH lim AS (
+    SELECT COALESCE(
+             NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
+             NULLIF(p.limits->>'ai_tokens', '')::BIGINT
+           ) AS token_limit
+      FROM app.accounts a
+      JOIN app.plans    p ON p.id = a.plan
+     WHERE a.id = p_account_id
+  ),
+  u AS (
+    SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
+      FROM app.ai_usage
+     WHERE account_id  = p_account_id
+       AND occurred_at >= date_trunc('month', now())
+  )
+  SELECT u.used,
+         lim.token_limit,
+         (lim.token_limit IS NOT NULL AND u.used >= lim.token_limit) AS is_over
+    FROM u CROSS JOIN lim;
+$$;
+
 -- ── In-app notifications (the bell) ─────────────────────────────────────────
 --  One row per (recipient user × workspace × event). Producers fan an event out
 --  to the active members of a workspace, respecting each member's per-workspace
@@ -483,6 +512,40 @@ CREATE INDEX notifications_user_unread_idx
 -- Idempotency for re-runnable producers (the new_leads scan).
 CREATE UNIQUE INDEX notifications_dedupe_idx
   ON app.notifications(user_id, type, dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+-- ── Platform-owner invites (Studio) ─────────────────────────────────────────
+-- Pending platform-owner grants for emails that haven't signed up yet. On
+-- registration the new user is auto-promoted and the invite consumed
+-- (see provisionUserWithCompany in routes/auth.js).
+CREATE TABLE app.platform_owner_invites (
+  email      TEXT        PRIMARY KEY,                 -- stored lower-cased
+  invited_by UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Platform-wide announcement banners ──────────────────────────────────────
+-- A platform owner ("Studio") can publish an app-wide banner shown to EVERY user
+-- across every account/workspace (maintenance notices, incidents, product news).
+-- Distinct from app.notifications (per-user bell); dismissal is client-side.
+CREATE TABLE app.announcements (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  level       TEXT        NOT NULL DEFAULT 'info'
+                          CHECK (level IN ('info', 'success', 'warning', 'maintenance')),
+  title       TEXT,                                    -- optional bold lead-in
+  body        TEXT        NOT NULL,                     -- the message itself
+  link_url    TEXT,                                     -- optional call-to-action link
+  link_label  TEXT,
+  is_active   BOOLEAN     NOT NULL DEFAULT true,        -- master on/off switch
+  dismissible BOOLEAN     NOT NULL DEFAULT true,        -- can a user close it?
+  starts_at   TIMESTAMPTZ,                              -- NULL = live immediately
+  ends_at     TIMESTAMPTZ,                              -- NULL = no auto-expiry
+  created_by  UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- The user-facing "active now" lookup filters on is_active + the time window.
+CREATE INDEX idx_announcements_active
+  ON app.announcements (is_active, starts_at, ends_at);
 
 -- ── Audit helper ────────────────────────────────────────────────────────────
 -- Uniform entry point so every route records actions the same way. The account

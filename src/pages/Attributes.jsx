@@ -9,6 +9,7 @@ import {
   FileText, Upload, ArrowRight, Download,
   Filter, ArrowUp, ArrowDown, ChevronDown, ChevronUp, ChevronRight, ChevronsUpDown, ChevronsDownUp, History, Sparkles, Undo2, BarChart2, Clock,
   Copy, Lock, RotateCw, CheckCheck,
+  Users, Mail, MousePointer2, Lightbulb,
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import { usePreferences } from "@/lib/PreferencesContext";
@@ -1914,16 +1915,73 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
     </div>
   );
   return (
-    <div className={`border border-border rounded-lg p-6 max-w-xl mx-auto space-y-5 ${firstStepsOnly ? "mb-6" : "mt-6"}`}>
-      <div className="text-center">
-        <Tag className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
-        <p className="text-sm font-medium">{t("Get started with content attributes")}</p>
-        <p className="text-xs text-muted-foreground">
-          {firstStepsOnly
-            ? t("Google Analytics is disconnected. Your attribute definitions are kept - reconnect, sync, and re-crawl to tag your pages again.")
-            : t("The AI reads your website, tags each page, and visitors inherit those tags - even anonymous ones.")}
-        </p>
-      </div>
+    <div className={`border border-border rounded-lg p-6 ${firstStepsOnly ? "max-w-xl" : "max-w-2xl"} mx-auto space-y-6 ${firstStepsOnly ? "mb-6" : "mt-6"}`}>
+      {firstStepsOnly ? (
+        <div className="text-center">
+          <Tag className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
+          <p className="text-sm font-medium">{t("Get started with content attributes")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("Google Analytics is disconnected. Your attribute definitions are kept - reconnect, sync, and re-crawl to tag your pages again.")}
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* What attributes are & why they matter */}
+          <div className="text-center space-y-2">
+            <Tag className="w-8 h-8 text-muted-foreground mx-auto opacity-40" />
+            <p className="text-base font-semibold">{t("Get started with attributes")}</p>
+            <p className="text-xs text-muted-foreground leading-relaxed max-w-lg mx-auto">
+              {t("Attributes are custom targeting dimensions you define about your audience - things like \"Interested In\", \"Life Stage\", or \"Account Tier\". They turn raw web activity and profile data into labels you can act on, so you can find the right people and reach them with the right message.")}
+            </p>
+          </div>
+
+          {/* Why use them - the payoff */}
+          <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+            <p className="text-xs font-semibold flex items-center gap-1.5">
+              <Lightbulb className="w-3.5 h-3.5 text-muted-foreground" /> {t("What you can do with attributes")}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                [Users, t("Build segments"), t("Group people by an attribute value to create precise, reusable audiences.")],
+                [MousePointer2, t("Target pop ups"), t("Show on-site messages only to visitors who match an attribute.")],
+                [Mail, t("Personalise email"), t("Send campaigns tuned to what each attribute tells you about a person.")],
+              ].map(([Icon, title, desc]) => (
+                <div key={title} className="space-y-1">
+                  <Icon className="w-4 h-4 text-muted-foreground" />
+                  <p className="text-xs font-medium">{title}</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Which type to use */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold">{t("Three ways to build an attribute")}</p>
+            <ul className="space-y-1.5 text-[11px] text-muted-foreground">
+              <li className="flex gap-2">
+                <Globe className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span><strong className="text-foreground">{t("Content")}</strong> {t("(this tab) - the AI reads your website, tags each page, and every visitor inherits the tags of the pages they viewed. This is the only type that labels anonymous visitors automatically.")}</span>
+              </li>
+              <li className="flex gap-2">
+                <UserCog className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span><strong className="text-foreground">{t("Manual")}</strong> - {t("assign values to specific people yourself, or in bulk from a segment, search, or CSV upload.")}</span>
+              </li>
+              <li className="flex gap-2">
+                <SlidersHorizontal className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span><strong className="text-foreground">{t("Rule")}</strong> - {t("compute a value from existing profile fields, e.g. \"Engagement Level\" from GA session counts, or \"Life Stage\" from age.")}</span>
+              </li>
+            </ul>
+            <p className="text-[11px] text-muted-foreground">{t("Switch between them using the tabs above. The steps below set up a Content attribute.")}</p>
+          </div>
+
+          {/* How content attributes work - lead-in to the steps */}
+          <div className="border-t border-border pt-4">
+            <p className="text-xs font-semibold mb-0.5">{t("Set up your first content attribute")}</p>
+            <p className="text-[11px] text-muted-foreground">{t("Connect your site, let the AI crawl it, describe a dimension, then reconstruct to tag your pages.")}</p>
+          </div>
+        </>
+      )}
       <div className="space-y-4">
         <Step done={gaConnected} n={1} current={currentN === 1} title={t("Connect Google Analytics")}>
           {gaConnected ? t("Connected - the AI knows which site to crawl.") : (

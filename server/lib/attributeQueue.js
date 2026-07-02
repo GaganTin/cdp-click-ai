@@ -10,7 +10,7 @@ import { randomUUID } from "crypto";
 import { crawlPage, discoverUrls, contentHash, closeBrowser, isValidTitle, fetchSitemapLastmod, normUrl } from "./webCrawler.js";
 import { tagPage, isAIConfigured } from "./attributeAI.js";
 import { triggerContentScrape } from "./contentScrapeTrigger.js";
-import { recordAiUsage } from "./aiUsage.js";
+import { recordAiUsage, getAiQuota } from "./aiUsage.js";
 
 // Cap how many blocked pages we hand to the Selenium DAG in one escalation.
 const MAX_ESCALATE = 500;
@@ -267,6 +267,9 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   ));
   if (!isAIConfigured()) {
     await mergeProgress(pool, job.id, { tagging_note: "AI not configured - skipped tagging." });
+  } else if ((await getAiQuota(pool, { companyId })).over) {
+    // Monthly AI limit reached: don't spend any more tokens tagging pages.
+    await mergeProgress(pool, job.id, { tagging_note: "Monthly AI credit limit reached - tagging skipped. Upgrade your plan or wait for it to reset." });
   } else {
     const { rows: pages } = await pool.query(
       `SELECT id, url, title, content, content_hash, needs_retag, metadata
@@ -321,6 +324,9 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
         console.warn(`[attr] tag failed ${page.url}:`, e.message);
       }
       tagged++;
+      // Stop mid-batch if the account crosses its monthly AI limit. Re-checked
+      // periodically (not per page) to bound overshoot without a DB hit each time.
+      if (tagged % 25 === 0 && (await getAiQuota(pool, { companyId })).over) aborted = true;
       // Heartbeat every ~TAG_CONCURRENCY completed pages (bumps updated_date): a slow
       // LLM call must never let a live job's updated_date drift past the stale-reset
       // window. The lease guard also catches a cancel or stale-reclaim here - if it

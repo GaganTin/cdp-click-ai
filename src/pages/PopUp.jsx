@@ -9,7 +9,7 @@ import {
 } from "date-fns";
 import {
   Plus, Pencil, Trash2, MousePointer2, Mail, ToggleLeft,
-  ToggleRight, Search, Calendar,
+  ToggleRight, Search, Calendar, Lightbulb,
   CheckCircle2, Clock, Users, Ghost, Layout,
   BarChart2, Upload, Eye, Filter,
   Link2, Copy, Info, LayoutGrid, AlertTriangle,
@@ -2185,21 +2185,59 @@ export default function PopUp() {
               </div>
             )}
 
-            {!isLoading && filtered.length === 0 && (
+            {/* Truly empty - full get-started explainer */}
+            {!isLoading && popups.length === 0 && (
+              <div className="border border-dashed border-border rounded-lg p-8 max-w-2xl mx-auto space-y-6">
+                {/* What a pop up is */}
+                <div className="text-center space-y-2">
+                  <MousePointer2 className="w-8 h-8 text-muted-foreground mx-auto opacity-40" />
+                  <p className="text-base font-semibold text-foreground">{t("Get started with pop ups")}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-lg mx-auto">
+                    {t("Pop ups are on-site messages shown to visitors as they browse your website - served automatically by your WordPress plugin. Use them to greet, convert, or collect details from the right people at the right moment.")}
+                  </p>
+                </div>
+
+                {/* What you can do with them */}
+                <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+                  <p className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                    <Lightbulb className="w-3.5 h-3.5 text-muted-foreground" /> {t("What you can do with pop ups")}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+                    {[
+                      [Users, t("Target an audience"), t("Show a pop up only to visitors in a chosen segment - or to everyone.")],
+                      [Mail, t("Capture emails"), t("Collect email addresses and grow your contactable audience.")],
+                      [BarChart2, t("Measure impact"), t("Track impressions and clicks to see what actually converts.")],
+                    ].map(([Icon, title, desc]) => (
+                      <div key={title} className="space-y-1">
+                        <Icon className="w-4 h-4 text-muted-foreground" />
+                        <p className="text-xs font-medium text-foreground">{title}</p>
+                        <p className="text-[11px] text-muted-foreground leading-snug">{desc}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* How to start */}
+                <div className="border-t border-border pt-4 text-center space-y-3">
+                  <p className="text-xs text-muted-foreground">{t("Start from a ready-made template, or build your own from scratch - then target a segment and publish.")}</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
+                      <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setTab("templates")}>
+                      <Layout className="w-3.5 h-3.5" /> {t("Browse Templates")}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Have pop ups, but filters/search hide them all */}
+            {!isLoading && popups.length > 0 && filtered.length === 0 && (
               <div className="text-center py-20 text-sm text-muted-foreground">
                 <MousePointer2 className="w-10 h-10 mx-auto mb-3 opacity-20" />
-                <p className="font-medium text-foreground mb-1">{t("No pop ups yet")}</p>
-                <p className="text-xs mb-4">
-                  {t("Create a pop-up or start from a template - the WordPress plugin will serve it to your visitors.")}
-                </p>
-                <div className="flex items-center justify-center gap-2">
-                  <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
-                    <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
-                  </Button>
-                  <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setTab("templates")}>
-                    <Layout className="w-3.5 h-3.5" /> {t("Browse Templates")}
-                  </Button>
-                </div>
+                <p className="font-medium text-foreground mb-1">{t("No pop ups match your search or filters")}</p>
+                <p className="text-xs">{t("Try adjusting or clearing them to see your pop ups.")}</p>
               </div>
             )}
 

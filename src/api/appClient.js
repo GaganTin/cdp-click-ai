@@ -145,6 +145,7 @@ export const appClient = {
   },
   billing: {
     getUsage:   () => request("/billing/usage"),
+    getAiQuota: () => request("/billing/ai-quota"),
   },
   // Platform-owner ("Studio") API - platform-scoped, no x-company-id needed.
   admin: {

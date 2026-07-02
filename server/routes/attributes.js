@@ -3,7 +3,7 @@ import { authenticate, withCompany } from "../middleware/auth.js";
 import { processNextAttributeJob, repropagate, retagPagesScoped } from "../lib/attributeQueue.js";
 import { crawlPage, contentHash, matchesExclusion, decodeUrl, isValidTitle } from "../lib/webCrawler.js";
 import { tagPage, isAIConfigured, groupValues, suggestAttributes } from "../lib/attributeAI.js";
-import { recordAiUsage } from "../lib/aiUsage.js";
+import { recordAiUsage, enforceAiQuota } from "../lib/aiUsage.js";
 import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, gaTopValidPagesForTest, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
 import { triggerContentScrape, cancelContentScrape } from "../lib/contentScrapeTrigger.js";
 import { ruleFieldRegistry, previewRule, repropagateRule } from "../lib/attributeRules.js";
@@ -525,6 +525,7 @@ export function createAttributesRouter(pool) {
   // Re-tag the given pages with ONLY the chosen attributes (others keep their tags).
   router.post("/web-pages/retag", async (req, res) => {
     if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
+    if (!(await enforceAiQuota(pool, req, res, { companyId: req.companyId }))) return;
     const pageIds = Array.isArray(req.body?.page_ids) ? req.body.page_ids : [];
     const attributeIds = Array.isArray(req.body?.attribute_ids) ? req.body.attribute_ids : [];
     if (!pageIds.length || !attributeIds.length) return res.status(400).json({ error: "page_ids and attribute_ids required" });
@@ -870,6 +871,7 @@ export function createAttributesRouter(pool) {
   // AI suggests new attributes by reading a sample of already-crawled pages.
   router.post("/suggest", async (req, res) => {
     if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
+    if (!(await enforceAiQuota(pool, req, res, { companyId: req.companyId }))) return;
     try {
       const { rows: pages } = await pool.query(
         `SELECT url, title, content FROM app.web_pages
@@ -1379,6 +1381,7 @@ export function createAttributesRouter(pool) {
   // Auto-group this attribute's approved values with AI under group_label.
   router.post("/:id/autogroup", async (req, res) => {
     if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
+    if (!(await enforceAiQuota(pool, req, res, { companyId: req.companyId }))) return;
     try {
       const { rows: arows } = await pool.query(
         `SELECT group_label FROM app.attributes WHERE id = $1 AND company_id = $2`,
@@ -1554,6 +1557,7 @@ export function createAttributesRouter(pool) {
   // crawled pages, WITHOUT persisting. Lets users tune the instruction first.
   router.post("/:id/test", async (req, res) => {
     if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
+    if (!(await enforceAiQuota(pool, req, res, { companyId: req.companyId }))) return;
     try {
       const { rows: arows } = await pool.query(
         `SELECT id, name, description, value_type, extract_from FROM app.attributes WHERE id = $1 AND company_id = $2`,

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lightbulb, Mail, MousePointer2 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
 import { Button } from "@/components/ui/button";
@@ -798,11 +798,56 @@ export default function Segments() {
       {isLoading ? (
         <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}</div>
       ) : segments.length === 0 ? (
-        <div className="border border-dashed border-border rounded-lg p-12 text-center">
-          <Users className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-          <p className="text-sm font-medium mb-1">{t("No")} {activeTab === "customer" ? t("Customer") : t("Anonymous")} {t("segments yet")}</p>
-          <p className="text-xs text-muted-foreground mb-4">{t(TABS.find(tab => tab.key === activeTab)?.description)}</p>
-          <Link to="/"><Button variant="outline" size="sm" className="gap-1.5">{t("Ask AI to create a segment")}</Button></Link>
+        <div className="border border-dashed border-border rounded-lg p-8 max-w-2xl mx-auto space-y-6">
+          {/* What a segment is */}
+          <div className="text-center space-y-2">
+            <Users className="w-8 h-8 text-muted-foreground mx-auto opacity-40" />
+            <p className="text-base font-semibold">{t("No")} {activeTab === "customer" ? t("Customer") : t("Anonymous")} {t("segments yet")}</p>
+            <p className="text-xs text-muted-foreground leading-relaxed max-w-lg mx-auto">
+              {t("Segments are saved audiences - groups of people who share the same behaviour, attributes, or source. You define a segment once and it becomes a live audience you can target again and again.")}
+            </p>
+          </div>
+
+          {/* What you can do with them */}
+          <div className="rounded-lg bg-secondary/30 p-4 space-y-3">
+            <p className="text-xs font-semibold flex items-center gap-1.5">
+              <Lightbulb className="w-3.5 h-3.5 text-muted-foreground" /> {t("What you can do with a segment")}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {[
+                [MousePointer2, t("Show pop ups"), t("Trigger on-site messages only for visitors in the segment.")],
+                [Mail, t("Send email"), t("Aim an email campaign at exactly this audience.")],
+                [BarChart2, t("Track & refine"), t("Watch the segment size change and tune the criteria over time.")],
+              ].map(([Icon, title, desc]) => (
+                <div key={title} className="space-y-1">
+                  <Icon className="w-4 h-4 text-muted-foreground" />
+                  <p className="text-xs font-medium">{title}</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Customer vs anonymous */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold">{t("Two kinds of segment")}</p>
+            <ul className="space-y-1.5 text-[11px] text-muted-foreground">
+              <li className="flex gap-2">
+                <UserCheck className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span><strong className="text-foreground">{t("Customer")}</strong> - {t("known people you already have contact details for - ideal for email.")}</span>
+              </li>
+              <li className="flex gap-2">
+                <Ghost className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span><strong className="text-foreground">{t("Anonymous")}</strong> - {t("visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.")}</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* How to start */}
+          <div className="border-t border-border pt-4 text-center space-y-3">
+            <p className="text-xs text-muted-foreground">{t("Build one by hand with filters and criteria, or simply describe the audience you want and let the AI create it for you.")}</p>
+            <Link to="/"><Button variant="outline" size="sm" className="gap-1.5">{t("Ask AI to create a segment")}</Button></Link>
+          </div>
         </div>
       ) : (
         <div className="space-y-8">

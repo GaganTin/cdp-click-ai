@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate, withCompany } from "../middleware/auth.js";
+import { getAiQuota } from "../lib/aiUsage.js";
 
 export function createBillingRouter(pool) {
   const router = Router();
@@ -48,7 +49,10 @@ export function createBillingRouter(pool) {
                 COALESCE(SUM(input_tokens), 0)   AS input_tokens,
                 COALESCE(SUM(output_tokens), 0)  AS output_tokens,
                 COALESCE(SUM(cost), 0)           AS cost,
-                COALESCE(MAX(currency), 'USD')   AS currency
+                COALESCE(MAX(currency), 'USD')   AS currency,
+                -- Current-month spend: this is what the ai_tokens plan limit is
+                -- enforced against (see app.ai_quota), so the usage bar uses it.
+                COALESCE(SUM(total_tokens) FILTER (WHERE occurred_at >= date_trunc('month', now())), 0) AS tokens_month
            FROM app.ai_usage WHERE account_id = $1`,
         [accountId]
       );
@@ -82,6 +86,7 @@ export function createBillingRouter(pool) {
         // AI totals come from the cost ledger (account-keyed) so they stay correct
         // even after a workspace is deleted.
         ai_tokens: num(ai.tokens),
+        ai_tokens_month: num(ai.tokens_month),
         ai_input_tokens: num(ai.input_tokens),
         ai_output_tokens: num(ai.output_tokens),
         ai_cost: money(ai.cost),
@@ -95,6 +100,7 @@ export function createBillingRouter(pool) {
         team_members: overall.team_members,
         campaigns: overall.campaigns,
         ai_tokens: overall.ai_tokens,
+        ai_tokens_month: overall.ai_tokens_month,
         ai_cost: overall.ai_cost,
         ai_currency: overall.ai_currency,
         profiles: overall.profiles,
@@ -102,6 +108,21 @@ export function createBillingRouter(pool) {
         overall,
         workspaces,
       });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/billing/ai-quota - lightweight current-month AI quota status for the
+  // account, from the same authoritative source enforcement uses (app.ai_quota).
+  // Powers the proactive "running low on credits" banner. Cheap enough to poll.
+  router.get("/ai-quota", authenticate, withCompany(pool), async (req, res) => {
+    try {
+      const q = await getAiQuota(pool, { companyId: req.companyId });
+      const pct = q.limit == null || q.limit <= 0
+        ? null
+        : Math.min(100, Math.round((q.used / q.limit) * 100));
+      res.json({ used: q.used, limit: q.limit, remaining: q.remaining, over: q.over, pct });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

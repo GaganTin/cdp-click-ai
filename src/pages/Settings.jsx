@@ -1506,7 +1506,7 @@ function BillingTab({ company }) {
   const usageItems = [
     { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
     { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
-    { key: "ai_tokens",    label: t("AI credits"),        limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT },
+    { key: "ai_tokens",    label: t("AI credits (this month)"), limitKey: "ai_tokens", divisor: TOKENS_PER_CREDIT, usageKey: "ai_tokens_month" },
     { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
   ];
 
@@ -1561,7 +1561,7 @@ function BillingTab({ company }) {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            {usageItems.map(({ key, label, limitKey, divisor }) => {
+            {usageItems.map(({ key, label, limitKey, divisor, usageKey }) => {
               const rawLimit = limits[limitKey];
               const d = divisor || 1;
               const unlimited = rawLimit === null || rawLimit === undefined;
@@ -1569,7 +1569,7 @@ function BillingTab({ company }) {
                 <div key={key} className="border border-border rounded-lg px-5 py-4">
                   <UsageBar
                     label={label}
-                    used={Math.round((usage?.[key] ?? 0) / d)}
+                    used={Math.round((usage?.[usageKey || key] ?? 0) / d)}
                     limit={unlimited ? rawLimit : Math.round(rawLimit / d)}
                     unlimited={unlimited}
                   />

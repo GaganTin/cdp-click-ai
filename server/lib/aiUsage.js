@@ -42,6 +42,53 @@ async function getPricing(pool, model) {
  * @param {string} [ctx.userId]       acting user, when known
  * @param {object} [ctx.metadata]     extra context stored on the row
  */
+/**
+ * Resolve an account's CURRENT-MONTH AI token quota via the DB function
+ * app.ai_quota (the single source of truth). Fails OPEN (over=false) on any
+ * error so a quota-check hiccup can never wedge the whole app.
+ * @returns {Promise<{accountId:string|null, limit:number|null, used:number, over:boolean, remaining:number|null}>}
+ */
+export async function getAiQuota(pool, { accountId = null, companyId = null } = {}) {
+  const open = { accountId, limit: null, used: 0, over: false, remaining: null };
+  if (!pool) return open;
+  try {
+    let acc = accountId;
+    if (!acc && companyId) {
+      const { rows } = await pool.query("SELECT account_id FROM app.companies WHERE id = $1", [companyId]);
+      acc = rows[0]?.account_id || null;
+    }
+    if (!acc) return open;
+    const { rows } = await pool.query("SELECT used, token_limit, is_over FROM app.ai_quota($1)", [acc]);
+    const r = rows[0];
+    if (!r) return { ...open, accountId: acc };
+    const limit = r.token_limit == null ? null : Number(r.token_limit);
+    const used = Number(r.used || 0);
+    return { accountId: acc, limit, used, over: !!r.is_over, remaining: limit == null ? null : Math.max(0, limit - used) };
+  } catch (err) {
+    console.error("getAiQuota failed (allowing):", err.message);
+    return open;
+  }
+}
+
+/**
+ * Express guard: if the account has hit its monthly AI limit, send 402 and
+ * return false (caller does `if (!(await enforceAiQuota(...))) return;`).
+ * Returns true when the request may proceed.
+ */
+export async function enforceAiQuota(pool, req, res, { accountId = null, companyId = null } = {}) {
+  const q = await getAiQuota(pool, { accountId, companyId });
+  if (q.over) {
+    res.status(402).json({
+      error: "You've reached your monthly AI credit limit. Upgrade your plan or wait for it to reset at the start of next month.",
+      code: "ai_quota_exceeded",
+      used: q.used,
+      limit: q.limit,
+    });
+    return false;
+  }
+  return true;
+}
+
 export async function recordAiUsage(pool, ctx = {}) {
   if (!pool) return;
   try {
