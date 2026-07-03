@@ -22,11 +22,10 @@ CREATE TABLE IF NOT EXISTS app.ai_model_pricing (
   updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 
--- Seed the deployment in use. Editable later in Studio; ON CONFLICT keeps any
--- admin-edited rate on re-run.
-INSERT INTO app.ai_model_pricing (model, input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.75, 4.50, 'USD')
-ON CONFLICT (model) DO NOTHING;
+-- Model pricing is seeded by the base schema (fresh DBs) and by the dedicated
+-- add_gpt5mini_pricing / add_gpt5nano_pricing migrations (which carry the cached
+-- rate). No pricing is seeded here anymore: seeding a row before the cached
+-- column exists would leave cached_input_per_1m stuck at 0.
 
 -- ── AI usage ledger (per call) ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS app.ai_usage (

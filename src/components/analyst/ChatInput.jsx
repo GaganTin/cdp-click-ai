@@ -3,6 +3,7 @@ import { Send, Plus, Upload, Check, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { appClient } from "@/api/appClient";
+import { toast } from "sonner";
 
 export default function ChatInput({
   onSend,
@@ -30,10 +31,18 @@ export default function ChatInput({
     if (!file) return;
     setUploading(true);
     setPopoverOpen(false);
-    const { file_url } = await appClient.integrations.Core.UploadFile({ file });
-    onSend(`[Attached file: ${file.name}](${file_url})`, [file_url]);
-    setUploading(false);
-    fileRef.current.value = "";
+    try {
+      const { file_url } = await appClient.integrations.Core.UploadFile({ file });
+      // Pass a clean chat name so a file-first new chat isn't titled with raw markdown.
+      onSend(`[Attached file: ${file.name}](${file_url})`, [file_url], { chatName: file.name });
+    } catch (err) {
+      // Surface the failure and, crucially, re-enable the + button (previously a
+      // failed upload left `uploading` true forever, locking the control).
+      toast.error(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   };
 
   const handleTemplateClick = (skill) => {

@@ -193,27 +193,42 @@ CREATE TABLE app.company_report_config (
     "mem_segment_filter":      {"debugStartDate":"2025-01-01","isDebugging":false},
     "ap_membership_profiles":  {"debugStartDate":"2025-01-01","isDebugging":false}
   }',
-  -- Which Google Analytics reports the pipeline runs (presence of a key = enabled).
-  -- One key per report task in the integration_ga_reports_* DAGs. The per-report
-  -- {isDebugging,debugStartDate} is retained for the app's config editor, but the
-  -- ACTUAL incremental window now comes from ga_landing.ga_sync_control (plan-based
-  -- first-run backfill, then last_sync_date - overlap). keyword_performance is a
-  -- Search Console report and lives in gsc_reports below, NOT here.
+  -- Which Google Analytics reports (cubes) the pipeline runs (presence of a key =
+  -- enabled). One key per cube in lib/cube_catalog, grouped by the purpose DAGs
+  -- (path_funnel / content / purchase / ecommerce / acquisition / audience /
+  -- retention). The per-report {isDebugging,debugStartDate} is retained for the
+  -- app's config editor, but the ACTUAL incremental window now comes from
+  -- ga_landing.ga_sync_control (plan-based first-run backfill, then
+  -- last_sync_date - overlap). The retired flat utm/country tables were dropped.
+  -- keyword_performance is a Search Console report (gsc_reports below, NOT here).
+  -- interest_daily is intentionally omitted pending brandingInterest apiName
+  -- verification (see cube_catalog) - add it once confirmed.
   ga_reports                JSONB       NOT NULL DEFAULT '{
-    "path_exploration":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "path_exploration_duration":        {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "funnel_report":                    {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_performance":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_performance":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_full_param_performance": {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_utm_id_performance":     {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_ad_performance":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "country_performance":              {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "page_metrics":                     {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "page_utm_metrics":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "website_metrics":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "event_list":                       {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "purchase_list":                    {"isDebugging":false,"debugStartDate":"2025-07-30"}
+    "path_exploration":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_engagement_daily":       {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "funnel_report":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_metrics":                {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_utm_metrics":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "website_metrics":             {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "session_quality_daily":       {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "event_list":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "purchase_list":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "acquisition_session_daily":   {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "acquisition_firstuser_daily": {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "channel_daily":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "landing_page_daily":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_ad_performance":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_daily_utm_id_performance":{"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "demographics_daily":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "audience_daily":              {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "tech_daily":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "geo_daily":                   {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "returning_daily":             {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "item_performance":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "item_attribution":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "transaction_metrics":         {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "cohort_weekly":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "cohort_monthly":              {"isDebugging":false,"debugStartDate":"2025-07-30"}
   }',
   -- Which Google Search Console reports the pipeline runs (run by the
   -- click_cdp_ai_gsc_keyword_performance DAG when GSC is connected with a site_url).

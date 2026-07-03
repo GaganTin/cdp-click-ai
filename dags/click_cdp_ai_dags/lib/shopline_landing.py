@@ -3,7 +3,7 @@
 """One-call Shopline dataset runner shared by the scheduled and trial-flow DAGs.
 
 ``run_dataset(dict_config, dataset)`` resolves the access token (App DB, by
-company_id - never in XCom), fetches from the Shopline REST API, transforms, and
+company_id — never in XCom), fetches from the Shopline REST API, transforms, and
 upserts into Postgres + advances the watermark.
 """
 

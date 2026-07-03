@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
+import { Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical, MoreHorizontal, Trash2, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -82,6 +82,9 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
   // undefined === on); toggling off freezes the current data as a snapshot. Only meaningful
   // for charts that have a stored query to re-run.
   const [autoRefresh, setAutoRefresh] = useState(chart.metadata?.auto_refresh !== false);
+  // Set by the server when the last refresh (manual or nightly cron) failed - the
+  // chart is showing a stale snapshot. Surfaced as a warning so failures aren't silent.
+  const refreshError = chart.metadata?.last_refresh_error;
   const toggleAutoRefresh = () => {
     const next = !autoRefresh;
     setAutoRefresh(next);
@@ -147,9 +150,12 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
       title,
       description: chart.description || "",
       chart_type: chartType,
-      // Carry the LIVE chart type (chartType is editable after mount; filteredConfig
-      // keeps the frozen original), so a pie/line stays a pie/line in the chat.
-      chart_config: JSON.stringify({ ...filteredConfig, chart_type: chartType }),
+      // Carry the LIVE chart type and the LIVE date filter (both editable after mount;
+      // filteredConfig keeps the frozen originals). This keeps the embedded config
+      // consistent with the data/period actually applied on screen - otherwise the
+      // config's date_filter would still read the stored value while the data reflects
+      // the user's current selection.
+      chart_config: JSON.stringify({ ...filteredConfig, chart_type: chartType, date_filter: dateFilter }),
       period: DATE_FILTERS.find(f => f.key === dateFilter)?.label || "All time",
       delta: delta ? { pct: delta.pct, current: delta.cur, previous: delta.prev } : null,
     });
@@ -319,12 +325,16 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
             live daily-refreshed view or a frozen snapshot. Toggling lives in the ⋯ menu. */}
         {chart.query && (
           <span
-            className="ml-auto inline-flex items-center gap-1 text-[10px] text-muted-foreground"
-            title={autoRefresh
-              ? "Auto-refreshes daily - change in the ⋯ menu"
-              : "Data is frozen as a snapshot - change in the ⋯ menu"}
+            className={`ml-auto inline-flex items-center gap-1 text-[10px] ${refreshError ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+            title={refreshError
+              ? `Last refresh failed - showing stale data. ${refreshError}`
+              : autoRefresh
+                ? "Auto-refreshes daily - change in the ⋯ menu"
+                : "Data is frozen as a snapshot - change in the ⋯ menu"}
           >
-            <RefreshCw className="w-3 h-3" /> {autoRefresh ? "Daily" : "Snapshot"}
+            {refreshError
+              ? <><AlertTriangle className="w-3 h-3" /> Stale</>
+              : <><RefreshCw className="w-3 h-3" /> {autoRefresh ? "Daily" : "Snapshot"}</>}
           </span>
         )}
       </div>

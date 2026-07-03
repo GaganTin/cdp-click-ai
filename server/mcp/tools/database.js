@@ -7,7 +7,7 @@ export const databaseTools = [
     description:
       "Execute a read-only SELECT query against the PostgreSQL database. " +
       "Use this whenever you need actual data to answer a question or estimate numbers. " +
-      "Always prefix table names with their schema (e.g. ga_landing.utm_daily_performance, app.customer_profiles, app.segments). All data tables are company-scoped - filter by company_id.",
+      "Always prefix table names with their schema (e.g. ga_landing.acquisition_session_daily, app.customer_profiles, app.segments). All data tables are company-scoped - filter by company_id.",
     inputSchema: {
       type: "object",
       properties: {
@@ -80,9 +80,12 @@ export async function handleDatabaseTool(name, args, pool, dataDictionary) {
       return { content: [{ type: "text", text: JSON.stringify({ error: `Cross-workspace access denied. You may only query the current workspace (company_id = '${companyId}'). Remove any other company_id filter.` }) }] };
     }
     // 2) Any query touching tenant-scoped data MUST filter by the current
-    //    workspace. Every data table carries company_id, so require the exact
-    //    scoping predicate to be present.
-    const touchesTenantData = /\b(ga_landing|commerce|manual)\s*\.|\bapp\s*\.\s*(customer_profiles|anonymous_profiles|segments|campaigns|profile_identities|saved_reports|pinned_charts)/i.test(sql);
+    //    workspace. Default-DENY by schema: EVERY table in ga_landing / ga_gold /
+    //    commerce / manual / app carries company_id, so any reference to one of
+    //    those schemas requires the scoping predicate. (Previously this listed a
+    //    handful of app.* tables by name, which let unlisted ones - app.users,
+    //    app.companies, app.popups, app.skills, … - be read across ALL workspaces.)
+    const touchesTenantData = /\b(ga_landing|ga_gold|commerce|manual|app)\s*\.\s*"?[a-z_]/i.test(sql);
     const hasCurrentScope = new RegExp(`company_id\\s*=\\s*'${companyId}'`, "i").test(sql);
     if (touchesTenantData && !hasCurrentScope) {
       return { content: [{ type: "text", text: JSON.stringify({ error: `Workspace scoping required. Add company_id = '${companyId}' to the WHERE clause of every table in this query (all data tables are workspace-scoped).` }) }] };

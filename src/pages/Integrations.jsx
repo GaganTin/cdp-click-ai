@@ -45,6 +45,7 @@ const INTEGRATIONS = [
     category: "Analytics",
     Icon: BarChart2,
     syncable: true,
+    firstSyncNote: "Your first sync backfills up to 3 years of historical traffic. After that, data refreshes automatically once a day.",
     fields: [
       { key: "propertyId",   label: "Property ID",   placeholder: "e.g. 123456789",             type: "text",     hint: "Admin → Property Details (top right corner)" },
       { key: "propertyName", label: "Property URL",  placeholder: "e.g. https://www.example.com", type: "text",   hint: "Admin → Data Streams → your website URL" },
@@ -98,6 +99,7 @@ const INTEGRATIONS = [
     category: "Analytics",
     Icon: Search,
     syncable: true,
+    firstSyncNote: "Your first sync backfills your full available Search Console history - up to ~16 months (Google's retention limit). After that, data refreshes automatically once a day.",
     fields: [
       { key: "siteUrl", label: "Site URL", placeholder: "https://www.example.com/ or sc-domain:example.com", type: "text", hint: "URL-prefix format (https://www.example.com/) or Domain format (sc-domain:example.com)" },
     ],
@@ -130,6 +132,7 @@ const INTEGRATIONS = [
     category: "eCommerce",
     Icon: ShoppingBag,
     syncable: true,
+    firstSyncNote: "Your first sync imports your entire order history (trial accounts are limited to the last 2 months). After that, data refreshes automatically once a day.",
     fields: [
       { key: "storeName",    label: "Store Name",    placeholder: "storename123 (without .myshopify.com)", type: "text",     hint: "Settings → Store details → your myshopify.com subdomain." },
       { key: "accessToken",  label: "Access Token",  placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",       type: "password", hint: "Settings → Apps → Develop Apps → your app → Install App → \"Reveal & Copy Token\"" },
@@ -197,6 +200,7 @@ const INTEGRATIONS = [
     Icon: Store,
     syncable: true,
     comingSoon: true,
+    firstSyncNote: "Your first sync backfills up to 3 years of order history. After that, data refreshes automatically once a day.",
     fields: [],
     instructions: [],
   },
@@ -1112,6 +1116,15 @@ export default function Integrations() {
                 </TabsList>
 
                 <TabsContent value="instructions" className="flex-1 overflow-y-auto px-6 pb-6 mt-4">
+                  {activeIntegration.firstSyncNote && (
+                    <div className="mb-5 flex items-start gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2.5">
+                      <History className="w-3.5 h-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold mb-0.5">{t("How far back we sync")}</p>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">{t(activeIntegration.firstSyncNote)}</p>
+                      </div>
+                    </div>
+                  )}
                   {activeIntegration.instructions.map((step, i) => (
                     <InstructionStep key={i} step={step} index={i} />
                   ))}

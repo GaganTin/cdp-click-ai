@@ -1,8 +1,8 @@
 -- ============================================================================
 --  2026-07-02_resize_plan_allowances.sql
---  Resize the monthly AI token allowances after the gpt-5.4-mini rate correction
---  (see 2026-07-02_fix_gpt54mini_pricing.sql). At the corrected ~$1.50/1M blended
---  rate the old allowances were unprofitable (Standard ~75% of revenue), so:
+--  Resize the monthly AI token allowances alongside the analyst model change
+--  (see 2026-07-02_migrate_analyst_to_gpt5mini.sql). Allowances chosen to keep AI
+--  cost a comfortable share of plan revenue at the gpt-5-mini blended ~$0.66/1M:
 --
 --    Lite:     20M tokens (200 credits) -> 10M tokens (100 credits)
 --    Standard: 100M tokens (1,000 cr)   -> 30M tokens (300 credits)

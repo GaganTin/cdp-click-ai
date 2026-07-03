@@ -57,7 +57,7 @@ INVENTORY_LEVEL_COLUMNS = [
 
 
 # --------------------------------------------------------------------------- #
-# order - sale orders
+# order — sale orders
 # --------------------------------------------------------------------------- #
 def transform_order(items, client):
     rows = []
@@ -81,7 +81,7 @@ def transform_order(items, client):
 
 
 # --------------------------------------------------------------------------- #
-# order_line - line items (incl. ProductSet bundles + shipping)
+# order_line — line items (incl. ProductSet bundles + shipping)
 # --------------------------------------------------------------------------- #
 def _line_base(record, client):
     return {
@@ -191,7 +191,7 @@ def transform_order_line(items, client):
 
 
 # --------------------------------------------------------------------------- #
-# product - products (+variations) + addon_products + gifts
+# product — products (+variations) + addon_products + gifts
 # --------------------------------------------------------------------------- #
 def _product_row(client, pid, sku, category, ptype, price, tags, name, created, updated):
     return {
@@ -234,7 +234,7 @@ def transform_product(products, addons, gifts, client):
 
 
 # --------------------------------------------------------------------------- #
-# customer - Shopline customers (keeps gender/birthday: Shopline provides them)
+# customer — Shopline customers (keeps gender/birthday: Shopline provides them)
 # --------------------------------------------------------------------------- #
 def transform_customer(items, client):
     rows = []
@@ -270,7 +270,7 @@ def transform_customer(items, client):
 
 
 # --------------------------------------------------------------------------- #
-# inventory_level - per-product stock docs (full snapshot)
+# inventory_level — per-product stock docs (full snapshot)
 # --------------------------------------------------------------------------- #
 def transform_inventory_level(stock_docs, client):
     now = datetime.today().astimezone(_HK).strftime("%Y-%m-%d %H:%M:%S.%f%z")

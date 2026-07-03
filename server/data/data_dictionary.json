@@ -1,109 +1,5 @@
 [
   {
-    "table": "country_performance",
-    "use_case": "Daily traffic breakdown by country. Used for geographic audience analysis",
-    "granularity": "One row per unique combination of (date, country)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the sessions",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "country",
-        "type": "string",
-        "description": "User's country (GA4 country dimension)"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "bounce_rate",
-        "type": "float",
-        "description": "Bounce rate"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Engagement rate"
-      },
-      {
-        "name": "average_session_duration",
-        "type": "float",
-        "description": "Average session duration in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total number of sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "event_list",
-    "use_case": "Catalog of all GA4 events fired on a given day. Used to verify event coverage and identify which events are marked as key conversion events",
-    "granularity": "One row per unique combination of (date, event_name, is_key_event)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date the event was observed",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "event_name",
-        "type": "string",
-        "description": "GA4 event name (e.g. page_view, scroll, purchase, session_start)"
-      },
-      {
-        "name": "is_key_event",
-        "type": "string",
-        "description": "'true' if this event is marked as a key event (conversion) in GA4, otherwise 'false'"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
     "table": "keyword_performance",
     "use_case": "Organic search keyword rankings and click performance from Google Search Console. Used for SEO analysis",
     "granularity": "One row per search query keyword per day",
@@ -157,806 +53,6 @@
         "name": "capsuite_ref",
         "type": "string",
         "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "page_metrics",
-    "use_case": "Daily page-level performance metrics. Used for content performance analysis and identifying high/low engagement pages",
-    "granularity": "One row per unique combination of (date, page_path)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the page activity",
-        "format": "YYYY-MM-DD"
-      },
-      {
-        "name": "page_path",
-        "type": "string",
-        "description": "Page path (unified screen/page path from GA4, excludes hostname)"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users on this page"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users who visited this page"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Fraction of sessions that were engaged"
-      },
-      {
-        "name": "page_views",
-        "type": "int",
-        "description": "Total page view count"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total sessions that included this page"
-      },
-      {
-        "name": "engaged_sessions",
-        "type": "int",
-        "description": "Sessions that were classified as engaged"
-      },
-      {
-        "name": "bounced_sessions",
-        "type": "int",
-        "description": "Derived: sessions minus engaged_sessions",
-        "is_derived": true,
-        "formula": "sessions - engaged_sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "page_utm_metrics",
-    "use_case": "Page performance broken down by traffic source/medium. Used to attribute page views and users to specific channels",
-    "granularity": "One row per unique combination of (date, page_path, source, medium)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the page activity",
-        "format": "YYYY-MM-DD"
-      },
-      {
-        "name": "page_path",
-        "type": "string",
-        "description": "Page path (unified screen/page path from GA4)"
-      },
-      {
-        "name": "session_source",
-        "type": "string",
-        "description": "UTM source of the session"
-      },
-      {
-        "name": "session_medium",
-        "type": "string",
-        "description": "UTM medium of the session"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "page_views",
-        "type": "int",
-        "description": "Total page view count"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "path_exploration",
-    "use_case": "Tracks user navigation paths through the website including click events, referrers, and campaign context",
-    "granularity": "One row per event occurrence at minute precision",
-    "fields": [
-      {
-        "name": "event_name",
-        "type": "string",
-        "description": "GA4 event name (e.g. page_view, click)"
-      },
-      {
-        "name": "date_hour_minute",
-        "type": "datetime",
-        "description": "Timestamp of the event at minute precision, naive (no timezone), in GA4 property timezone"
-      },
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date portion of date_hour_minute, used as partition key",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "page_referrer",
-        "type": "string",
-        "description": "Full URL of the referring page; empty string if direct traffic"
-      },
-      {
-        "name": "page_location",
-        "type": "string",
-        "description": "Full URL of the page where the event occurred"
-      },
-      {
-        "name": "link_url",
-        "type": "string",
-        "description": "URL of the link that was clicked; empty string if not a click event"
-      },
-      {
-        "name": "session_source_medium",
-        "type": "string",
-        "description": "Combined source/medium (e.g. google / cpc); '(direct) / (none)' for direct traffic"
-      },
-      {
-        "name": "session_campaign_name",
-        "type": "string",
-        "description": "UTM campaign name; '(not set)' if not tagged"
-      },
-      {
-        "name": "capsuite_sid",
-        "type": "string",
-        "description": "Capsuite session ID (custom GA4 dimension); empty string if not collected"
-      },
-      {
-        "name": "capsuite_uid",
-        "type": "string",
-        "description": "Capsuite user ID (custom GA4 dimension); empty string if not collected"
-      },
-      {
-        "name": "capsuite_apid",
-        "type": "string",
-        "description": "Capsuite application/product ID (custom GA4 dimension); empty string if not collected"
-      },
-      {
-        "name": "capsuite_identifier",
-        "type": "string",
-        "description": "Capsuite identifier (custom GA4 dimension); empty string if not collected"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "path_exploration_duration",
-    "use_case": "Same as path_exploration but without link_url, and includes user engagement duration. Used for dwell-time and engagement analysis per page/session",
-    "granularity": "One row per event occurrence at minute precision",
-    "fields": [
-      {
-        "name": "event_name",
-        "type": "string",
-        "description": "GA4 event name"
-      },
-      {
-        "name": "date_hour_minute",
-        "type": "datetime",
-        "description": "Timestamp of the event at minute precision, naive (no timezone)"
-      },
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date partition key",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "page_referrer",
-        "type": "string",
-        "description": "Full URL of the referring page; empty string if direct"
-      },
-      {
-        "name": "page_location",
-        "type": "string",
-        "description": "Full URL of the current page"
-      },
-      {
-        "name": "session_source_medium",
-        "type": "string",
-        "description": "Combined source/medium"
-      },
-      {
-        "name": "user_engagement_duration",
-        "type": "int",
-        "description": "Total user engagement duration in seconds for this row"
-      },
-      {
-        "name": "capsuite_sid",
-        "type": "string",
-        "description": "Capsuite session ID; empty string if not collected"
-      },
-      {
-        "name": "capsuite_uid",
-        "type": "string",
-        "description": "Capsuite user ID; empty string if not collected"
-      },
-      {
-        "name": "capsuite_apid",
-        "type": "string",
-        "description": "Capsuite application/product ID; empty string if not collected"
-      },
-      {
-        "name": "capsuite_identifier",
-        "type": "string",
-        "description": "Capsuite identifier; empty string if not collected"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "utm_ad_performance",
-    "use_case": "Paid ad cost and impression data imported from linked Google Ads. Used for ROI and CPC analysis",
-    "granularity": "One row per unique combination of (date, source, medium, campaign, utm_id)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the ad activity",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "session_source",
-        "type": "string",
-        "description": "UTM source"
-      },
-      {
-        "name": "session_medium",
-        "type": "string",
-        "description": "UTM medium"
-      },
-      {
-        "name": "session_campaign_name",
-        "type": "string",
-        "description": "UTM campaign name"
-      },
-      {
-        "name": "session_utm_id",
-        "type": "string",
-        "description": "UTM ID"
-      },
-      {
-        "name": "advertiser_ad_impressions",
-        "type": "int",
-        "description": "Number of ad impressions"
-      },
-      {
-        "name": "advertiser_ad_clicks",
-        "type": "int",
-        "description": "Number of ad clicks"
-      },
-      {
-        "name": "advertiser_ad_cost",
-        "type": "float",
-        "description": "Total ad cost in the Google Ads account currency"
-      },
-      {
-        "name": "advertiser_ad_cost_per_click",
-        "type": "float",
-        "description": "Cost per click (CPC)"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "utm_daily_full_param_performance",
-    "use_case": "Same as utm_daily_performance but includes all UTM parameters. Used for detailed attribution where utm_content, utm_term, and utm_id are needed",
-    "granularity": "One row per unique combination of (date, source, medium, campaign, content, term, utm_id, country, device)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the sessions",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "session_source",
-        "type": "string",
-        "description": "UTM source"
-      },
-      {
-        "name": "session_medium",
-        "type": "string",
-        "description": "UTM medium"
-      },
-      {
-        "name": "session_campaign_name",
-        "type": "string",
-        "description": "UTM campaign name"
-      },
-      {
-        "name": "session_content",
-        "type": "string",
-        "description": "UTM content parameter (utm_content)"
-      },
-      {
-        "name": "session_term",
-        "type": "string",
-        "description": "UTM term parameter (utm_term)"
-      },
-      {
-        "name": "session_utm_id",
-        "type": "string",
-        "description": "UTM ID parameter (utm_id)"
-      },
-      {
-        "name": "country",
-        "type": "string",
-        "description": "User's country"
-      },
-      {
-        "name": "device",
-        "type": "string",
-        "description": "Device category: desktop, mobile, or tablet"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "bounce_rate",
-        "type": "float",
-        "description": "Bounce rate"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Engagement rate"
-      },
-      {
-        "name": "average_session_duration",
-        "type": "float",
-        "description": "Average session duration in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total number of sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "utm_daily_performance",
-    "use_case": "Day-level campaign performance without content/term/utm_id. Primary report for daily campaign comparison",
-    "granularity": "One row per unique combination of (date, source, medium, campaign, country, device)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the sessions",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "session_source",
-        "type": "string",
-        "description": "UTM source"
-      },
-      {
-        "name": "session_medium",
-        "type": "string",
-        "description": "UTM medium"
-      },
-      {
-        "name": "session_campaign_name",
-        "type": "string",
-        "description": "UTM campaign name"
-      },
-      {
-        "name": "country",
-        "type": "string",
-        "description": "User's country"
-      },
-      {
-        "name": "device",
-        "type": "string",
-        "description": "Device category: desktop, mobile, or tablet"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "bounce_rate",
-        "type": "float",
-        "description": "Bounce rate"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Engagement rate"
-      },
-      {
-        "name": "average_session_duration",
-        "type": "float",
-        "description": "Average session duration in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total number of sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "utm_daily_utm_id_performance",
-    "use_case": "Day-level campaign performance grouped only by UTM ID (utm_id). Use to compare performance across paid ad IDs",
-    "granularity": "One row per unique combination of (date, utm_id)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the sessions",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "session_utm_id",
-        "type": "string",
-        "description": "UTM ID (utm_id parameter)"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "bounce_rate",
-        "type": "float",
-        "description": "Bounce rate"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Engagement rate"
-      },
-      {
-        "name": "average_session_duration",
-        "type": "float",
-        "description": "Average session duration in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total number of sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "utm_performance",
-    "use_case": "Hourly/minute-level campaign performance with full UTM parameters. Use for intraday campaign monitoring",
-    "granularity": "One row per unique combination of (minute, source, medium, campaign, content, term, utm_id, country, device)",
-    "fields": [
-      {
-        "name": "date_hour_minute",
-        "type": "datetime",
-        "description": "Timezone-aware timestamp in Asia/Hong_Kong (HKT)"
-      },
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date partition key derived from date_hour_minute",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "session_source",
-        "type": "string",
-        "description": "UTM source (e.g. google, facebook)"
-      },
-      {
-        "name": "session_medium",
-        "type": "string",
-        "description": "UTM medium (e.g. cpc, email)"
-      },
-      {
-        "name": "session_campaign_name",
-        "type": "string",
-        "description": "UTM campaign name"
-      },
-      {
-        "name": "session_content",
-        "type": "string",
-        "description": "UTM content parameter (utm_content)"
-      },
-      {
-        "name": "session_term",
-        "type": "string",
-        "description": "UTM term parameter (utm_term)"
-      },
-      {
-        "name": "session_utm_id",
-        "type": "string",
-        "description": "UTM ID parameter (utm_id)"
-      },
-      {
-        "name": "country",
-        "type": "string",
-        "description": "User's country"
-      },
-      {
-        "name": "device",
-        "type": "string",
-        "description": "Device category: desktop, mobile, or tablet"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Number of distinct active users"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Number of first-time users"
-      },
-      {
-        "name": "bounce_rate",
-        "type": "float",
-        "description": "Fraction of sessions with no engagement"
-      },
-      {
-        "name": "engagement_rate",
-        "type": "float",
-        "description": "Fraction of sessions that were engaged"
-      },
-      {
-        "name": "average_session_duration",
-        "type": "float",
-        "description": "Average session duration in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total number of sessions"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "website_metrics",
-    "use_case": "Top-level daily website health metrics. Primary KPI summary for overall site performance",
-    "granularity": "One row per date (site-wide daily totals)",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the metrics",
-        "format": "YYYY-MM-DD"
-      },
-      {
-        "name": "active_users",
-        "type": "int",
-        "description": "Total distinct active users site-wide"
-      },
-      {
-        "name": "new_users",
-        "type": "int",
-        "description": "Total first-time users site-wide"
-      },
-      {
-        "name": "sessions",
-        "type": "int",
-        "description": "Total sessions site-wide"
-      },
-      {
-        "name": "engaged_sessions",
-        "type": "int",
-        "description": "Sessions classified as engaged"
-      },
-      {
-        "name": "user_engagement_duration",
-        "type": "int",
-        "description": "Total user engagement time in seconds",
-        "unit": "seconds"
-      },
-      {
-        "name": "page_views",
-        "type": "int",
-        "description": "Total page views site-wide"
-      },
-      {
-        "name": "engaged_sessions_per_active_user",
-        "type": "float",
-        "description": "Average number of engaged sessions per active user",
-        "is_derived": true,
-        "formula": "engaged_sessions / active_users (0 when active_users = 0)"
-      },
-      {
-        "name": "average_engagement_time_per_session",
-        "type": "float",
-        "description": "Average engagement time per session in seconds",
-        "unit": "seconds",
-        "is_derived": true,
-        "formula": "user_engagement_duration / sessions (0 when sessions = 0)"
-      },
-      {
-        "name": "average_engagement_time_per_user",
-        "type": "float",
-        "description": "Average engagement time per active user in seconds",
-        "unit": "seconds",
-        "is_derived": true,
-        "formula": "user_engagement_duration / active_users (0 when active_users = 0)"
-      },
-      {
-        "name": "capsuite_ref",
-        "type": "string",
-        "description": "Client identifier slug used to partition blobs in Azure Blob Storage"
-      },
-      {
-        "name": "property_id",
-        "type": "string",
-        "description": "Google Analytics 4 property ID"
-      },
-      {
-        "name": "property_name",
-        "type": "string",
-        "description": "Google Analytics 4 property display name"
       }
     ],
     "schema": "ga_landing"
@@ -1093,7 +189,7 @@
       {
         "name": "ga_reports",
         "type": "jsonb",
-        "description": "Per-report debug and configuration flags for GA data pipeline reports. Keys: path_exploration, path_exploration_duration, utm_performance, utm_daily_performance, utm_daily_full_param_performance, utm_ad_performance, country_performance, page_metrics, page_utm_metrics, website_metrics, keyword_performance, event_list. Each entry has isDebugging (bool) and debugStartDate (YYYY-MM-DD)."
+        "description": "Per-cube debug/config flags for the GA data pipeline (one key per enabled cube in cube_catalog, grouped by the purpose DAGs path_funnel/content/purchase/ecommerce/acquisition/audience/retention). Example keys: path_exploration, page_engagement_daily, funnel_report, page_metrics, website_metrics, event_list, purchase_list, acquisition_session_daily, channel_daily, landing_page_daily, geo_daily, tech_daily, demographics_daily, returning_daily, transaction_metrics, item_performance, cohort_weekly. Each entry has isDebugging (bool) and debugStartDate (YYYY-MM-DD). The retired flat utm_*/country_performance tables were dropped."
       }
     ]
   },
@@ -1214,7 +310,7 @@
       {
         "name": "plan",
         "type": "string",
-        "description": "Subscription plan: free | starter | pro | enterprise."
+        "description": "Subscription plan: lite | standard | enterprise."
       },
       {
         "name": "plan_expires_at",
@@ -1308,45 +404,6 @@
         "type": "string",
         "description": "Month of the funnel",
         "format": "YYYY-MM"
-      }
-    ],
-    "schema": "ga_landing"
-  },
-  {
-    "table": "purchase_list",
-    "use_case": "Individual purchase transactions from GA (event_name=purchase), stamped with visitor/customer identity ids. Use for purchase counts, revenue-to-session attribution, and identity stitching.",
-    "granularity": "One row per purchase transaction",
-    "fields": [
-      {
-        "name": "date",
-        "type": "string",
-        "description": "Date of the purchase",
-        "format": "YYYYMMDD"
-      },
-      {
-        "name": "trxn_id",
-        "type": "string",
-        "description": "Transaction id"
-      },
-      {
-        "name": "capsuite_sid",
-        "type": "string",
-        "description": "Session id"
-      },
-      {
-        "name": "capsuite_apid",
-        "type": "string",
-        "description": "Anonymous/visitor id (links to path_exploration and profiles)"
-      },
-      {
-        "name": "capsuite_uid",
-        "type": "string",
-        "description": "Known user id"
-      },
-      {
-        "name": "capsuite_identifier",
-        "type": "string",
-        "description": "Additional identifier"
       }
     ],
     "schema": "ga_landing"
@@ -3234,6 +2291,1614 @@
         "name": "synced_at",
         "type": "timestamp",
         "description": "When the row was loaded."
+      }
+    ]
+  },
+  {
+    "table": "path_exploration",
+    "schema": "ga_landing",
+    "use_case": "Raw event stream (page/interaction events) with minute-level timing, referrer, location and last-touch acquisition - the base for path analysis and anonymous-profile rollups.",
+    "granularity": "one row per event at minute granularity",
+    "fields": [
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name."
+      },
+      {
+        "name": "date_hour_minute",
+        "type": "string",
+        "description": "Event minute (YYYYMMDDHHMM, naive).",
+        "format": "YYYYMMDDHHMM"
+      },
+      {
+        "name": "page_referrer",
+        "type": "string",
+        "description": "Referring URL."
+      },
+      {
+        "name": "page_location",
+        "type": "string",
+        "description": "Full page URL."
+      },
+      {
+        "name": "link_url",
+        "type": "string",
+        "description": "Outbound / clicked link URL."
+      },
+      {
+        "name": "session_source_medium",
+        "type": "string",
+        "description": "Session source / medium (last-touch)."
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "Session campaign name (last-touch)."
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Capsuite session id (analytics-only identity)."
+      },
+      {
+        "name": "capsuite_uid",
+        "type": "string",
+        "description": "Capsuite member/user id (links to a CRM member)."
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Capsuite anonymous profile id (web visitor cookie)."
+      },
+      {
+        "name": "capsuite_identifier",
+        "type": "string",
+        "description": "Capsuite identifier (email or custom key)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "page_engagement_daily",
+    "schema": "ga_landing",
+    "use_case": "Slimmed to page-level daily engagement duration (was a near-duplicate of path_exploration). Use for dwell/engagement per page; path_exploration holds the raw events.",
+    "granularity": "date x page path (engagement seconds)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_path",
+        "type": "string",
+        "description": "Unified page path / screen."
+      },
+      {
+        "name": "user_engagement_duration",
+        "type": "int",
+        "description": "User engagement duration (s)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "utm_daily_utm_id_performance",
+    "schema": "ga_landing",
+    "use_case": "Daily performance keyed by UTM id only.",
+    "granularity": "date x utm_id",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM id (sessionManualCampaignId)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration (s)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "utm_ad_performance",
+    "schema": "ga_landing",
+    "use_case": "Daily advertising cost/click metrics by campaign, with conversions and ROAS so ad spend can be judged on outcome (metrics only - no extra cardinality).",
+    "granularity": "date x source x medium x campaign x utm_id, ad-cost + ROAS metrics",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source",
+        "type": "string",
+        "description": "Session source (last-touch)."
+      },
+      {
+        "name": "session_medium",
+        "type": "string",
+        "description": "Session medium (last-touch)."
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "Session campaign name (last-touch)."
+      },
+      {
+        "name": "session_utm_id",
+        "type": "string",
+        "description": "UTM id (sessionManualCampaignId)."
+      },
+      {
+        "name": "advertiser_ad_impressions",
+        "type": "int",
+        "description": "Ad impressions."
+      },
+      {
+        "name": "advertiser_ad_clicks",
+        "type": "int",
+        "description": "Ad clicks."
+      },
+      {
+        "name": "advertiser_ad_cost",
+        "type": "float",
+        "description": "Ad cost."
+      },
+      {
+        "name": "advertiser_ad_cost_per_click",
+        "type": "float",
+        "description": "Ad cost per click."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "return_on_ad_spend",
+        "type": "float",
+        "description": "Return on ad spend (revenue / cost)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "page_metrics",
+    "schema": "ga_landing",
+    "use_case": "Daily page-level metrics, with page title for analysis by page name/type rather than raw URL. NON-ADDITIVE: a user/session spans many pages, so user & session counts are NOT additive across rows (compare pages, don't sum; use website_metrics for site totals).",
+    "granularity": "date x page path x page title",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (YYYY-MM-DD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_path",
+        "type": "string",
+        "description": "Unified page path / screen."
+      },
+      {
+        "name": "page_title",
+        "type": "string",
+        "description": "Page title (friendly page name / type)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Screen/page views."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "bounced_sessions",
+        "type": "int",
+        "description": "Sessions - engaged_sessions (derived)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "page_utm_metrics",
+    "schema": "ga_landing",
+    "use_case": "Daily page x acquisition-channel metrics (converged from page x source x medium to page x channel_group to cut cardinality). NON-ADDITIVE: user counts are not additive across pages/channels.",
+    "granularity": "date x page path x channel group",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (YYYY-MM-DD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "page_path",
+        "type": "string",
+        "description": "Unified page path / screen."
+      },
+      {
+        "name": "channel_group",
+        "type": "string",
+        "description": "Default channel group (last-touch)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Screen/page views."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "website_metrics",
+    "schema": "ga_landing",
+    "use_case": "Daily site-wide totals with derived engagement rates. Deduplicated baseline for reconciling wider cubes against the GA4 UI.",
+    "granularity": "date (site-wide totals)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (YYYY-MM-DD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "user_engagement_duration",
+        "type": "int",
+        "description": "User engagement duration (s)."
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Screen/page views."
+      },
+      {
+        "name": "engaged_sessions_per_active_user",
+        "type": "float",
+        "description": "engaged_sessions / active_users (derived)."
+      },
+      {
+        "name": "average_engagement_time_per_session",
+        "type": "float",
+        "description": "engagement duration / sessions (derived)."
+      },
+      {
+        "name": "average_engagement_time_per_user",
+        "type": "float",
+        "description": "engagement duration / active_users (derived)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "session_quality_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily session-DEPTH metrics (pages/session, avg duration, bounce, engagement) by device - the session-level middle layer between events and site totals. Distinct from tech_daily, which is REACH (users/sessions) by device/OS/browser.",
+    "granularity": "date x device (session depth / quality)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "device",
+        "type": "string",
+        "description": "Device category (mobile/desktop/tablet)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "screen_page_views_per_session",
+        "type": "float",
+        "description": "Screen/page views per session."
+      },
+      {
+        "name": "average_session_duration",
+        "type": "float",
+        "description": "Average session duration (s)."
+      },
+      {
+        "name": "bounce_rate",
+        "type": "float",
+        "description": "Bounce rate."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "event_list",
+    "schema": "ga_landing",
+    "use_case": "Catalog of events seen per day and whether each is a key event.",
+    "granularity": "date x event name x is_key_event",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "event_name",
+        "type": "string",
+        "description": "GA4 event name."
+      },
+      {
+        "name": "is_key_event",
+        "type": "string",
+        "description": "Whether the event is a key event."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "purchase_list",
+    "schema": "ga_landing",
+    "use_case": "GA purchase events keyed by transaction id plus capsuite identity keys. IDENTITY JOIN POINT ONLY - it carries WHO purchased (link to member/order), NOT the order value; revenue comes from commerce.\"order\" via trxn_id, or from transaction_metrics for GA-side revenue by channel.",
+    "granularity": "one row per purchase event (transaction id)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "trxn_id",
+        "type": "string",
+        "description": "Transaction id (joins commerce.\"order\".order_ref)."
+      },
+      {
+        "name": "capsuite_sid",
+        "type": "string",
+        "description": "Capsuite session id (analytics-only identity)."
+      },
+      {
+        "name": "capsuite_uid",
+        "type": "string",
+        "description": "Capsuite member/user id (links to a CRM member)."
+      },
+      {
+        "name": "capsuite_apid",
+        "type": "string",
+        "description": "Capsuite anonymous profile id (web visitor cookie)."
+      },
+      {
+        "name": "capsuite_identifier",
+        "type": "string",
+        "description": "Capsuite identifier (email or custom key)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "item_performance",
+    "schema": "ga_landing",
+    "use_case": "Daily product funnel (view -> cart -> purchase) and revenue per item; joins commerce.order_line on item_id.",
+    "granularity": "date x item (dedicated item cube)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "item_id",
+        "type": "string",
+        "description": "Product/item id."
+      },
+      {
+        "name": "item_name",
+        "type": "string",
+        "description": "Product/item name."
+      },
+      {
+        "name": "item_brand",
+        "type": "string",
+        "description": "Product brand."
+      },
+      {
+        "name": "item_category",
+        "type": "string",
+        "description": "Product category."
+      },
+      {
+        "name": "items_viewed",
+        "type": "int",
+        "description": "Items viewed."
+      },
+      {
+        "name": "items_added_to_cart",
+        "type": "int",
+        "description": "Items added to cart."
+      },
+      {
+        "name": "items_purchased",
+        "type": "int",
+        "description": "Items purchased."
+      },
+      {
+        "name": "item_revenue",
+        "type": "float",
+        "description": "Item revenue."
+      },
+      {
+        "name": "cart_to_view_rate",
+        "type": "float",
+        "description": "Cart-to-view rate."
+      },
+      {
+        "name": "purchase_to_view_rate",
+        "type": "float",
+        "description": "Purchase-to-view rate."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "item_attribution",
+    "schema": "ga_landing",
+    "use_case": "Item revenue and units by acquisition channel (which channel drives which products). Overlaps item_performance on revenue/units but adds the channel split; item_performance is the full per-item funnel (views->cart->purchase).",
+    "granularity": "date x item x channel group",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "item_id",
+        "type": "string",
+        "description": "Product/item id."
+      },
+      {
+        "name": "channel_group",
+        "type": "string",
+        "description": "Default channel group (last-touch)."
+      },
+      {
+        "name": "item_revenue",
+        "type": "float",
+        "description": "Item revenue."
+      },
+      {
+        "name": "items_purchased",
+        "type": "int",
+        "description": "Items purchased."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "transaction_metrics",
+    "schema": "ga_landing",
+    "use_case": "Daily transaction/revenue totals by channel; reconciles against commerce orders.",
+    "granularity": "date x channel group",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "channel_group",
+        "type": "string",
+        "description": "Default channel group (last-touch)."
+      },
+      {
+        "name": "transactions",
+        "type": "int",
+        "description": "Transactions."
+      },
+      {
+        "name": "purchase_revenue",
+        "type": "float",
+        "description": "Purchase revenue."
+      },
+      {
+        "name": "ecommerce_purchases",
+        "type": "int",
+        "description": "Ecommerce purchases."
+      },
+      {
+        "name": "first_time_purchasers",
+        "type": "int",
+        "description": "First-time purchasers."
+      },
+      {
+        "name": "average_purchase_revenue",
+        "type": "float",
+        "description": "Average purchase revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "acquisition_session_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily last-touch acquisition performance with conversions AND revenue - the campaign workhorse. Converged replacement for utm_daily_performance (one high-cardinality dim: campaign; outcome metrics add no cardinality).",
+    "granularity": "date x source/medium x campaign (one HIGH dim)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "session_source_medium",
+        "type": "string",
+        "description": "Session source / medium (last-touch)."
+      },
+      {
+        "name": "session_campaign_name",
+        "type": "string",
+        "description": "Session campaign name (last-touch)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "description": "Total revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "acquisition_firstuser_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily FIRST-touch (user acquisition) performance - the first-touch counterpart to the session (last-touch) cube.",
+    "granularity": "date x first-user source/medium x first-user channel",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "first_user_source_medium",
+        "type": "string",
+        "description": "First-user source / medium (first-touch)."
+      },
+      {
+        "name": "first_user_channel_group",
+        "type": "string",
+        "description": "First-user default channel group (first-touch)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "total_users",
+        "type": "int",
+        "description": "Total users."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "channel_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily performance by default channel group; low-cardinality reconciliation cube closest to the GA4 'Traffic acquisition' overview.",
+    "granularity": "date x channel group (low cardinality)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "channel_group",
+        "type": "string",
+        "description": "Default channel group (last-touch)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "landing_page_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily landing-page performance.",
+    "granularity": "date x landing page (one HIGH dim)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "landing_page",
+        "type": "string",
+        "description": "Landing page path."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engaged_sessions",
+        "type": "int",
+        "description": "Engaged sessions."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "demographics_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily audience by age/gender (needs Google Signals; rows may be thresholded).",
+    "granularity": "date x age bracket x gender",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "age_bracket",
+        "type": "string",
+        "description": "User age bracket (needs Google Signals; thresholded)."
+      },
+      {
+        "name": "gender",
+        "type": "string",
+        "description": "User gender (needs Google Signals; thresholded)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "new_users",
+        "type": "int",
+        "description": "New users."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "description": "Total revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "audience_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily performance by GA4 audience membership. NON-ADDITIVE: a user can belong to many audiences, so user/session counts overlap and must not be summed across audiences (compare, don't total).",
+    "granularity": "date x audience name (one HIGH dim)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "audience_name",
+        "type": "string",
+        "description": "GA4 audience name."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "description": "Total revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "tech_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily technographics REACH (users/sessions/engagement) by device/OS/browser. For session DEPTH (pages/session, duration) by device, use session_quality_daily.",
+    "granularity": "date x device x OS x browser",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "device",
+        "type": "string",
+        "description": "Device category (mobile/desktop/tablet)."
+      },
+      {
+        "name": "operating_system",
+        "type": "string",
+        "description": "Operating system."
+      },
+      {
+        "name": "browser",
+        "type": "string",
+        "description": "Browser."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "engagement_rate",
+        "type": "float",
+        "description": "Engagement rate."
+      },
+      {
+        "name": "page_views",
+        "type": "int",
+        "description": "Screen/page views."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "geo_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily performance by geography (country + region). Superset of country_performance.",
+    "granularity": "date x country x region",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "country",
+        "type": "string",
+        "description": "Country."
+      },
+      {
+        "name": "region",
+        "type": "string",
+        "description": "Region / state."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "description": "Total revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "interest_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily affinity/interest breakdown (verify brandingInterest availability per property). NON-ADDITIVE + thresholded: a user has many affinity categories, so counts heavily overlap (observed ~5-6x the deduplicated total) - use for relative interest popularity only, never sum.",
+    "granularity": "date x interest (one HIGH dim)",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "interest",
+        "type": "string",
+        "description": "Affinity/interest category (verify brandingInterest via getMetadata)."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "returning_daily",
+    "schema": "ga_landing",
+    "use_case": "Daily new vs returning split and its value.",
+    "granularity": "date x new vs returning",
+    "fields": [
+      {
+        "name": "date",
+        "type": "string",
+        "description": "Event date (GA 'date' dimension, YYYYMMDD).",
+        "format": "YYYYMMDD"
+      },
+      {
+        "name": "new_vs_returning",
+        "type": "string",
+        "description": "New vs returning user."
+      },
+      {
+        "name": "active_users",
+        "type": "int",
+        "description": "Active users (HLL++ estimated)."
+      },
+      {
+        "name": "sessions",
+        "type": "int",
+        "description": "Sessions."
+      },
+      {
+        "name": "key_events",
+        "type": "int",
+        "description": "Key events (conversions)."
+      },
+      {
+        "name": "total_revenue",
+        "type": "float",
+        "description": "Total revenue."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "cohort_weekly",
+    "schema": "ga_landing",
+    "use_case": "Weekly acquisition cohorts and their retained active users over subsequent weeks (retention curve).",
+    "granularity": "weekly acquisition cohort x nth week",
+    "fields": [
+      {
+        "name": "cohort",
+        "type": "string",
+        "description": "Cohort id (acquisition period)."
+      },
+      {
+        "name": "cohort_nth_week",
+        "type": "int",
+        "description": "Weeks since acquisition."
+      },
+      {
+        "name": "cohort_active_users",
+        "type": "int",
+        "description": "Active users retained in the cohort."
+      },
+      {
+        "name": "cohort_total_users",
+        "type": "int",
+        "description": "Total users in the cohort."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
+      }
+    ]
+  },
+  {
+    "table": "cohort_monthly",
+    "schema": "ga_landing",
+    "use_case": "Monthly acquisition cohorts and their retained active users over subsequent months (long-horizon retention).",
+    "granularity": "monthly acquisition cohort x nth month",
+    "fields": [
+      {
+        "name": "cohort",
+        "type": "string",
+        "description": "Cohort id (acquisition period)."
+      },
+      {
+        "name": "cohort_nth_month",
+        "type": "int",
+        "description": "Months since acquisition."
+      },
+      {
+        "name": "cohort_active_users",
+        "type": "int",
+        "description": "Active users retained in the cohort."
+      },
+      {
+        "name": "cohort_total_users",
+        "type": "int",
+        "description": "Total users in the cohort."
+      },
+      {
+        "name": "capsuite_ref",
+        "type": "string",
+        "description": "Workspace identifier (tenant key mirror)."
+      },
+      {
+        "name": "property_id",
+        "type": "string",
+        "description": "GA4 property id the row was fetched from."
+      },
+      {
+        "name": "property_name",
+        "type": "string",
+        "description": "GA4 property display name."
+      },
+      {
+        "name": "company_id",
+        "type": "string",
+        "description": "Tenant key (app.companies.id); ga_landing is partitioned by it."
       }
     ]
   }

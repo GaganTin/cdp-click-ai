@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, Link as LinkIcon, BarChart2,
+  Plus, Link as LinkIcon, BarChart2, Waypoints,
   Lock, Search, Filter, X,
   ArrowUp, ArrowDown, ArrowUpDown, Info, Upload,
   ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown,
@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import UTMForm, { buildUTMUrl } from "../components/campaigns/UTMForm";
 import UTMAnalyticsPanel, { GAUtmLinksSection, GA_PERIODS } from "../components/campaigns/UTMAnalyticsPanel";
+import ChannelAttributionPanel from "../components/campaigns/ChannelAttributionPanel";
 import UTMImportDialog from "../components/import/UTMImportDialog";
 
 // Portal-rendered tooltip so it escapes the table's overflow-auto clipping (the
@@ -293,6 +294,7 @@ export default function Campaigns() {
   const TABS = [
     { key: "utm",       label: t("UTM Links"), icon: <LinkIcon className="w-3.5 h-3.5" /> },
     { key: "analytics", label: t("Analytics"), icon: <BarChart2 className="w-3.5 h-3.5" /> },
+    { key: "channels",  label: t("Channels"),  icon: <Waypoints className="w-3.5 h-3.5" /> },
   ];
 
   const { canUseFeatures } = usePlan();
@@ -655,6 +657,9 @@ export default function Campaigns() {
 
         {/* ── Analytics Tab ────────────────────────────────────────────── */}
         {tab === "analytics" && <UTMAnalyticsPanel />}
+
+        {/* ── Channels Tab (channel attribution from GA base cubes) ─────── */}
+        {tab === "channels" && <ChannelAttributionPanel />}
       </div>
 
       {/* Create Dialog */}

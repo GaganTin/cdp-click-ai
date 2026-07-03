@@ -4,7 +4,7 @@
  * ----------------------------------------------------------------------------
  *  Creates ONE account with TWO workspaces (companies) so multi-tenant
  *  isolation is visible, and fills every page/tab with realistic data:
- *    • Account "Acme Group" (plan pro) + 3 users with different per-workspace roles
+ *    • Account "Acme Group" (plan enterprise) + 3 users with different per-workspace roles
  *    • Workspace A "Acme Retail"  (capsuite_ref acme_retail) - Shopify + GA + GSC
  *    • Workspace B "Acme Academy" (capsuite_ref acme_academy) - Manual + GA
  *    • Per workspace: integrations, GA/GSC landing data, source membership,
@@ -46,7 +46,7 @@ async function main() {
   // ── Account ───────────────────────────────────────────────────────────────
   const acct = (await q(
     `INSERT INTO app.accounts (name, slug, plan, plan_expires_at, settings)
-     VALUES ('Acme Group','acme','paid', NULL, '{"onboarded":true}')
+     VALUES ('Acme Group','acme','enterprise', NULL, '{"onboarded":true}')
      RETURNING id`
   )).rows[0].id;
 

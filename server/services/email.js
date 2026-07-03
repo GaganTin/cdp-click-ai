@@ -111,6 +111,24 @@ export async function sendPasswordResetEmail(to, token) {
   });
 }
 
+// Workspace invitation: emailed to a teammate an admin invited. The link lands on
+// the /join/:token page, which accepts the invite once the recipient is signed in
+// (registering first if they don't have an account yet).
+export async function sendInvitationEmail(to, token, { companyName, inviterName } = {}) {
+  const link = `${appUrl()}/join/${encodeURIComponent(token)}`;
+  const workspace = companyName ? `<strong>${companyName}</strong>` : "a workspace";
+  const inviter = inviterName ? `${inviterName} invited you` : "You've been invited";
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: companyName ? `You're invited to join ${companyName} on Meritma` : "You're invited to join a workspace on Meritma",
+    html: `<p>${inviter} to join ${workspace} on Meritma.</p>
+           <p><a href="${link}">Accept your invitation</a> - this link is valid for 7 days.</p>
+           <p>If you don't have a Meritma account yet, you'll be able to create one first, then the invitation is applied automatically.</p>
+           <p>If you weren't expecting this, you can safely ignore this email.</p>`,
+  });
+}
+
 export async function sendVerificationEmail(to, token) {
   const link = `${appUrl()}/verify-email?token=${encodeURIComponent(token)}`;
   return sendEmail({

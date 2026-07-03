@@ -18,7 +18,8 @@
     "db:schema": "node scripts/apply_schema.cjs",
     "db:migrate": "node scripts/apply_migrations.cjs",
     "db:seed": "node scripts/seed_all.cjs",
-    "db:bootstrap": "node scripts/bootstrap_db.cjs"
+    "db:bootstrap": "node scripts/bootstrap_db.cjs",
+    "gen:ga-catalog": "python scripts/gen_ga_catalog.py"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

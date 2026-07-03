@@ -50,7 +50,7 @@ function fetchChart(key, s, e, paramFilters = {}) {
     case "daily":      return appClient.utm.timeseries(p);
     case "bounce":     return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "bounce_rate", minSessions: 50, limit: 10 });
     case "engagement": return appClient.utm.breakdown({ ...p, dim: "session_source", metric: "engagement_rate", minSessions: 50, limit: 10 });
-    case "device":     return appClient.utm.breakdown({ ...p, dim: "device", metric: "sessions", limit: 10 });
+    case "device":     return appClient.utm.devices({ start: p.start, end: p.end, limit: 10 });
     case "country":    return appClient.utm.countries({ start: p.start, end: p.end, limit: 10 });
     default:           return Promise.resolve([]);
   }
@@ -615,9 +615,6 @@ const UTM_COLS = [
   { key: "session_source",        label: "Source",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
   { key: "session_medium",        label: "Medium",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
   { key: "session_campaign_name", label: "Campaign",    defaultVisible: true,  filterable: true,  filterType: "multiselect" },
-  { key: "session_content",       label: "Content",     defaultVisible: true,  filterable: true,  filterType: "multiselect" },
-  { key: "session_term",          label: "Term",        defaultVisible: true,  filterable: true,  filterType: "multiselect" },
-  { key: "session_utm_id",        label: "UTM ID",      defaultVisible: true,  filterable: true,  filterType: "multiselect" },
   { key: "sessions",              label: "Sessions",    defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Sessions: the number of sessions that began on your site or app. A session is a period of user engagement that starts when a user opens your site/app in the foreground; it ends after 30 minutes of inactivity (a new session starts on the user's return)." },
   { key: "active_users",          label: "Active Users",defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 Active Users: the number of distinct users who had an engaged session (a session lasting 10+ seconds, with a conversion event, or 2+ page/screen views). In GA4 this is the primary 'Users' metric, counting only people who actively engaged rather than every visitor." },
   { key: "new_users",             label: "New Users",   defaultVisible: true,  filterable: false, numeric: true, align: "right", format: fmtNum,  info: "GA4 New Users: the number of users who interacted with your site or app for the first time, counted by the first_visit (or first_open) event. Returning users are excluded." },
@@ -752,8 +749,8 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
 
   const visibleCols = colOrder.filter(k => !hiddenCols.has(k)).map(k => UTM_COLS.find(c => c.key === k)).filter(Boolean);
 
-  // Row key for GA rows (no ID - composite key). Includes session_utm_id to match
-  // the /links GROUP BY exactly, so selection and prev-period lookups are 1:1.
+  // Row key for GA rows (no ID - composite key). Matches the /links GROUP BY
+  // (source / medium / campaign) exactly, so selection and prev-period lookups are 1:1.
   const rowKey = gaRowKey;
 
   // Previous-period rows keyed for O(1) lookup when rendering per-metric deltas.
@@ -786,9 +783,9 @@ export function GAUtmLinksSection({ days = "all", compare = false, onDaysChange,
   };
 
   const copySelected = () => {
-    const header = "Source\tMedium\tCampaign\tContent\tTerm";
+    const header = "Source\tMedium\tCampaign";
     const rows = selectedRows.map(r =>
-      [r.session_source, r.session_medium, r.session_campaign_name, r.session_content, r.session_term]
+      [r.session_source, r.session_medium, r.session_campaign_name]
         .map(v => v || "")
         .join("\t")
     ).join("\n");

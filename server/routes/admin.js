@@ -216,7 +216,7 @@ export function createAdminRouter(pool) {
   });
 
   // ── PATCH /api/admin/accounts/:id ─────────────────────────────────────────
-  // Change plan (lite|standard|pro), set/extend trial expiry, suspend/reactivate,
+  // Change plan (lite|standard|enterprise), set/extend trial expiry, suspend/reactivate,
   // plus per-account limit overrides + billing notes (stored in settings JSONB).
   // The app.stamp_plan_upgraded_at trigger stamps plan_upgraded_at when the trial
   // expiry is cleared (i.e. the account converts to paid).
@@ -226,8 +226,8 @@ export function createAdminRouter(pool) {
     const vals = [];
 
     if (plan !== undefined) {
-      if (!["lite", "standard", "pro"].includes(plan)) {
-        return res.status(400).json({ error: "plan must be 'lite', 'standard' or 'pro'" });
+      if (!["lite", "standard", "enterprise"].includes(plan)) {
+        return res.status(400).json({ error: "plan must be 'lite', 'standard' or 'enterprise'" });
       }
       sets.push(`plan = $${sets.length + 1}`); vals.push(plan);
     }

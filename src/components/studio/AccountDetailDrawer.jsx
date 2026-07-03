@@ -158,7 +158,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Plan</span>
                   <div className="flex gap-1.5">
-                    {["lite", "standard", "pro"].map((p) => (
+                    {["lite", "standard", "enterprise"].map((p) => (
                       <button key={p} onClick={() => setPlan(p)}
                         className={`px-3 py-1 rounded-md text-sm capitalize transition-colors ${
                           plan === p ? "bg-foreground text-background" : "bg-secondary text-muted-foreground hover:text-foreground"

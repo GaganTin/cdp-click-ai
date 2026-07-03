@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { appClient } from "@/api/appClient";
 import PageGuide from "@/components/PageGuide";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
@@ -996,7 +996,25 @@ export default function Profiles() {
   const [importOpen, setImportOpen] = useState(false);
   const filterRef = useRef(null);
   const queryClient = useQueryClient();
+  const location = useLocation();
   const LIMIT = 20;
+
+  // Accept filters deep-linked from another page (e.g. the AI Analyst's "Open in
+  // Profiles" action) via router state. Merge over the initial filter shape so
+  // untouched fields keep their empty-array/empty-string defaults, then clear the
+  // history state so a refresh/back doesn't re-apply it. Runs once on mount.
+  useEffect(() => {
+    const s = location.state;
+    if (!s?.profileFilters) return;
+    if (s.tab === "anonymous" || s.tab === "customer") setActiveTab(s.tab);
+    if (s.tab === "anonymous") setAnonFilters(f => ({ ...f, ...s.profileFilters }));
+    else setCustFilters(f => ({ ...f, ...s.profileFilters }));
+    if (s.attrFilters) setAttrFilters(s.attrFilters);
+    setShowFilters(true);
+    setPage(1);
+    window.history.replaceState({}, "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const saveSegmentMutation = useMutation({
     mutationFn: (data) => appClient.entities.Segment.create(data),
@@ -1050,6 +1068,10 @@ export default function Profiles() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Data sources — used to hide the "Connect a source" CTA once GA (or another source) is already connected.
+  const { data: integrationsList = [] } = useQuery({ queryKey: ["data-integrations"], queryFn: () => appClient.dataIntegrations.list() });
+  const gaConnected = integrationsList.some((r) => r.integration_type === "googleAnalytics" && r.is_connected && !r.is_connection_error);
 
   const { data: custFilterOpts } = useQuery({ queryKey: ["profiles-cust-filters"], queryFn: () => appClient.profiles.customerFilters() });
   const { data: anonFilterOpts } = useQuery({ queryKey: ["profiles-anon-filters"], queryFn: () => appClient.profiles.anonymousFilters() });
@@ -1554,9 +1576,19 @@ export default function Profiles() {
 
               {/* How to start */}
               <div className="border-t border-border pt-4 text-center space-y-3">
-                <p className="text-xs text-muted-foreground">{t("Profiles appear here once your data is flowing. Connect a source like Google Analytics or Shopify, or upload a customer list to get started.")}</p>
+                {(!isCustomer && gaConnected) ? (
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-lg mx-auto">
+                    {t("Google Analytics is connected. Make sure you've completed step 4 of the GA setup - adding the CapSuite APID and SID custom dimensions. Once those are in place, GA needs a couple of days to start collecting visitor IDs, so anonymous profiles usually begin appearing here within 3-5 days.")}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">{t("Profiles appear here once your data is flowing. Connect a source like Google Analytics or Shopify, or upload a customer list to get started.")}</p>
+                )}
                 <div className="flex items-center justify-center gap-2">
-                  <Link to="/integrations"><Button variant="outline" size="sm" className="gap-1.5"><Globe className="w-3.5 h-3.5" /> {t("Connect a source")}</Button></Link>
+                  {(!isCustomer && gaConnected) ? (
+                    <Link to="/integrations"><Button variant="outline" size="sm" className="gap-1.5"><BarChart2 className="w-3.5 h-3.5" /> {t("Review GA setup")}</Button></Link>
+                  ) : (
+                    <Link to="/integrations"><Button variant="outline" size="sm" className="gap-1.5"><Globe className="w-3.5 h-3.5" /> {t("Connect a source")}</Button></Link>
+                  )}
                   <Link to="/import-export"><Button variant="outline" size="sm" className="gap-1.5"><Upload className="w-3.5 h-3.5" /> {t("Upload data")}</Button></Link>
                 </div>
               </div>

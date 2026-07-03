@@ -358,13 +358,320 @@ CREATE INDEX gal_pl_company_date_idx ON ga_landing.purchase_list(company_id, dat
 -- profile-mapping: trxn_id lookup (GA purchase -> commerce/manual order -> buyer)
 CREATE INDEX gal_pl_company_trxn_idx ON ga_landing.purchase_list(company_id, trxn_id);
 
+-- ── GA cube tables (conformed daily cubes from the redesign) ─────────────────
+--  GENERATED from dags/click_cdp_ai_dags/lib/cube_catalog.py (the pipeline's single
+--  source of truth). Regenerate with:  python scripts/gen_ga_catalog.py
+--  The DAG loader auto-creates these (CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT
+--  EXISTS) but does NOT create the (company_id, date) index the app's UTM / channel
+--  queries rely on - that is why the tables + indexes are declared here.
+-- >>> BEGIN GENERATED CUBE TABLES
+CREATE TABLE ga_landing.page_engagement_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  page_path                  TEXT,
+  user_engagement_duration   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_page_engagement_daily_cd_idx ON ga_landing.page_engagement_daily(company_id, date);
+
+CREATE TABLE ga_landing.session_quality_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  screen_page_views_per_session DOUBLE PRECISION,
+  average_session_duration   DOUBLE PRECISION,
+  bounce_rate                DOUBLE PRECISION,
+  engagement_rate            DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_session_quality_daily_cd_idx ON ga_landing.session_quality_daily(company_id, date);
+
+CREATE TABLE ga_landing.item_performance (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  item_name                  TEXT,
+  item_brand                 TEXT,
+  item_category              TEXT,
+  items_viewed               BIGINT,
+  items_added_to_cart        BIGINT,
+  items_purchased            BIGINT,
+  item_revenue               DOUBLE PRECISION,
+  cart_to_view_rate          DOUBLE PRECISION,
+  purchase_to_view_rate      DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_item_performance_cd_idx ON ga_landing.item_performance(company_id, date);
+
+CREATE TABLE ga_landing.item_attribution (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  channel_group              TEXT,
+  item_revenue               DOUBLE PRECISION,
+  items_purchased            BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_item_attribution_cd_idx ON ga_landing.item_attribution(company_id, date);
+
+CREATE TABLE ga_landing.transaction_metrics (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  transactions               BIGINT,
+  purchase_revenue           DOUBLE PRECISION,
+  ecommerce_purchases        BIGINT,
+  first_time_purchasers      BIGINT,
+  average_purchase_revenue   DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_transaction_metrics_cd_idx ON ga_landing.transaction_metrics(company_id, date);
+
+CREATE TABLE ga_landing.acquisition_session_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  session_source_medium      TEXT,
+  session_campaign_name      TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_acquisition_session_daily_cd_idx ON ga_landing.acquisition_session_daily(company_id, date);
+
+CREATE TABLE ga_landing.acquisition_firstuser_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  first_user_source_medium   TEXT,
+  first_user_channel_group   TEXT,
+  new_users                  BIGINT,
+  total_users                BIGINT,
+  active_users               BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_acquisition_firstuser_daily_cd_idx ON ga_landing.acquisition_firstuser_daily(company_id, date);
+
+CREATE TABLE ga_landing.channel_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_channel_daily_cd_idx ON ga_landing.channel_daily(company_id, date);
+
+CREATE TABLE ga_landing.landing_page_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  landing_page               TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_landing_page_daily_cd_idx ON ga_landing.landing_page_daily(company_id, date);
+
+CREATE TABLE ga_landing.demographics_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  age_bracket                TEXT,
+  gender                     TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_demographics_daily_cd_idx ON ga_landing.demographics_daily(company_id, date);
+
+CREATE TABLE ga_landing.audience_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  audience_name              TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_audience_daily_cd_idx ON ga_landing.audience_daily(company_id, date);
+
+CREATE TABLE ga_landing.tech_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  operating_system           TEXT,
+  browser                    TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  page_views                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_tech_daily_cd_idx ON ga_landing.tech_daily(company_id, date);
+
+CREATE TABLE ga_landing.geo_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  country                    TEXT,
+  region                     TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_geo_daily_cd_idx ON ga_landing.geo_daily(company_id, date);
+
+CREATE TABLE ga_landing.interest_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  interest                   TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_interest_daily_cd_idx ON ga_landing.interest_daily(company_id, date);
+
+CREATE TABLE ga_landing.returning_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  new_vs_returning           TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_returning_daily_cd_idx ON ga_landing.returning_daily(company_id, date);
+
+CREATE TABLE ga_landing.cohort_weekly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_week            BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_cohort_weekly_c_idx ON ga_landing.cohort_weekly(company_id);
+
+CREATE TABLE ga_landing.cohort_monthly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_month           BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_cohort_monthly_c_idx ON ga_landing.cohort_monthly(company_id);
+-- <<< END GENERATED CUBE TABLES
+
 -- ── Sync control / incremental watermark (one row per workspace × report) ────
 --  The DAGs read this BEFORE each fetch to decide the start date, and advance
 --  last_sync_date in the SAME transaction as the data load (idempotent re-runs).
 --  Resume logic (see dags/click_cdp_ai/lib/pg_state.py):
 --    is_debugging = TRUE  -> 1st of (today - debug_months)
 --    last_sync_date set   -> last_sync_date - overlap_days   (daily incremental)
---    first run            -> plan-based backfill: 3y free/trial, 5y pro/enterprise
+--    first run            -> plan-based backfill: 3 years for every tier by default
 --  Keyed by capsuite_ref (1:1 with a workspace) so the external ETL stays
 --  decoupled from app UUIDs. Created here so the schema is authoritative; the
 --  DAG also ensures it at runtime (CREATE IF NOT EXISTS) for safety.

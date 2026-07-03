@@ -45,15 +45,18 @@ CONTROL_TABLES = [
 
 # The integration DAGs whose runs this digest reports on (for the Airflow-metadata
 # failed / recovered-on-retry scan). NOTE these are the real dag_ids:
-#   - the 4 GA child report DAGs carry the precise failing task, so we scan THEM
+#   - the GA child report DAGs carry the precise failing task, so we scan THEM
 #     (not the GA orchestrator, whose rollup failure would just double-count a
 #     child failure; orchestrator own-task failures still fire a Tier 1 alert);
 #   - GSC's dag_id is click_cdp_ai_gsc_keyword_performance (no "integration_").
 FLEET_DAG_IDS = [
     "click_cdp_ai_integration_ga_reports_path_funnel",
-    "click_cdp_ai_integration_ga_reports_utm",
     "click_cdp_ai_integration_ga_reports_content",
     "click_cdp_ai_integration_ga_reports_purchase",
+    "click_cdp_ai_integration_ga_reports_ecommerce",
+    "click_cdp_ai_integration_ga_reports_acquisition",
+    "click_cdp_ai_integration_ga_reports_audience",
+    "click_cdp_ai_integration_ga_reports_retention",
     "click_cdp_ai_gsc_keyword_performance",
     "click_cdp_ai_integration_shopify",
     "click_cdp_ai_integration_shopline",
@@ -151,6 +154,11 @@ def _collect_airflow(lookback_hours):
         from airflow.utils.session import create_session
 
         cutoff = utcnow() - timedelta(hours=lookback_hours)
+        # Build the result lists INSIDE the session: _short_reason reads ti.note,
+        # which in Airflow >=2.5 is a lazy relationship (association proxy). Reading
+        # it after the session closes raises DetachedInstanceError - not an
+        # AttributeError, so getattr(..., None) doesn't catch it - which would bubble
+        # up to the except below and silently drop every failure. Keep it attached.
         with create_session() as session:
             tis = (
                 session.query(TaskInstance)
@@ -158,29 +166,36 @@ def _collect_airflow(lookback_hours):
                 .filter(TaskInstance.start_date >= cutoff)
                 .all()
             )
-        for ti in tis:
-            if ti.state == "failed":
-                failed.append({
-                    "dag_id": ti.dag_id,
-                    "task_id": ti.task_id,
-                    "run_id": ti.run_id,
-                    "error": _short_reason(ti),
-                })
-            elif ti.state == "success" and (ti.try_number or 1) > 1:
-                recovered.append({
-                    "dag_id": ti.dag_id,
-                    "task_id": ti.task_id,
-                    "run_id": ti.run_id,
-                    "tries": ti.try_number,
-                })
+            for ti in tis:
+                if ti.state == "failed":
+                    failed.append({
+                        "dag_id": ti.dag_id,
+                        "task_id": ti.task_id,
+                        "run_id": ti.run_id,
+                        "error": _short_reason(ti),
+                    })
+                elif ti.state == "success" and (ti.try_number or 1) > 1:
+                    recovered.append({
+                        "dag_id": ti.dag_id,
+                        "task_id": ti.task_id,
+                        "run_id": ti.run_id,
+                        "tries": ti.try_number,
+                    })
     except Exception as exc:  # noqa: BLE001
         _log.error("digest: Airflow-metadata collection failed: %s", exc)
     return failed, recovered
 
 
 def _short_reason(ti):
-    """Best-effort one-line failure reason for a task instance."""
-    note = getattr(ti, "note", None)
+    """Best-effort one-line failure reason for a task instance.
+
+    ``ti.note`` is a lazy relationship (Airflow >=2.5) - reading it can raise if
+    the instance is detached, so never let it abort the surrounding scan.
+    """
+    try:
+        note = getattr(ti, "note", None)
+    except Exception:  # noqa: BLE001 - detached/relationship load failure
+        note = None
     if note:
         return str(note)[:160]
     return "task failed (see Airflow logs)"
@@ -241,8 +256,8 @@ def build_card(report):
         body.append({"type": "TextBlock", "weight": "Bolder", "color": "Attention",
                      "text": f"❌ Failed ({len(failed)})", "spacing": "Medium"})
         body.append(_bullet_list([
-            f"**{f['dag_id'].replace('click_cdp_ai_integration_', '')}** - "
-            f"{f['task_id']} - {f['error']}"
+            f"**{f['dag_id'].replace('click_cdp_ai_integration_', '')}** — "
+            f"{f['task_id']} — {f['error']}"
             for f in failed[:25]
         ]))
 
@@ -250,7 +265,7 @@ def build_card(report):
         body.append({"type": "TextBlock", "weight": "Bolder",
                      "text": f"⚠️ Recovered on retry ({len(recovered)})", "spacing": "Medium"})
         body.append(_bullet_list([
-            f"**{r['dag_id'].replace('click_cdp_ai_integration_', '')}** - "
+            f"**{r['dag_id'].replace('click_cdp_ai_integration_', '')}** — "
             f"{r['task_id']} (passed on try {r['tries']})"
             for r in recovered[:25]
         ]))
@@ -258,7 +273,7 @@ def build_card(report):
     if zero_pairs:
         body.append({"type": "TextBlock", "weight": "Bolder",
                      "text": f"🕳️ Synced but 0 rows ({len(zero_pairs)})", "spacing": "Medium"})
-        body.append(_bullet_list([f"{label} - {client}" for label, client in zero_pairs[:25]]))
+        body.append(_bullet_list([f"{label} — {client}" for label, client in zero_pairs[:25]]))
 
     # Per-platform healthy roll-up.
     facts = [

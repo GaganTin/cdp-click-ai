@@ -2,9 +2,9 @@ import { Router } from "express";
 import { authenticate, requirePlatformAdmin } from "../middleware/auth.js";
 
 // Fallback used when DB is not available - mirrors the DB seed exactly.
-// Three tiers: 'lite' ($100/mo, 3-month trial), 'standard' ($199/mo), 'pro'
+// Three tiers: 'lite' ($100/mo, 3-month trial), 'standard' ($199/mo), 'enterprise'
 // (contact sales). team_members:null => unlimited. ai_tokens are stored as raw
-// tokens (gpt-5.4-mini @ $0.75/$4.50 per 1M) but shown in the UI as "credits"
+// tokens (gpt-5-mini @ $0.28/$2.20 per 1M) but shown in the UI as "credits"
 // at 100,000 tokens = 1 credit (10M => 100, 30M => 300).
 export const FALLBACK_PLANS = [
   {
@@ -28,10 +28,10 @@ export const FALLBACK_PLANS = [
     is_active: true,
   },
   {
-    id: "pro", name: "Pro", price_display: "Contact sales", period: "",
+    id: "enterprise", name: "Enterprise", price_display: "Contact sales", period: "",
     badge: null,
     description: "For high-volume teams. Custom profile and AI limits, tailored to you.",
-    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Upgrade to Pro", cta_external: true,
+    cta_label: "Contact sales", cta_href: "mailto:support@clickcdp.com?subject=Upgrade to Enterprise", cta_external: true,
     is_highlighted: false, sort_order: 3, trial_days: null, warning_days: 7,
     features: ["Unlimited team members", "5+ workspaces", "Custom customer profile volume", "AI Analyst", "Intelligent Segmentation", "UTM tracking", "AI Content & Traffic Analysis", "Dynamic Pop-up", "Unlimited email campaigns", "Custom credits", "Priority support"],
     limits: { profiles: null, campaigns: null, ai_tokens: null, team_members: null, workspaces: null },

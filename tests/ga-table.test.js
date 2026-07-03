@@ -3,15 +3,23 @@ import { gaRowKey, gaDeltaPct, distinctValues, rowMatchesFilters } from "../src/
 
 // ── gaRowKey ──────────────────────────────────────────────────────────────────
 describe("gaRowKey", () => {
+  // GA cube redesign: the /links grid groups by source / medium / campaign only.
+  // content / term / utm_id are no longer fetched by any cube, so they are not
+  // part of the key (and any such fields on a row are ignored).
   const base = {
     session_source: "google", session_medium: "cpc", session_campaign_name: "q1",
-    session_content: "banner", session_term: "shoes", session_utm_id: "A1",
   };
 
-  it("includes session_utm_id so rows differing only by UTM ID get distinct keys", () => {
+  it("distinguishes rows that differ by campaign", () => {
     const a = gaRowKey(base);
-    const b = gaRowKey({ ...base, session_utm_id: "A2" });
+    const b = gaRowKey({ ...base, session_campaign_name: "q2" });
     expect(a).not.toBe(b);
+  });
+
+  it("ignores dropped columns (content / term / utm_id) - they no longer key the row", () => {
+    const a = gaRowKey(base);
+    const b = gaRowKey({ ...base, session_content: "banner", session_term: "shoes", session_utm_id: "A2" });
+    expect(a).toBe(b);
   });
 
   it("is stable for identical rows", () => {
@@ -19,8 +27,8 @@ describe("gaRowKey", () => {
   });
 
   it("treats null/undefined values as empty segments (no collisions across shapes)", () => {
-    expect(gaRowKey({ session_source: "x" })).toBe("x|||||");
-    expect(gaRowKey({})).toBe("|||||");
+    expect(gaRowKey({ session_source: "x" })).toBe("x||");
+    expect(gaRowKey({})).toBe("||");
   });
 });
 

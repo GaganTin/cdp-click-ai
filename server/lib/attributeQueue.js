@@ -88,10 +88,15 @@ async function runContentJob(pool, job, opts = { scrape: true, tag: true, scoped
   // job, our heartbeats fail and we bail out instead of double-running it.
   const lease = job.progress?.lease;
 
-  // 1) Active web_content attributes (optionally a single one)
+  // 1) web_content attributes to tag. A single-attribute reconstruct (job.attribute_id
+  //    set) runs in ANY status so users can reconstruct a Draft attribute and preview
+  //    its page tags; propagation to profiles is still gated on status='active' (see
+  //    propagate()), so a Draft attribute never writes profile tags. The "tag all"
+  //    path (attribute_id IS NULL) only tags Active attributes.
   const attrParams = [companyId];
-  let attrWhere = "company_id = $1 AND source = 'web_content' AND status = 'active'";
+  let attrWhere = "company_id = $1 AND source = 'web_content'";
   if (job.attribute_id) { attrParams.push(job.attribute_id); attrWhere += ` AND id = $2`; }
+  else { attrWhere += " AND status = 'active'"; }
   const { rows: attrs } = await pool.query(
     `SELECT id, name, description, value_type, scope, extract_from FROM app.attributes WHERE ${attrWhere}`,
     attrParams
@@ -408,7 +413,7 @@ async function propagate(pool, companyId, attrIds, entityType) {
        ON wp.company_id = $1 AND wp.is_excluded = false
           AND app.norm_url(wp.url) = app.norm_url(vp.url)
      JOIN app.page_attribute_values pav ON pav.page_id = wp.id
-     JOIN app.attributes a       ON a.id = pav.attribute_id AND a.scope = ANY($4::text[])
+     JOIN app.attributes a       ON a.id = pav.attribute_id AND a.scope = ANY($4::text[]) AND a.status = 'active'
      JOIN app.attribute_values av ON av.id = pav.attribute_value_id
      JOIN app.attribute_values cav ON cav.id = COALESCE(av.merged_into, av.id)
      WHERE pav.attribute_id = ANY($2::uuid[])

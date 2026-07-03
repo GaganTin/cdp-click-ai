@@ -35,12 +35,12 @@
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
 --  Three tiers: 'lite' ($100/mo, the entry tier carrying a 3-month trial that
---  goes read-only on expiry), 'standard' ($199/mo) and 'pro' (contact sales).
+--  goes read-only on expiry), 'standard' ($199/mo) and 'enterprise' (contact sales).
 --  There is no in-app payment flow - the paid upgrade is applied out-of-band by
 --  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
 --  by plan_expires_at, not the tier, so any tier could in principle carry one.
 CREATE TABLE app.plans (
-  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'pro'
+  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'enterprise'
   name           TEXT        NOT NULL,
   price_display  TEXT        NOT NULL DEFAULT '',
   period         TEXT        NOT NULL DEFAULT '',
@@ -72,9 +72,9 @@ VALUES
    'Get started', '/register', false, true, 2, null, 7,
    '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
    '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
-  ('pro', 'Pro', 'Contact sales', '', null,
+  ('enterprise', 'Enterprise', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
-   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
+   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Enterprise', true, false, 3, null, 7,
    '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
@@ -101,7 +101,7 @@ CREATE TRIGGER accounts_updated_date BEFORE UPDATE ON app.accounts
 -- Tier-agnostic trial/upgrade stamping. An account is "in trial" iff
 -- plan_expires_at is set; converting to paid (sales clears the expiry) stamps
 -- plan_upgraded_at, and (re)entering a trial clears it. Keeps the date accurate
--- no matter which tier (lite/standard/pro) the account lands on.
+-- no matter which tier (lite/standard/enterprise) the account lands on.
 CREATE OR REPLACE FUNCTION app.stamp_plan_upgraded_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -417,7 +417,6 @@ CREATE TABLE app.ai_model_pricing (
   updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD'),
   ('gpt-5-mini',   0.28, 0.030, 2.20, 'USD'),
   ('gpt-5-nano',   0.05, 0.010, 0.40, 'USD');
 

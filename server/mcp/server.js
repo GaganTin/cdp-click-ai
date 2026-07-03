@@ -7,11 +7,12 @@ import { databaseTools, handleDatabaseTool } from "./tools/database.js";
 import { segmentTools, handleSegmentTool } from "./tools/segments.js";
 import { utmTools, handleUtmTool } from "./tools/utm.js";
 import { analyticsTools, handleAnalyticsTool } from "./tools/analytics.js";
+import { catalogTools, handleCatalogTool } from "./tools/catalog.js";
 
 // NOTE: EDM (email) tools are intentionally NOT registered - email is a
 // coming-soon feature, so the analyst must have no access to email data and
 // must not suggest email campaigns. Re-add edm.js here when email ships.
-const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...analyticsTools];
+const ALL_TOOLS = [...databaseTools, ...segmentTools, ...utmTools, ...analyticsTools, ...catalogTools];
 
 /**
  * Create a connected MCP server+client pair for in-process use.
@@ -49,6 +50,9 @@ export async function createAnalystMCPClient(pool, dataDictionary) {
     }
     if (analyticsTools.some((t) => t.name === name)) {
       return handleAnalyticsTool(name, args, pool);
+    }
+    if (catalogTools.some((t) => t.name === name)) {
+      return handleCatalogTool(name, args, pool);
     }
 
     return { content: [{ type: "text", text: JSON.stringify({ error: `Unknown tool: ${name}` }) }] };

@@ -86,7 +86,7 @@ def click_cdp_ai_gsc_keyword_performance():
             return dict_config
         try:
             # Resume point from ga_sync_control: first run -> plan-based backfill
-            # (3y trial / 5y pro), then daily incremental overlap.
+            # (3 years for every tier by default), then daily incremental overlap.
             str_start_date = pg_state.resolve_start_date(str_client_name, "keyword_performance")
             str_end_date = datetime.today().strftime("%Y-%m-%d")
             if str_start_date > str_end_date:

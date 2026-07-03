@@ -32,6 +32,31 @@ _log = get_logger("ga.purchase")
 _DEFAULT_ARGS = ga_config.pool_default_args("cdp_ai_ga_api_pool", "GA_API_POOL")
 
 
+def _add_capsuite_param_dims(dict_config, gaConnector, list_dimensions):
+    """Append the supporting capsuite custom dimensions, returning the order map."""
+    num_current_dim = len(list_dimensions) - 1
+    dict_dim_order = {}
+    if "supportingCapsuiteParam" in dict_config:
+        for param in dict_config["supportingCapsuiteParam"]:
+            if param == "capsuite_sid":
+                list_dimensions.append(gaConnector.DIM_CAPSUITE_SID)
+                num_current_dim += 1
+                dict_dim_order["capsuite_sid"] = num_current_dim
+            if param == "capsuite_uid":
+                list_dimensions.append(gaConnector.DIM_CAPSUITE_UID)
+                num_current_dim += 1
+                dict_dim_order["capsuite_uid"] = num_current_dim
+            if param == "capsuite_apid":
+                list_dimensions.append(gaConnector.DIM_CAPSUITE_APID)
+                num_current_dim += 1
+                dict_dim_order["capsuite_apid"] = num_current_dim
+            if param == "capsuite_identifier":
+                list_dimensions.append(gaConnector.DIM_CAPSUITE_IDENTIFIER)
+                num_current_dim += 1
+                dict_dim_order["capsuite_identifier"] = num_current_dim
+    return dict_dim_order
+
+
 @dag(
     schedule=None,
     start_date=datetime(2024, 1, 1),
@@ -70,16 +95,15 @@ def click_cdp_ai_integration_ga_reports_purchase():
             _log.info(f"Getting records from: {str_start_date}")
 
             df = pd.DataFrame()
+            quality = None
             for property in dict_config["property"]:
                 property_id = property["property_id"]
                 property_name = property["property_name"]
                 _log.info(f"Handling property: {property_id}")
 
                 gaConnector = GoogleAnalytics(ga_config.get_ga_service_account(), property_id)
-                list_dimensions = [
-                    gaConnector.DIM_DATE, gaConnector.DIM_TRXN_ID, gaConnector.DIM_CAPSUITE_SID,
-                    gaConnector.DIM_CAPSUITE_APID, gaConnector.DIM_CAPSUITE_UID, gaConnector.DIM_CAPSUITE_IDENTIFIER,
-                ]
+                list_dimensions = [gaConnector.DIM_DATE, gaConnector.DIM_TRXN_ID]
+                dict_dim_order = _add_capsuite_param_dims(dict_config, gaConnector, list_dimensions)
                 list_metrics = []
 
                 response = gaConnector.get_base_report(
@@ -91,10 +115,11 @@ def click_cdp_ai_integration_ga_reports_purchase():
                             string_filter=Filter.StringFilter(value="purchase"),
                         )))
                 num_row_count = type(response).to_dict(response)['row_count']
+                quality = GoogleAnalytics.extract_quality(response)
                 _log.info(f"Total rows found: {num_row_count}")
 
                 if num_row_count > 0:
-                    list_path_exploration = transform_purchase_response(response)
+                    list_path_exploration = transform_purchase_response(response, dict_dim_order)
                     if num_row_count > 100000:
                         num_requests = (num_row_count // 100000) + (1 if num_row_count % 100000 != 0 else 0)
                         for request_num in range(1, num_requests):
@@ -108,7 +133,7 @@ def click_cdp_ai_integration_ga_reports_purchase():
                                         field_name="eventName",
                                         string_filter=Filter.StringFilter(value="purchase"),
                                     )))
-                            list_path_exploration += transform_purchase_response(response)
+                            list_path_exploration += transform_purchase_response(response, dict_dim_order)
                             num_current_offset += 100000
 
                     tmp_df = pd.json_normalize(list_path_exploration)
@@ -119,6 +144,8 @@ def click_cdp_ai_integration_ga_reports_purchase():
                 else:
                     _log.info(f"No new data found in {property_id}")
 
+            if quality is not None:
+                tf.record_report_quality(str_client_name, "purchase_list", property_id, quality, df=df, start_date=str_start_date)
             ga_storage.persist_by_date(df, str_client_name, "purchase_list")
         except Exception as error:
             _log.error(f"Error generating purchase list files for {str_client_name}, error: {error}.")

@@ -124,6 +124,7 @@ export const appClient = {
       request(`/companies/${id}/invitations`, { method: "POST", body: JSON.stringify({ email, role }) }),
     cancelInvitation: (companyId, invId) =>
       request(`/companies/${companyId}/invitations/${invId}`, { method: "DELETE" }),
+    getInvitation: (token) => request(`/companies/invitation/${token}`),
     acceptInvitation: (token) =>
       request(`/companies/join/${token}`, { method: "POST" }),
     getPreferences: (id) => request(`/companies/${id}/preferences`),
@@ -327,7 +328,10 @@ export const appClient = {
     breakdown(params)   { return request(`/utm/breakdown${this._qs(params)}`); },
     timeseries(params)  { return request(`/utm/timeseries${this._qs(params)}`); },
     countries(params)   { return request(`/utm/countries${this._qs(params)}`); },
+    devices(params)     { return request(`/utm/devices${this._qs(params)}`); },
     utmIds(params)      { return request(`/utm/utm-ids${this._qs(params)}`); },
+    channelCommerce(params) { return request(`/utm/channel-commerce${this._qs(params)}`); },
+    channelTouch(params)    { return request(`/utm/channel-touch${this._qs(params)}`); },
     paramValues(params) { return request(`/utm/param-values${this._qs(params)}`); },
     links(days = "all", prev = false, range = null) {
       // `range` = { start, end } as YYYYMMDD for a fixed window (e.g. a calendar
@@ -533,10 +537,19 @@ export const appClient = {
       request("/attributes/values/bulk", { method: "POST", body: JSON.stringify({ value_ids, action, ...extra }) }),
     valuePages: (valueId) => request(`/attributes/values/${valueId}/pages`),
     review: () => request("/attributes/review"),
-    taggedPages: (filter) => request(`/attributes/tagged-pages${filter ? `?filter=${filter}` : ""}`),
+    taggedPages: (filter, { attribute_id, search } = {}) => {
+      const p = new URLSearchParams();
+      if (filter) p.set("filter", filter);
+      if (attribute_id) p.set("attribute_id", attribute_id);
+      if (search) p.set("search", search);
+      const q = p.toString();
+      return request(`/attributes/tagged-pages${q ? `?${q}` : ""}`);
+    },
     reviewCount: () => request("/attributes/review-count"),
     reviewPage: (pageId) => request(`/attributes/pages/${pageId}/review`, { method: "POST" }),
-    reviewAllPages: (filter) => request(`/attributes/tagged-pages/review-all${filter ? `?filter=${filter}` : ""}`, { method: "POST" }),
+    // Bulk-verify: pass { page_ids } for a selection, or { filter, attribute_id, search }
+    // to verify a whole slice server-side.
+    reviewAllPages: (opts = {}) => request(`/attributes/tagged-pages/review-all`, { method: "POST", body: JSON.stringify(typeof opts === "string" ? { filter: opts } : opts) }),
     addPageTag: (pageId, attribute_id, value, display_label) =>
       request(`/attributes/pages/${pageId}/tags`, { method: "POST", body: JSON.stringify({ attribute_id, value, display_label }) }),
     pages: (id) => request(`/attributes/${id}/pages`),
@@ -578,8 +591,15 @@ export const appClient = {
     resolveDuplicates: (id, keep) => request(`/attributes/${id}/resolve-duplicates`, { method: "POST", body: JSON.stringify({ keep }) }),
     run: (id) => request(`/attributes/${id}/run`, { method: "POST" }),
     runAll: () => request("/attributes/run", { method: "POST" }),
-    autogroup: (id, group_label) =>
-      request(`/attributes/${id}/autogroup`, { method: "POST", body: JSON.stringify({ group_label }) }),
+    autogroup: (id, dimension) =>
+      request(`/attributes/${id}/autogroup`, { method: "POST", body: JSON.stringify({ dimension }) }),
+    // Grouping dimensions (multi-dimension grouping).
+    addDimension: (id, name) =>
+      request(`/attributes/${id}/dimensions`, { method: "POST", body: JSON.stringify({ name }) }),
+    renameDimension: (id, oldName, newName) =>
+      request(`/attributes/${id}/dimensions`, { method: "PATCH", body: JSON.stringify({ old: oldName, new: newName }) }),
+    removeDimension: (id, name) =>
+      request(`/attributes/${id}/dimensions/${encodeURIComponent(name)}`, { method: "DELETE" }),
     latestJob: (attributeId) => {
       const q = attributeId ? `?attribute_id=${attributeId}` : "";
       return request(`/attributes/jobs/latest${q}`);
@@ -601,8 +621,12 @@ export const appClient = {
       async UploadFile({ file }) {
         const fd = new FormData();
         fd.append("file", file);
+        // Scope the upload to the active workspace (server stores it per-company).
+        // Do NOT set Content-Type - the browser adds the multipart boundary.
+        const headers = {};
+        if (_currentCompanyId) headers["x-company-id"] = _currentCompanyId;
         const res = await fetch(`${API_BASE}/integrations/upload`, {
-          method: "POST", body: fd, credentials: "include",
+          method: "POST", body: fd, credentials: "include", headers,
         });
         if (!res.ok) {
           const payload = await res.json().catch(() => ({}));

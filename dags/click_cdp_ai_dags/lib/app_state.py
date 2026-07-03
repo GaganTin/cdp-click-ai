@@ -141,7 +141,7 @@ def build_configs(str_client_name=None, is_debugging=False, is_trial=None, conn_
 # scheduled sweep and a user's click never process the same workspace at once
 # (mirrors pg_config._fetch_rows for GA/GSC).
 _NOT_IN_FLIGHT = (
-    "AND NOT EXISTS (SELECT 1 FROM {schema}.integration_sync_jobs j "
+    "NOT EXISTS (SELECT 1 FROM {schema}.integration_sync_jobs j "
     "WHERE j.company_id = di.company_id AND j.integration_type = %s "
     "AND j.status IN ('queued', 'running'))"
 )

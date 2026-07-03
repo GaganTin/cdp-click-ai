@@ -19,6 +19,7 @@ from dags.utils.google_analytics import GoogleAnalytics
 from dags.click_cdp_ai_dags.lib import config as ga_config
 from dags.click_cdp_ai_dags.lib import storage as ga_storage
 from dags.click_cdp_ai_dags.lib import ga_reports as tf
+from dags.click_cdp_ai_dags.lib import ga_cube_runner
 from dags.click_cdp_ai_dags.lib.transforms import (
     transform_page_response,
     transform_page_utm_response,
@@ -74,13 +75,14 @@ def click_cdp_ai_integration_ga_reports_content():
             _log.info(f"Getting records from: {str_start_date}")
 
             df = pd.DataFrame()
+            quality = None
             for property in dict_config["property"]:
                 property_id = property["property_id"]
                 property_name = property["property_name"]
                 _log.info(f"Handling property: {property_id}")
 
                 gaConnector = GoogleAnalytics(ga_config.get_ga_service_account(), property_id)
-                list_dimensions = [gaConnector.DIM_DATE, gaConnector.DIM_UNIFIED_PAGE_PATH]
+                list_dimensions = [gaConnector.DIM_DATE, gaConnector.DIM_UNIFIED_PAGE_PATH, gaConnector.DIM_PAGE_TITLE]
                 list_metrics = [
                     gaConnector.MET_ACTIVE_USERS, gaConnector.MET_NEW_USERS, gaConnector.MET_ENGAGEMENT_RATE,
                     gaConnector.MET_PAGE_VIEWS, gaConnector.MET_SESSIONS, gaConnector.MET_ENGAGED_SESSIONS,
@@ -91,6 +93,7 @@ def click_cdp_ai_integration_ga_reports_content():
                     str_start_date=str_start_date, str_end_date='today',
                     num_offset=0, list_dimension_filters=None)
                 num_row_count = type(response).to_dict(response)['row_count']
+                quality = GoogleAnalytics.extract_quality(response)
                 _log.info(f"Total rows found: {num_row_count}")
 
                 if num_row_count > 0:
@@ -114,6 +117,8 @@ def click_cdp_ai_integration_ga_reports_content():
                 else:
                     _log.info(f"No new data found in {property_id}")
 
+            if quality is not None:
+                tf.record_report_quality(str_client_name, "page_metrics", property_id, quality, df=df, start_date=str_start_date)
             ga_storage.persist_by_date(df, str_client_name, "page_metrics", dashed_source_date=True)
         except Exception as error:
             _log.error(f"Error generating page metrics files for {str_client_name}, error: {error}.")
@@ -134,15 +139,18 @@ def click_cdp_ai_integration_ga_reports_content():
             _log.info(f"Getting records from: {str_start_date}")
 
             df = pd.DataFrame()
+            quality = None
             for property in dict_config["property"]:
                 property_id = property["property_id"]
                 property_name = property["property_name"]
                 _log.info(f"Handling property: {property_id}")
 
                 gaConnector = GoogleAnalytics(ga_config.get_ga_service_account(), property_id)
+                # Converged: page x channel_group (low-cardinality) instead of
+                # page x source x medium - lowers the (other)-row risk on this page-scoped cube.
                 list_dimensions = [
                     gaConnector.DIM_DATE, gaConnector.DIM_UNIFIED_PAGE_PATH,
-                    gaConnector.DIM_SESSION_SOURCE, gaConnector.DIM_SESSION_MEDIUM,
+                    gaConnector.DIM_SESSION_CHANNEL_GROUP,
                 ]
                 list_metrics = [gaConnector.MET_ACTIVE_USERS, gaConnector.MET_NEW_USERS, gaConnector.MET_PAGE_VIEWS]
 
@@ -151,6 +159,7 @@ def click_cdp_ai_integration_ga_reports_content():
                     str_start_date=str_start_date, str_end_date='today',
                     num_offset=0, list_dimension_filters=None)
                 num_row_count = type(response).to_dict(response)['row_count']
+                quality = GoogleAnalytics.extract_quality(response)
                 _log.info(f"Total rows found: {num_row_count}")
 
                 if num_row_count > 0:
@@ -174,6 +183,8 @@ def click_cdp_ai_integration_ga_reports_content():
                 else:
                     _log.info(f"No new data found in {property_id}")
 
+            if quality is not None:
+                tf.record_report_quality(str_client_name, "page_utm_metrics", property_id, quality, df=df, start_date=str_start_date)
             ga_storage.persist_by_date(df, str_client_name, "page_utm_metrics", dashed_source_date=True)
         except Exception as error:
             _log.error(f"Error generating page utm metrics files for {str_client_name}, error: {error}.")
@@ -194,6 +205,7 @@ def click_cdp_ai_integration_ga_reports_content():
             _log.info(f"Getting records from: {str_start_date}")
 
             df = pd.DataFrame()
+            quality = None
             for property in dict_config["property"]:
                 property_id = property["property_id"]
                 property_name = property["property_name"]
@@ -208,6 +220,7 @@ def click_cdp_ai_integration_ga_reports_content():
                     str_start_date=str_start_date, str_end_date="today",
                     num_offset=0, list_dimension_filters=None)
                 num_row_count = type(response).to_dict(response)['row_count']
+                quality = GoogleAnalytics.extract_quality(response)
                 _log.info(f"Total rows found: {num_row_count}")
 
                 if num_row_count > 0:
@@ -231,6 +244,8 @@ def click_cdp_ai_integration_ga_reports_content():
                 else:
                     _log.info(f"No new data found in {property_id}")
 
+            if quality is not None:
+                tf.record_report_quality(str_client_name, "event_list", property_id, quality, df=df, start_date=str_start_date)
             ga_storage.persist_by_date(df, str_client_name, "event_list")
         except Exception as error:
             _log.error(f"Error generating event list files for {str_client_name}, error: {error}.")
@@ -251,6 +266,7 @@ def click_cdp_ai_integration_ga_reports_content():
             _log.info(f"Getting records from: {str_start_date}")
 
             df = pd.DataFrame()
+            quality = None
             for property in dict_config["property"]:
                 property_id = property["property_id"]
                 property_name = property["property_name"]
@@ -267,6 +283,7 @@ def click_cdp_ai_integration_ga_reports_content():
                     str_start_date=str_start_date, str_end_date='today',
                     num_offset=0, list_dimension_filters=None)
                 num_row_count = type(response).to_dict(response)['row_count']
+                quality = GoogleAnalytics.extract_quality(response)
                 _log.info(f"Total rows found: {num_row_count}")
 
                 if num_row_count > 0:
@@ -290,6 +307,8 @@ def click_cdp_ai_integration_ga_reports_content():
                 else:
                     _log.info(f"No new data found in {property_id}")
 
+            if quality is not None:
+                tf.record_report_quality(str_client_name, "website_metrics", property_id, quality, df=df, start_date=str_start_date)
             ga_storage.persist_by_date(df, str_client_name, "website_metrics", dashed_source_date=True)
         except Exception as error:
             _log.error(f"Error generating website metrics files for {str_client_name}, error: {error}.")
@@ -297,12 +316,18 @@ def click_cdp_ai_integration_ga_reports_content():
         return dict_config
 
     task_get_config = get_config()
+    @task(retries=3, retry_delay=timedelta(seconds=5))
+    def create_session_quality(dict_config):
+        # Catalog-driven (generic runner) - session-depth cube; no bespoke transform.
+        return ga_cube_runner.run_cube(dict_config, "session_quality_daily", _log)
+
     task_page_metrics = create_page_metrics.expand(dict_config=task_get_config)
     task_page_utm_metrics = create_page_utm_metrics.expand(dict_config=task_page_metrics)
     task_event_list = create_event_list.expand(dict_config=task_page_utm_metrics)
     task_website_metrics = create_website_metrics.expand(dict_config=task_event_list)
+    task_session_quality = create_session_quality.expand(dict_config=task_website_metrics)
 
-    task_page_metrics >> task_page_utm_metrics >> task_event_list >> task_website_metrics
+    task_page_metrics >> task_page_utm_metrics >> task_event_list >> task_website_metrics >> task_session_quality
 
 
 click_cdp_ai_integration_ga_reports_content()

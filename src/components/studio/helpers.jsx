@@ -41,8 +41,8 @@ export function fmtCost(v, currency = "USD") {
 }
 
 export function PlanBadge({ plan }) {
-  // Higher paid tiers (standard/pro) get the solid badge; Lite is the entry tier.
-  const highlighted = plan === "standard" || plan === "pro";
+  // Higher paid tiers (standard/enterprise) get the solid badge; Lite is the entry tier.
+  const highlighted = plan === "standard" || plan === "enterprise";
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
       highlighted ? "bg-foreground text-background" : "bg-secondary text-muted-foreground border border-border"

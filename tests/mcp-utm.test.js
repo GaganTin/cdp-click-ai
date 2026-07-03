@@ -91,7 +91,7 @@ describe("UTM - list_campaigns", () => {
 });
 
 describe("UTM - analyze_utm_performance", () => {
-  it("queries utm_daily_performance with default 30 days", async () => {
+  it("queries acquisition_session_daily with default 30 days", async () => {
     const rows = [{ utm_source: "google", utm_medium: "cpc", total_sessions: 500 }];
     const pool = makePool(rows);
     const result = await call("analyze_utm_performance", {}, pool);
@@ -99,7 +99,8 @@ describe("UTM - analyze_utm_performance", () => {
     expect(data.rows).toHaveLength(1);
     expect(data.days_analyzed).toBe(30);
     const [sql] = pool.query.mock.calls[0];
-    expect(sql).toMatch(/utm_daily_performance/);
+    // GA cube redesign: reads acquisition_session_daily (utm_daily_performance retired).
+    expect(sql).toMatch(/acquisition_session_daily/);
     expect(sql).toMatch(/30 days/);
   });
 
@@ -107,8 +108,8 @@ describe("UTM - analyze_utm_performance", () => {
     const pool = makePool([{ utm_source: "facebook", total_sessions: 200 }]);
     await call("analyze_utm_performance", { utm_source: "facebook" }, pool);
     const [sql, params] = pool.query.mock.calls[0];
-    // Filters on the real GA4 column session_source (aliased to utm_source in output).
-    expect(sql).toMatch(/session_source =/);
+    // Filters on source split from session_source_medium (aliased to utm_source in output).
+    expect(sql).toMatch(/split_part\(session_source_medium, ' \/ ', 1\) =/);
     expect(params).toContain("facebook");
   });
 
@@ -116,7 +117,7 @@ describe("UTM - analyze_utm_performance", () => {
     const pool = makePool([]);
     await call("analyze_utm_performance", { utm_medium: "email" }, pool);
     const [sql, params] = pool.query.mock.calls[0];
-    expect(sql).toMatch(/session_medium =/);
+    expect(sql).toMatch(/split_part\(session_source_medium, ' \/ ', 2\) =/);
     expect(params).toContain("email");
   });
 
@@ -124,9 +125,9 @@ describe("UTM - analyze_utm_performance", () => {
     const pool = makePool([]);
     await call("analyze_utm_performance", {}, pool);
     const [sql] = pool.query.mock.calls[0];
-    // Groups by the real GA4 columns; output is aliased to utm_source/utm_medium.
-    expect(sql).toMatch(/GROUP BY session_source, session_medium/);
-    expect(sql).toMatch(/session_source AS utm_source/);
+    // Groups by the combined session_source_medium; output is split/aliased to utm_source/utm_medium.
+    expect(sql).toMatch(/GROUP BY session_source_medium/);
+    expect(sql).toMatch(/AS utm_source/);
   });
 
   it("groups by campaign when group_by=campaign", async () => {

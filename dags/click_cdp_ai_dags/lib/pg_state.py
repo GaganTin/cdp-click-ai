@@ -11,13 +11,12 @@ Resume logic (per report, read before the task fetches from GA):
   - is_debugging = TRUE  -> start from the 1st of (today - debug_months)   (default 2 months)
   - is_debugging = FALSE and last_sync_date set -> last_sync_date - overlap_days (default 7)
   - first run (no last_sync_date) -> full historical BACKFILL sized by the owning
-                            account's plan: 3 years for free/trial, 5 years for
-                            pro/enterprise (see PLAN_BACKFILL_YEARS). A default
-                            control row is inserted so you can flip is_debugging
-                            in the DB later.
+                            account's plan: 3 years for every tier by default
+                            (see PLAN_BACKFILL_YEARS). A default control row is
+                            inserted so you can flip is_debugging in the DB later.
 
 The plan-based backfill is what makes the FIRST "Sync Data" click pull the full
-3y/5y history; every subsequent (daily) run is the cheap incremental overlap.
+3-year history; every subsequent (daily) run is the cheap incremental overlap.
 
 The watermark is advanced in the SAME transaction as the data load (see
 pg_loader.load_dataframe), so it never moves past data that failed to load - the
@@ -43,12 +42,14 @@ _log = get_logger("pg_state")
 
 
 CONTROL_TABLE = "ga_sync_control"
+QUALITY_TABLE = "ga_report_quality"
 DEFAULT_DEBUG_MONTHS = 2
 DEFAULT_OVERLAP_DAYS = 7
 
 # First-run historical backfill window, in years, by account plan
-# (app.accounts.plan). Free/trial accounts get 3 years, paid get 5.
-PLAN_BACKFILL_YEARS = {"free": 3, "pro": 5, "enterprise": 5}
+# (app.accounts.plan: 'lite' | 'standard' | 'enterprise'). Every tier gets 3 years
+# by default; bump a specific tier here if a plan should pull deeper history.
+PLAN_BACKFILL_YEARS = {"lite": 3, "standard": 3, "enterprise": 3}
 DEFAULT_BACKFILL_YEARS = 3
 
 
@@ -258,6 +259,124 @@ def resolve_start_date(client, report, conn_kwargs=None, schema=None,
               ctx(client, report), start, row["is_debugging"],
               row["last_sync_date"], row.get("backfill_years"))
     return start.strftime("%Y-%m-%d")
+
+
+def ensure_quality_table(conn, schema, quality_table=None):
+    """Create the GA report-quality table if absent (idempotent).
+
+    One row per (capsuite_ref, report, property_id) holding the latest run's
+    GA4 data-quality signals - sampling, (other)-row loss, thresholding - plus
+    GA's metric TOTALs vs the summed rows, so we can MEASURE which reports
+    diverge from the GA4 UI instead of guessing. See GoogleAnalytics.extract_quality.
+    """
+    quality_table = quality_table or QUALITY_TABLE
+    with conn.cursor() as cur:
+        cur.execute(
+            sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {}.{} (
+                    capsuite_ref             TEXT        NOT NULL,
+                    report                   TEXT        NOT NULL,
+                    property_id              TEXT        NOT NULL,
+                    run_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    start_date               DATE,
+                    row_count                INTEGER,
+                    is_sampled               BOOLEAN,
+                    sampling_pct             DOUBLE PRECISION,
+                    data_loss_from_other_row BOOLEAN,
+                    subject_to_thresholding  BOOLEAN,
+                    empty_reason             TEXT,
+                    sessions_drift_pct       DOUBLE PRECISION,
+                    ga_totals                JSONB       NOT NULL DEFAULT '{{}}'::jsonb,
+                    summed_metrics           JSONB       NOT NULL DEFAULT '{{}}'::jsonb,
+                    updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (capsuite_ref, report, property_id)
+                )
+                """
+            ).format(sql.Identifier(schema), sql.Identifier(quality_table))
+        )
+
+
+def record_report_quality(client, report, property_id, quality,
+                          summed_metrics=None, start_date=None,
+                          conn_kwargs=None, schema=None, quality_table=None):
+    """Upsert the latest data-quality row for (client, report, property_id).
+
+    ``quality`` is the dict from ``GoogleAnalytics.extract_quality``. If
+    ``summed_metrics`` (a {metric_name: summed_value} from the actual rows) is
+    given and both it and GA's TOTAL carry ``sessions``, the per-row vs total
+    drift is computed - a non-zero drift quantifies (other)-row loss.
+
+    Best-effort: never raises into the caller's data path (a quality-logging
+    failure must not fail the sync). Returns the computed sessions_drift_pct or
+    None.
+    """
+    import json as _json
+
+    schema = schema or ga_config.PG_SCHEMA
+    quality_table = quality_table or QUALITY_TABLE
+    summed_metrics = summed_metrics or {}
+    ga_totals = (quality or {}).get('totals', {}) or {}
+
+    drift = None
+    ga_sessions = ga_totals.get('sessions')
+    summed_sessions = summed_metrics.get('sessions')
+    if ga_sessions not in (None, 0) and summed_sessions is not None:
+        try:
+            drift = round((float(summed_sessions) - float(ga_sessions)) / float(ga_sessions) * 100, 4)
+        except (TypeError, ValueError, ZeroDivisionError):
+            drift = None
+
+    try:
+        ck = _conn_kwargs(conn_kwargs)
+        from dags.click_cdp_ai_dags.lib import db
+
+        def _do(conn):
+            ensure_quality_table(conn, schema, quality_table=quality_table)
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL(
+                        """
+                        INSERT INTO {schema}.{table}
+                            (capsuite_ref, report, property_id, run_at, start_date, row_count,
+                             is_sampled, sampling_pct, data_loss_from_other_row,
+                             subject_to_thresholding, empty_reason, sessions_drift_pct,
+                             ga_totals, summed_metrics, updated_at)
+                        VALUES (%s, %s, %s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                        ON CONFLICT (capsuite_ref, report, property_id) DO UPDATE SET
+                            run_at                   = EXCLUDED.run_at,
+                            start_date               = EXCLUDED.start_date,
+                            row_count                = EXCLUDED.row_count,
+                            is_sampled               = EXCLUDED.is_sampled,
+                            sampling_pct             = EXCLUDED.sampling_pct,
+                            data_loss_from_other_row = EXCLUDED.data_loss_from_other_row,
+                            subject_to_thresholding  = EXCLUDED.subject_to_thresholding,
+                            empty_reason             = EXCLUDED.empty_reason,
+                            sessions_drift_pct       = EXCLUDED.sessions_drift_pct,
+                            ga_totals                = EXCLUDED.ga_totals,
+                            summed_metrics           = EXCLUDED.summed_metrics,
+                            updated_at               = now()
+                        """
+                    ).format(schema=sql.Identifier(schema), table=sql.Identifier(quality_table)),
+                    (client, report, property_id, parse_watermark(start_date),
+                     (quality or {}).get('row_count'),
+                     (quality or {}).get('is_sampled'),
+                     (quality or {}).get('sampling_pct'),
+                     (quality or {}).get('data_loss_from_other_row'),
+                     (quality or {}).get('subject_to_thresholding'),
+                     (quality or {}).get('empty_reason'),
+                     drift, _json.dumps(ga_totals), _json.dumps(summed_metrics)),
+                )
+
+        db.run_tx(ck, _do)
+        if (quality or {}).get('is_sampled') or (quality or {}).get('data_loss_from_other_row'):
+            _log.warning("%s GA data-quality flag: sampled=%s other_row=%s thresholding=%s drift=%s%%",
+                         ctx(client, report), (quality or {}).get('is_sampled'),
+                         (quality or {}).get('data_loss_from_other_row'),
+                         (quality or {}).get('subject_to_thresholding'), drift)
+    except Exception as error:  # never break the data path on a logging failure
+        _log.error("%s failed to record report quality: %s", ctx(client, report), error)
+    return drift
 
 
 def update_watermark_in_tx(conn, schema, client, report, watermark_value,

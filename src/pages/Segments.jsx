@@ -424,13 +424,37 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
                   const aIds = a.values.map(v => v.id);
                   const selected = attrValueIds.filter(id => aIds.includes(id));
                   return (
-                    <MultiCriteriaRow
-                      key={a.id}
-                      label={a.name}
-                      value={selected}
-                      onChange={vals => setAttrValueIds(cur => [...cur.filter(id => !aIds.includes(id)), ...vals])}
-                      opts={a.values.map(v => ({ value: v.id, label: `${v.value}${v.profile_count ? ` (${v.profile_count})` : ""}` }))}
-                    />
+                    <div key={a.id} className="space-y-1.5">
+                      {/* Group rollups: target a whole group (e.g. Continent = Asia) -
+                          expands to every member value id. One row per dimension. */}
+                      {(a.group_dimensions || []).map(dim => {
+                        const groups = {};
+                        for (const v of a.values) { const g = v.group_map?.[dim]; if (g) (groups[g] ||= []).push(v.id); }
+                        const names = Object.keys(groups).sort();
+                        if (!names.length) return null;
+                        const selectedGroups = names.filter(g => groups[g].every(id => attrValueIds.includes(id)));
+                        return (
+                          <MultiCriteriaRow
+                            key={`${a.id}:${dim}`}
+                            label={`${a.name} · ${dim}`}
+                            value={selectedGroups}
+                            onChange={newGroups => setAttrValueIds(cur => {
+                              const set = new Set(cur);
+                              names.filter(g => newGroups.includes(g) && !selectedGroups.includes(g)).forEach(g => groups[g].forEach(id => set.add(id)));
+                              names.filter(g => selectedGroups.includes(g) && !newGroups.includes(g)).forEach(g => groups[g].forEach(id => set.delete(id)));
+                              return [...set];
+                            })}
+                            opts={names.map(g => ({ value: g, label: `${g} (${groups[g].length})` }))}
+                          />
+                        );
+                      })}
+                      <MultiCriteriaRow
+                        label={a.name}
+                        value={selected}
+                        onChange={vals => setAttrValueIds(cur => [...cur.filter(id => !aIds.includes(id)), ...vals])}
+                        opts={a.values.map(v => ({ value: v.id, label: `${v.value}${v.profile_count ? ` (${v.profile_count})` : ""}` }))}
+                      />
+                    </div>
                   );
                 })}
               </CriteriaGroup>

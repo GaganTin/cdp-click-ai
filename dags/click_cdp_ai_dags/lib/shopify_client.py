@@ -9,12 +9,13 @@ The original Shopify landing DAGs copy-pasted the same three steps ~7 times:
 
 ``ShopifyClient.run_bulk_query`` encapsulates that. Each dataset's inner query is
 a module-level ``*_query(start, end)`` builder ported verbatim from the originals.
-No Airflow, no Blob, no Mongo - pure I/O so it is unit-testable.
+No Airflow, no Blob, no Mongo — pure I/O so it is unit-testable.
 """
 
 import json
 import random
 import time
+from datetime import datetime, timezone
 
 import requests
 from dags.click_cdp_ai_dags.lib.log import get_logger, ctx
@@ -40,6 +41,19 @@ _CURRENT_BULK_QUERY = """
         }
     }
 """
+
+_BULK_CANCEL_MUTATION = """
+    mutation bulkOperationCancel($id: ID!) {
+        bulkOperationCancel(id: $id) {
+            bulkOperation { id status }
+            userErrors { field message }
+        }
+    }
+"""
+
+# Statuses that occupy the store's single bulk-op slot (a new run is rejected
+# while any of these is the currentBulkOperation).
+_BULK_IN_PROGRESS = ("CREATED", "RUNNING", "CANCELING")
 
 # Refund line items via a REGULAR (non-bulk) paginated query. Bulk operations
 # reject a connection (refundLineItems) nested in a list field (Order.refunds),
@@ -73,7 +87,7 @@ class ShopifyError(RuntimeError):
 
 class ShopifyClient:
     def __init__(self, store_name, access_token, api_version=SHOPIFY_API_VERSION,
-                 max_poll_tries=120, max_poll_sleep=60):
+                 max_poll_tries=120, max_poll_sleep=60, stale_op_seconds=120):
         # The App DB stores the full host (e.g. "x.myshopify.com"); strip it so
         # we never end up with "x.myshopify.com.myshopify.com".
         host = (store_name or "").strip()
@@ -84,6 +98,7 @@ class ShopifyClient:
         self.api_version = api_version
         self.max_poll_tries = max_poll_tries
         self.max_poll_sleep = max_poll_sleep
+        self.stale_op_seconds = stale_op_seconds
         self._endpoint = (
             f"https://{host}.myshopify.com/admin/api/{api_version}/graphql.json"
         )
@@ -104,12 +119,67 @@ class ShopifyClient:
             raise ShopifyError(f"Shopify HTTP {resp.status_code}: {resp.text}")
         return resp.json()
 
+    @staticmethod
+    def _op_age_seconds(created_at):
+        """Seconds since a bulk op's ``createdAt`` (ISO-8601), or None if unparseable."""
+        if not created_at:
+            return None
+        try:
+            ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return (datetime.now(timezone.utc) - ts).total_seconds()
+
+    def _clear_stale_bulk_op(self):
+        """Free the store's single bulk-op slot before starting a new operation.
+
+        Shopify allows ONE bulk query per app+shop. A prior attempt's pod can die
+        (timeout/eviction) while its bulk op keeps running server-side; the retry
+        then hits ``bulkOperationRunQuery userErrors: ... already in progress`` and
+        every retry collides with that orphan -> the task can never recover.
+
+        Pre-flight: if an op is in progress AND older than ``stale_op_seconds``,
+        treat it as an orphan and cancel it (polling until the slot frees). A
+        freshly-created op (younger than the threshold) is assumed to belong to a
+        legitimately-running parallel task on the SAME store, so we raise instead
+        of cancelling it -- Airflow retries later once it finishes. Different
+        clients are different stores (separate token + endpoint), so this can
+        never touch another store's operation.
+        """
+        current = self._post(_CURRENT_BULK_QUERY)["data"]["currentBulkOperation"]
+        if not current or current.get("status") not in _BULK_IN_PROGRESS:
+            return
+        op_id = current.get("id")
+        age = self._op_age_seconds(current.get("createdAt"))
+        if age is not None and age < self.stale_op_seconds:
+            raise ShopifyError(
+                f"Bulk op already in progress on {self.store_name} "
+                f"(id={op_id}, age={age:.0f}s < {self.stale_op_seconds}s); "
+                "assuming a parallel sync owns it -- will retry later."
+            )
+        _log.warning(
+            "Cancelling stale bulk op %s on %s (status=%s, age=%s)",
+            op_id, self.store_name, current.get("status"),
+            "unknown" if age is None else f"{age:.0f}s",
+        )
+        self._post(_BULK_CANCEL_MUTATION, {"id": op_id})
+        # Poll until the slot is free (status leaves the in-progress set).
+        for _ in range(self.max_poll_tries):
+            cur = self._post(_CURRENT_BULK_QUERY)["data"]["currentBulkOperation"]
+            if not cur or cur.get("status") not in _BULK_IN_PROGRESS:
+                _log.info("Stale bulk op %s cleared", op_id)
+                return
+            time.sleep(min(2 ** 2, self.max_poll_sleep) + random.uniform(0, 1))
+        raise ShopifyError(f"Stale bulk op {op_id} did not clear in time")
+
     def run_bulk_query(self, inner_query):
         """Run one bulk operation and return the parsed NDJSON records.
 
         Returns ``[]`` when the operation completes with no objects. Each record
         is a dict that may carry ``__parentId`` (the bulk-op flattening marker).
         """
+        # Step 0: clear any orphaned bulk op left running on this store.
+        self._clear_stale_bulk_op()
         # Step 1: start the bulk operation.
         result = self._post(_BULK_RUN_MUTATION, {"query": inner_query})
         run = result.get("data", {}).get("bulkOperationRunQuery", {})

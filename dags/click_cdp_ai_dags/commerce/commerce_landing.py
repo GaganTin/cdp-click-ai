@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Commerce FULL-REBUILD utility - rebuild the neutral commerce.* layer for every
+"""Commerce FULL-REBUILD utility — rebuild the neutral commerce.* layer for every
 client+platform from the existing per-platform raw schemas.
 
 NOTE: the normal flow does NOT need this. Each platform DAG (integration_shopify

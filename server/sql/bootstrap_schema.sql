@@ -148,12 +148,12 @@ $$;
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
 --  Three tiers: 'lite' ($100/mo, the entry tier carrying a 3-month trial that
---  goes read-only on expiry), 'standard' ($199/mo) and 'pro' (contact sales).
+--  goes read-only on expiry), 'standard' ($199/mo) and 'enterprise' (contact sales).
 --  There is no in-app payment flow - the paid upgrade is applied out-of-band by
 --  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
 --  by plan_expires_at, not the tier, so any tier could in principle carry one.
 CREATE TABLE app.plans (
-  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'pro'
+  id             TEXT        PRIMARY KEY,            -- 'lite' | 'standard' | 'enterprise'
   name           TEXT        NOT NULL,
   price_display  TEXT        NOT NULL DEFAULT '',
   period         TEXT        NOT NULL DEFAULT '',
@@ -185,9 +185,9 @@ VALUES
    'Get started', '/register', false, true, 2, null, 7,
    '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
    '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
-  ('pro', 'Pro', 'Contact sales', '', null,
+  ('enterprise', 'Enterprise', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
-   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, null, 7,
+   'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Enterprise', true, false, 3, null, 7,
    '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
@@ -214,7 +214,7 @@ CREATE TRIGGER accounts_updated_date BEFORE UPDATE ON app.accounts
 -- Tier-agnostic trial/upgrade stamping. An account is "in trial" iff
 -- plan_expires_at is set; converting to paid (sales clears the expiry) stamps
 -- plan_upgraded_at, and (re)entering a trial clears it. Keeps the date accurate
--- no matter which tier (lite/standard/pro) the account lands on.
+-- no matter which tier (lite/standard/enterprise) the account lands on.
 CREATE OR REPLACE FUNCTION app.stamp_plan_upgraded_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -530,7 +530,6 @@ CREATE TABLE app.ai_model_pricing (
   updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD'),
   ('gpt-5-mini',   0.28, 0.030, 2.20, 'USD'),
   ('gpt-5-nano',   0.05, 0.010, 0.40, 'USD');
 
@@ -571,22 +570,14 @@ CREATE OR REPLACE VIEW app.account_ai_costs AS
 
 -- ── AI quota (hard limit enforcement) ───────────────────────────────────────
 -- Single source of truth the app calls before every LLM call to block spend once
--- the account's usage reaches its plan's ai_tokens limit, measured over the
--- current BILLING PERIOD (not the calendar month):
---   • Paid accounts reset on the billing-day anniversary of the upgrade date
---     (plan_upgraded_at, falling back to account creation).
---   • Trial accounts (plan_expires_at set) get ONE flat allowance for the whole
---     trial, counted from account creation with no monthly reset (Lite: 200
---     credits total across the 90-day trial).
--- A per-account settings override wins over the plan catalog; NULL = unlimited.
+-- the account's CURRENT-MONTH usage reaches its plan's ai_tokens limit. Returns
+-- (used this calendar month, effective limit, is_over). A per-account settings
+-- override wins over the plan catalog; NULL limit = unlimited (never over).
 CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
 RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
 LANGUAGE sql STABLE AS $$
-  WITH acct AS (
-    SELECT a.created_date,
-           a.plan_expires_at,
-           a.plan_upgraded_at,
-           COALESCE(
+  WITH lim AS (
+    SELECT COALESCE(
              NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
              NULLIF(p.limits->>'ai_tokens', '')::BIGINT
            ) AS token_limit
@@ -594,29 +585,16 @@ LANGUAGE sql STABLE AS $$
       JOIN app.plans    p ON p.id = a.plan
      WHERE a.id = p_account_id
   ),
-  win AS (
-    SELECT
-      CASE
-        WHEN acct.plan_expires_at IS NOT NULL
-          THEN acct.created_date
-        ELSE
-          COALESCE(acct.plan_upgraded_at, acct.created_date)
-          + make_interval(months =>
-              (EXTRACT(YEAR  FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT * 12
-             + EXTRACT(MONTH FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT))
-      END AS period_start
-      FROM acct
-  ),
   u AS (
     SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
-      FROM app.ai_usage, win
+      FROM app.ai_usage
      WHERE account_id  = p_account_id
-       AND occurred_at >= win.period_start
+       AND occurred_at >= date_trunc('month', now())
   )
   SELECT u.used,
-         acct.token_limit,
-         (acct.token_limit IS NOT NULL AND u.used >= acct.token_limit) AS is_over
-    FROM u CROSS JOIN acct;
+         lim.token_limit,
+         (lim.token_limit IS NOT NULL AND u.used >= lim.token_limit) AS is_over
+    FROM u CROSS JOIN lim;
 $$;
 
 -- ── In-app notifications (the bell) ─────────────────────────────────────────
@@ -907,27 +885,42 @@ CREATE TABLE app.company_report_config (
     "mem_segment_filter":      {"debugStartDate":"2025-01-01","isDebugging":false},
     "ap_membership_profiles":  {"debugStartDate":"2025-01-01","isDebugging":false}
   }',
-  -- Which Google Analytics reports the pipeline runs (presence of a key = enabled).
-  -- One key per report task in the integration_ga_reports_* DAGs. The per-report
-  -- {isDebugging,debugStartDate} is retained for the app's config editor, but the
-  -- ACTUAL incremental window now comes from ga_landing.ga_sync_control (plan-based
-  -- first-run backfill, then last_sync_date - overlap). keyword_performance is a
-  -- Search Console report and lives in gsc_reports below, NOT here.
+  -- Which Google Analytics reports (cubes) the pipeline runs (presence of a key =
+  -- enabled). One key per cube in lib/cube_catalog, grouped by the purpose DAGs
+  -- (path_funnel / content / purchase / ecommerce / acquisition / audience /
+  -- retention). The per-report {isDebugging,debugStartDate} is retained for the
+  -- app's config editor, but the ACTUAL incremental window now comes from
+  -- ga_landing.ga_sync_control (plan-based first-run backfill, then
+  -- last_sync_date - overlap). The retired flat utm/country tables were dropped.
+  -- keyword_performance is a Search Console report (gsc_reports below, NOT here).
+  -- interest_daily is intentionally omitted pending brandingInterest apiName
+  -- verification (see cube_catalog) - add it once confirmed.
   ga_reports                JSONB       NOT NULL DEFAULT '{
-    "path_exploration":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "path_exploration_duration":        {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "funnel_report":                    {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_performance":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_performance":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_full_param_performance": {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_daily_utm_id_performance":     {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "utm_ad_performance":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "country_performance":              {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "page_metrics":                     {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "page_utm_metrics":                 {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "website_metrics":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "event_list":                       {"isDebugging":false,"debugStartDate":"2025-07-30"},
-    "purchase_list":                    {"isDebugging":false,"debugStartDate":"2025-07-30"}
+    "path_exploration":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_engagement_daily":       {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "funnel_report":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_metrics":                {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "page_utm_metrics":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "website_metrics":             {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "session_quality_daily":       {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "event_list":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "purchase_list":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "acquisition_session_daily":   {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "acquisition_firstuser_daily": {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "channel_daily":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "landing_page_daily":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_ad_performance":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "utm_daily_utm_id_performance":{"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "demographics_daily":          {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "audience_daily":              {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "tech_daily":                  {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "geo_daily":                   {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "returning_daily":             {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "item_performance":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "item_attribution":            {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "transaction_metrics":         {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "cohort_weekly":               {"isDebugging":false,"debugStartDate":"2025-07-30"},
+    "cohort_monthly":              {"isDebugging":false,"debugStartDate":"2025-07-30"}
   }',
   -- Which Google Search Console reports the pipeline runs (run by the
   -- click_cdp_ai_gsc_keyword_performance DAG when GSC is connected with a site_url).
@@ -1244,7 +1237,8 @@ CREATE TABLE app.attributes (
   status          TEXT        NOT NULL DEFAULT 'draft',       -- draft | active | archived
   scope           TEXT        NOT NULL DEFAULT 'both',        -- customer | anonymous | both
   extract_from    TEXT        NOT NULL DEFAULT 'both',        -- title | content | both
-  group_label     TEXT,                                       -- optional grouping dimension
+  group_label     TEXT,                                       -- DEPRECATED (see group_dimensions): legacy single grouping dimension
+  group_dimensions JSONB      NOT NULL DEFAULT '[]',          -- grouping dimensions, e.g. ["Continent","GDP"]
   content_applied BOOLEAN     NOT NULL DEFAULT false,         -- true once tags have been applied to content → locks extract_from/value_type
   rule            JSONB       NOT NULL DEFAULT '{}',          -- for source='rule'
   last_run_date   TIMESTAMPTZ,
@@ -1266,7 +1260,8 @@ CREATE TABLE app.attribute_values (
   attribute_id  UUID        NOT NULL REFERENCES app.attributes(id) ON DELETE CASCADE,
   value         TEXT        NOT NULL,
   display_label TEXT,
-  group_name    TEXT,                                  -- group under attribute.group_label
+  group_name    TEXT,                                  -- DEPRECATED (see group_map): legacy single group
+  group_map     JSONB       NOT NULL DEFAULT '{}',     -- group per dimension, e.g. {"Continent":"Asia","GDP":"High"}
   is_exception  BOOLEAN     NOT NULL DEFAULT false,    -- AI-discovered, pending review
   is_approved   BOOLEAN     NOT NULL DEFAULT false,    -- curated/approved → used for targeting
   is_blocked    BOOLEAN     NOT NULL DEFAULT false,    -- stoplist: never resurrect/propagate
@@ -2007,13 +2002,320 @@ CREATE INDEX gal_pl_company_date_idx ON ga_landing.purchase_list(company_id, dat
 -- profile-mapping: trxn_id lookup (GA purchase -> commerce/manual order -> buyer)
 CREATE INDEX gal_pl_company_trxn_idx ON ga_landing.purchase_list(company_id, trxn_id);
 
+-- ── GA cube tables (conformed daily cubes from the redesign) ─────────────────
+--  GENERATED from dags/click_cdp_ai_dags/lib/cube_catalog.py (the pipeline's single
+--  source of truth). Regenerate with:  python scripts/gen_ga_catalog.py
+--  The DAG loader auto-creates these (CREATE TABLE IF NOT EXISTS + ADD COLUMN IF NOT
+--  EXISTS) but does NOT create the (company_id, date) index the app's UTM / channel
+--  queries rely on - that is why the tables + indexes are declared here.
+-- >>> BEGIN GENERATED CUBE TABLES
+CREATE TABLE ga_landing.page_engagement_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  page_path                  TEXT,
+  user_engagement_duration   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_page_engagement_daily_cd_idx ON ga_landing.page_engagement_daily(company_id, date);
+
+CREATE TABLE ga_landing.session_quality_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  screen_page_views_per_session DOUBLE PRECISION,
+  average_session_duration   DOUBLE PRECISION,
+  bounce_rate                DOUBLE PRECISION,
+  engagement_rate            DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_session_quality_daily_cd_idx ON ga_landing.session_quality_daily(company_id, date);
+
+CREATE TABLE ga_landing.item_performance (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  item_name                  TEXT,
+  item_brand                 TEXT,
+  item_category              TEXT,
+  items_viewed               BIGINT,
+  items_added_to_cart        BIGINT,
+  items_purchased            BIGINT,
+  item_revenue               DOUBLE PRECISION,
+  cart_to_view_rate          DOUBLE PRECISION,
+  purchase_to_view_rate      DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_item_performance_cd_idx ON ga_landing.item_performance(company_id, date);
+
+CREATE TABLE ga_landing.item_attribution (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  channel_group              TEXT,
+  item_revenue               DOUBLE PRECISION,
+  items_purchased            BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_item_attribution_cd_idx ON ga_landing.item_attribution(company_id, date);
+
+CREATE TABLE ga_landing.transaction_metrics (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  transactions               BIGINT,
+  purchase_revenue           DOUBLE PRECISION,
+  ecommerce_purchases        BIGINT,
+  first_time_purchasers      BIGINT,
+  average_purchase_revenue   DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_transaction_metrics_cd_idx ON ga_landing.transaction_metrics(company_id, date);
+
+CREATE TABLE ga_landing.acquisition_session_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  session_source_medium      TEXT,
+  session_campaign_name      TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_acquisition_session_daily_cd_idx ON ga_landing.acquisition_session_daily(company_id, date);
+
+CREATE TABLE ga_landing.acquisition_firstuser_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  first_user_source_medium   TEXT,
+  first_user_channel_group   TEXT,
+  new_users                  BIGINT,
+  total_users                BIGINT,
+  active_users               BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_acquisition_firstuser_daily_cd_idx ON ga_landing.acquisition_firstuser_daily(company_id, date);
+
+CREATE TABLE ga_landing.channel_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_channel_daily_cd_idx ON ga_landing.channel_daily(company_id, date);
+
+CREATE TABLE ga_landing.landing_page_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  landing_page               TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_landing_page_daily_cd_idx ON ga_landing.landing_page_daily(company_id, date);
+
+CREATE TABLE ga_landing.demographics_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  age_bracket                TEXT,
+  gender                     TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_demographics_daily_cd_idx ON ga_landing.demographics_daily(company_id, date);
+
+CREATE TABLE ga_landing.audience_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  audience_name              TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_audience_daily_cd_idx ON ga_landing.audience_daily(company_id, date);
+
+CREATE TABLE ga_landing.tech_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  operating_system           TEXT,
+  browser                    TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  page_views                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_tech_daily_cd_idx ON ga_landing.tech_daily(company_id, date);
+
+CREATE TABLE ga_landing.geo_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  country                    TEXT,
+  region                     TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_geo_daily_cd_idx ON ga_landing.geo_daily(company_id, date);
+
+CREATE TABLE ga_landing.interest_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  interest                   TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_interest_daily_cd_idx ON ga_landing.interest_daily(company_id, date);
+
+CREATE TABLE ga_landing.returning_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  new_vs_returning           TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_returning_daily_cd_idx ON ga_landing.returning_daily(company_id, date);
+
+CREATE TABLE ga_landing.cohort_weekly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_week            BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_cohort_weekly_c_idx ON ga_landing.cohort_weekly(company_id);
+
+CREATE TABLE ga_landing.cohort_monthly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_month           BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX gal_cohort_monthly_c_idx ON ga_landing.cohort_monthly(company_id);
+-- <<< END GENERATED CUBE TABLES
+
 -- ── Sync control / incremental watermark (one row per workspace × report) ────
 --  The DAGs read this BEFORE each fetch to decide the start date, and advance
 --  last_sync_date in the SAME transaction as the data load (idempotent re-runs).
 --  Resume logic (see dags/click_cdp_ai/lib/pg_state.py):
 --    is_debugging = TRUE  -> 1st of (today - debug_months)
 --    last_sync_date set   -> last_sync_date - overlap_days   (daily incremental)
---    first run            -> plan-based backfill: 3y free/trial, 5y pro/enterprise
+--    first run            -> plan-based backfill: 3 years for every tier by default
 --  Keyed by capsuite_ref (1:1 with a workspace) so the external ETL stays
 --  decoupled from app UUIDs. Created here so the schema is authoritative; the
 --  DAG also ensures it at runtime (CREATE IF NOT EXISTS) for safety.
@@ -3144,23 +3446,17 @@ ALTER TABLE app.company_report_config
 
 -- ── Editable model pricing (rates are USD per 1,000,000 tokens) ─────────────
 CREATE TABLE IF NOT EXISTS app.ai_model_pricing (
-  model               TEXT          PRIMARY KEY,
-  input_per_1m        NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
-  cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M CACHED input tokens (discounted)
-  output_per_1m       NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
-  currency            TEXT          NOT NULL DEFAULT 'USD',
-  updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  model         TEXT          PRIMARY KEY,
+  input_per_1m  NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M input/prompt tokens
+  output_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0,   -- $ per 1M output/completion tokens
+  currency      TEXT          NOT NULL DEFAULT 'USD',
+  updated_date  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
--- Add the cached-rate column on pre-existing tables.
-ALTER TABLE app.ai_model_pricing ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
 
--- Seed the deployment in use. Editable later in Studio; ON CONFLICT keeps any
--- admin-edited rate on re-run.
-INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5.4-mini', 0.75, 0.075, 4.50, 'USD'),
-  ('gpt-5-mini',   0.28, 0.030, 2.20, 'USD'),
-  ('gpt-5-nano',   0.05, 0.010, 0.40, 'USD')
-ON CONFLICT (model) DO NOTHING;
+-- Model pricing is seeded by the base schema (fresh DBs) and by the dedicated
+-- add_gpt5mini_pricing / add_gpt5nano_pricing migrations (which carry the cached
+-- rate). No pricing is seeded here anymore: seeding a row before the cached
+-- column exists would leave cached_input_per_1m stuck at 0.
 
 -- ── AI usage ledger (per call) ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS app.ai_usage (
@@ -3172,7 +3468,6 @@ CREATE TABLE IF NOT EXISTS app.ai_usage (
   feature       TEXT          NOT NULL,   -- analyst | chart_summary | llm | attribute_tag | attribute_group | attribute_suggest
   model         TEXT          NOT NULL,
   input_tokens  INTEGER       NOT NULL DEFAULT 0,
-  cached_input_tokens INTEGER NOT NULL DEFAULT 0,   -- subset of input_tokens billed at the cached rate
   output_tokens INTEGER       NOT NULL DEFAULT 0,
   total_tokens  INTEGER       NOT NULL DEFAULT 0,
   cost          NUMERIC(14,6) NOT NULL DEFAULT 0,    -- frozen at insert time
@@ -3180,7 +3475,6 @@ CREATE TABLE IF NOT EXISTS app.ai_usage (
   occurred_at   TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   metadata      JSONB         NOT NULL DEFAULT '{}'
 );
-ALTER TABLE app.ai_usage ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS ai_usage_account_idx ON app.ai_usage(account_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ai_usage_company_idx ON app.ai_usage(company_id, occurred_at DESC);
 CREATE INDEX IF NOT EXISTS ai_usage_user_idx    ON app.ai_usage(user_id, occurred_at DESC);
@@ -3515,8 +3809,8 @@ BEGIN;
 
 -- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
 --    team_members=null => unlimited; ai_tokens are a generous monthly token
---    budget (gpt-5.4-mini @ $0.75/$4.50 per 1M; at a ~80/20 input/output mix that
---    is roughly Lite 10M ~$15, Standard 30M ~$45 - actual cost tracks real usage).
+--    budget (gpt-5-mini @ $0.28/$2.20 per 1M; at a ~80/20 input/output mix that
+--    is roughly Lite 10M ~$7, Standard 30M ~$20 - actual cost tracks real usage).
 INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
@@ -3547,24 +3841,12 @@ ON CONFLICT (id) DO UPDATE SET
   trial_days=EXCLUDED.trial_days, warning_days=EXCLUDED.warning_days,
   features=EXCLUDED.features, limits=EXCLUDED.limits, is_active=EXCLUDED.is_active;
 
--- 2. Remap existing accounts/workspaces onto the new tiers.
+-- 2. Remap existing accounts/workspaces onto the new tiers. plan_expires_at is
+--    left untouched, so any in-flight Lite (was free) trial keeps its end date.
 UPDATE app.accounts  SET plan = 'lite'     WHERE plan = 'free';
 UPDATE app.accounts  SET plan = 'standard' WHERE plan = 'paid';
 UPDATE app.companies SET plan = 'lite'     WHERE plan = 'free';
 UPDATE app.companies SET plan = 'standard' WHERE plan = 'paid';
-
--- 2b. Extend in-flight trials to the tier's current trial_days. Accounts that
---     started under the old 30-day "free" plan kept a 30-day expiry, but Lite now
---     grants a 90-day trial - so recompute from signup + trial_days, extending
---     only (the "> current expiry" guard) and skipping sales-converted accounts
---     (plan_expires_at IS NULL).
-UPDATE app.accounts a
-SET plan_expires_at = a.created_date + (p.trial_days || ' days')::interval
-FROM app.plans p
-WHERE a.plan = p.id
-  AND a.plan_expires_at IS NOT NULL
-  AND p.trial_days IS NOT NULL
-  AND a.created_date + (p.trial_days || ' days')::interval > a.plan_expires_at;
 
 -- 3. New signups default to the Lite entry tier.
 ALTER TABLE app.accounts ALTER COLUMN plan SET DEFAULT 'lite';
@@ -3597,81 +3879,101 @@ DELETE FROM app.plans WHERE id IN ('free', 'paid');
 COMMIT;
 
 
--- ===================== migrations/2026-07-02_ai_quota_enforcement.sql =====================
+-- ===================== migrations/2026-07-02_add_gpt5mini_pricing.sql =====================
 
--- 2026-07-02  Hard-enforce the per-account AI token limit.
--- ---------------------------------------------------------------------------
--- Plans advertise a monthly AI allowance (e.g. Lite 20,000,000 tokens = 200
--- credits / month). Until now that limit was tracked but never enforced. This
--- adds the single source of truth used by the app to block further AI spend
--- once the CURRENT CALENDAR MONTH's usage reaches the limit.
+-- ============================================================================
+--  2026-07-02_add_gpt5mini_pricing.sql
+--  Register pricing for gpt-5-mini, the model the AI Analyst now runs on
+--  (AZURE_OPENAI_DEPLOYMENT), replacing gpt-5.4-mini. Azure OpenAI Data Zone rates:
+--    input $0.28 / cached input $0.03 / output $2.20 per 1M tokens.
 --
---   app.ai_quota(account_id) -> (used, token_limit, is_over)
---     used        = tokens spent this calendar month (app.ai_usage is account-
---                   scoped and survives workspace deletion, matching the billing
---                   "overall" totals).
---     token_limit = the account's effective ai_tokens limit: a per-account
---                   settings override wins over the plan catalog; NULL = unlimited
---                   (Pro / contact-sales), which is never over.
---     is_over      = TRUE only when a finite limit is set AND used >= limit.
+--  Cost tracking is keyed per model, so once this row exists every gpt-5-mini
+--  call is costed correctly with no further code changes. Without it, analyst
+--  spend would be ledgered at $0 (getPricing falls back to zero rates).
 --
--- Applies to EVERY account (existing and new) automatically: it reads live plan
--- limits, so no backfill is needed. Idempotent.
---   Run with: psql "$DATABASE_URL" -f <file>
+--  Idempotent AND non-clobbering: apply_migrations.cjs re-runs every file on every
+--  deploy, so this uses ON CONFLICT DO NOTHING — a later Studio rate edit survives.
+--  Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
 
-CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
-RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN)
-LANGUAGE sql STABLE AS $$
-  WITH lim AS (
-    SELECT COALESCE(
-             NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
-             NULLIF(p.limits->>'ai_tokens', '')::BIGINT
-           ) AS token_limit
-      FROM app.accounts a
-      JOIN app.plans    p ON p.id = a.plan
-     WHERE a.id = p_account_id
-  ),
-  u AS (
-    SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
-      FROM app.ai_usage
-     WHERE account_id  = p_account_id
-       AND occurred_at >= date_trunc('month', now())
-  )
-  SELECT u.used,
-         lim.token_limit,
-         (lim.token_limit IS NOT NULL AND u.used >= lim.token_limit) AS is_over
-    FROM u CROSS JOIN lim;
-$$;
+BEGIN;
 
-COMMENT ON FUNCTION app.ai_quota(UUID) IS
-  'Per-account monthly AI token quota: returns (used this calendar month, effective token limit, is_over). NULL limit = unlimited.';
+-- The cached column may not exist yet if this runs before the pricing-fix
+-- migration; add it defensively so the INSERT below always has a target.
+ALTER TABLE app.ai_model_pricing
+  ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
+
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
+VALUES ('gpt-5-mini', 0.28, 0.030, 2.20, 'USD')
+ON CONFLICT (model) DO NOTHING;
+
+COMMIT;
 
 
--- ===================== migrations/2026-07-02_chart_summary_data_hash.sql =====================
+-- ===================== migrations/2026-07-02_add_gpt5nano_pricing.sql =====================
 
--- Adds app.chart_summaries.data_hash so cached AI chart explanations become
--- data-aware: the server fingerprints the chart data (title + type + preview) it
--- generated a summary from, and regenerates when that fingerprint changes instead
--- of serving a stale explanation forever. Existing rows get NULL, which never
--- matches a fingerprint and so forces a one-time regeneration on next view.
--- Matches server/sql/03_app_core.sql. Idempotent.
-ALTER TABLE app.chart_summaries
-  ADD COLUMN IF NOT EXISTS data_hash TEXT;
+-- ============================================================================
+--  2026-07-02_add_gpt5nano_pricing.sql
+--  Register pricing for gpt-5-nano, the cheaper "fast" model now used for every
+--  AI feature EXCEPT the AI Analyst (attribute tagging/grouping/suggestions,
+--  chart summaries, the /llm integration). Azure OpenAI Global rates:
+--    input $0.05 / cached input $0.01 / output $0.40 per 1M tokens.
+--
+--  Cost tracking is keyed per model, so once this row exists every gpt-5-nano
+--  call is costed correctly with no further code changes.
+--
+--  Idempotent AND non-clobbering: apply_migrations.cjs re-runs every file on every
+--  deploy, so this uses ON CONFLICT DO NOTHING — a later Studio rate edit survives.
+--  Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- The cached column may not exist yet if this runs before the pricing-fix
+-- migration; add it defensively so the INSERT below always has a target.
+ALTER TABLE app.ai_model_pricing
+  ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
+
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
+VALUES ('gpt-5-nano', 0.05, 0.010, 0.40, 'USD')
+ON CONFLICT (model) DO NOTHING;
+
+COMMIT;
 
 
 -- ===================== migrations/2026-07-02_ai_quota_billing_period.sql =====================
 
--- Count the AI token quota per BILLING PERIOD, not calendar month, and return the
--- window bounds + trial flag so the UI can explain the period. Supersedes
--- 2026-07-02_ai_quota_enforcement.sql above:
---   • Paid accounts (plan_expires_at IS NULL) reset on the billing-day anniversary
---     of the upgrade date (plan_upgraded_at, falling back to account creation);
---     period_end is the next reset.
---   • Trial accounts (plan_expires_at set) get ONE flat allowance for the whole
---     trial, counted from account creation with no monthly reset (Lite: 200
---     credits total across the 90-day trial); period_end is the trial end.
--- Return type gains columns, so DROP first (CREATE OR REPLACE cannot change a
--- function's return type). Idempotent.
+-- 2026-07-02  Count the AI token quota per BILLING PERIOD, not calendar month.
+-- ---------------------------------------------------------------------------
+-- Supersedes 2026-07-02_ai_quota_enforcement.sql. The quota window is no longer
+-- the calendar month (date_trunc('month', now())); it now follows the account's
+-- billing anchor so the allowance resets on the SAME DAY each month, and the
+-- function also returns the window bounds + trial flag so the UI can explain the
+-- period to the user without re-deriving the date math.
+--
+--   • Paid accounts (plan_expires_at IS NULL): the window resets every billing-
+--     period month, anchored to the billing day = the upgrade date
+--     (plan_upgraded_at), falling back to the account creation date. period_start
+--     is the most recent monthly anniversary of that anchor at or before now, and
+--     period_end is one month later (the next reset).
+--     e.g. upgraded on the 14th -> resets on the 14th of every month.
+--
+--   • Trial accounts (plan_expires_at IS NOT NULL, i.e. the Lite 90-day trial):
+--     ONE flat allowance for the WHOLE trial, counted from the account start with
+--     NO monthly reset. period_end is the trial end (plan_expires_at). With the
+--     Lite plan's ai_tokens = 10,000,000 (100 credits) the trial therefore grants
+--     100 credits total across all 90 days. When spent, is_over stays TRUE until
+--     they buy a plan (which clears plan_expires_at and switches the account onto
+--     the paid per-billing-period window above).
+--
+-- Returns: used, token_limit, is_over (unchanged contract) + period_start,
+-- period_end, is_trial. token_limit / override resolution and the
+-- "NULL = unlimited" contract are unchanged. Idempotent.
+--   Run with: psql "$DATABASE_URL" -f <file>
+
+-- Return type gains columns, so the function must be dropped first (CREATE OR
+-- REPLACE cannot change a function's return type). Nothing in SQL depends on it
+-- (only the app calls it), so a plain DROP is safe.
 DROP FUNCTION IF EXISTS app.ai_quota(UUID);
 
 CREATE FUNCTION app.ai_quota(p_account_id UUID)
@@ -3696,8 +3998,10 @@ LANGUAGE sql STABLE AS $$
       acct.plan_expires_at,
       CASE
         WHEN acct.plan_expires_at IS NOT NULL
+          -- In trial: single allowance for the whole trial, no monthly reset.
           THEN acct.created_date
         ELSE
+          -- Paid: most recent monthly anniversary of the billing anchor.
           COALESCE(acct.plan_upgraded_at, acct.created_date)
           + make_interval(months =>
               (EXTRACT(YEAR  FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT * 12
@@ -3728,4 +4032,586 @@ LANGUAGE sql STABLE AS $$
 $$;
 
 COMMENT ON FUNCTION app.ai_quota(UUID) IS
-  'Per-account AI token quota over the current BILLING PERIOD: paid accounts reset on their billing-day anniversary; trial accounts get one flat allowance for the whole trial. Returns (used, token_limit, is_over, period_start, period_end, is_trial). NULL limit = unlimited.';
+  'Per-account AI token quota over the current BILLING PERIOD: paid accounts reset on their billing-day anniversary, trial accounts get one flat allowance for the whole trial. Returns (used, token_limit, is_over, period_start, period_end, is_trial). NULL limit = unlimited.';
+
+
+-- ===================== migrations/2026-07-02_ai_quota_enforcement.sql =====================
+
+-- 2026-07-02  Hard-enforce the per-account AI token limit.  [SUPERSEDED - NO-OP]
+-- ---------------------------------------------------------------------------
+-- This migration originally created app.ai_quota(UUID) returning
+--   (used, token_limit, is_over)  -- calendar-month window.
+--
+-- It has been fully SUPERSEDED by 2026-07-02_ai_quota_billing_period.sql, which
+-- redefines app.ai_quota(UUID) with an expanded return type
+--   (used, token_limit, is_over, period_start, period_end, is_trial)
+-- over the account's BILLING PERIOD instead of the calendar month.
+--
+-- Migrations are re-applied in filename order on every deploy and must all be
+-- idempotent. "billing_period" sorts BEFORE "enforcement", so billing_period
+-- creates the 6-column function first; this file then ran afterwards and tried
+-- to CREATE OR REPLACE it back to the 3-column signature, which Postgres rejects
+-- ("cannot change return type of existing function") and broke the deploy.
+--
+-- The original body is therefore removed and this file is intentionally a no-op.
+-- Do NOT re-add a CREATE/REPLACE of app.ai_quota here; own its definition in
+-- 2026-07-02_ai_quota_billing_period.sql (or a later dated migration).
+--   Run with: psql "$DATABASE_URL" -f <file>
+
+SELECT 1;  -- no-op; superseded by 2026-07-02_ai_quota_billing_period.sql
+
+
+-- ===================== migrations/2026-07-02_chart_summary_data_hash.sql =====================
+
+-- Adds app.chart_summaries.data_hash so cached AI chart explanations become
+-- data-aware: the server fingerprints the chart data (title + type + preview) it
+-- generated a summary from, and regenerates when that fingerprint changes instead
+-- of serving a stale explanation forever. Existing rows get NULL, which never
+-- matches a fingerprint and so forces a one-time regeneration on next view.
+-- Matches server/sql/03_app_core.sql. Idempotent.
+ALTER TABLE app.chart_summaries
+  ADD COLUMN IF NOT EXISTS data_hash TEXT;
+
+
+-- ===================== migrations/2026-07-02_extend_lite_trial_to_90.sql =====================
+
+-- ============================================================================
+-- 2026-07-02_extend_lite_trial_to_90.sql
+-- Fix short trial windows left over from the free (30-day) -> lite (90-day) move.
+--
+-- The 2026-06-30 lite/standard/pro migration remapped free -> lite but LEFT
+-- plan_expires_at untouched, so accounts that started their trial under the old
+-- 30-day "free" plan still expire 30 days after signup, while the app now
+-- advertises (and grants new signups) a 90-day Lite trial. Their TrialBanner
+-- therefore reads e.g. "22 days left out of the 90-day free trial" for an
+-- account that only signed up a few days ago.
+--
+-- Recompute the trial end from the signup date + the tier's CURRENT trial_days,
+-- but only where that EXTENDS the window (the "> current expiry" guard), so we
+-- never shorten an account and never touch sales-converted accounts (those have
+-- plan_expires_at IS NULL and are skipped).
+--
+-- Idempotent: on a second run every eligible row already sits at
+-- created_date + trial_days, so the guard makes it a no-op.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+UPDATE app.accounts a
+SET plan_expires_at = a.created_date + (p.trial_days || ' days')::interval
+FROM app.plans p
+WHERE a.plan = p.id
+  AND a.plan_expires_at IS NOT NULL                                           -- still in trial (not sales-converted)
+  AND p.trial_days IS NOT NULL                                               -- tier actually carries a trial
+  AND a.created_date + (p.trial_days || ' days')::interval > a.plan_expires_at; -- extend only, never shorten
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-02_migrate_analyst_to_gpt5mini.sql =====================
+
+-- ============================================================================
+--  2026-07-02_migrate_analyst_to_gpt5mini.sql
+--  The AI Analyst deployment is 'gpt-5-mini' (Azure OpenAI Data Zone). It was
+--  previously mislabeled 'gpt-5.4-mini' and seeded at the wrong rate ($0.15/$0.60).
+--  Correct Data-Zone rates: input $0.28 / cached input $0.03 / output $2.20 per 1M.
+--
+--  This migration:
+--    1. Adds the cached-token columns (idempotent; may run before/after add_*).
+--    2. Re-keys any legacy 'gpt-5.4-mini' usage rows onto 'gpt-5-mini'.
+--    3. Drops the obsolete 'gpt-5.4-mini' pricing row (add_gpt5mini seeds the new one;
+--       a safety-net INSERT here covers the case where that file is absent).
+--    4. Recomputes frozen cost on gpt-5-mini rows at the corrected rate.
+--
+--  Idempotent AND non-clobbering: apply_migrations.cjs re-runs every file on every
+--  deploy. The recompute is guarded to the EXACT corrected rate and to rows whose
+--  cost actually differs, so a later Studio rate edit is never overwritten and
+--  already-frozen history is never rewritten to a new rate.
+--  Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- 1. Schema: cached-rate column (pricing) + cached-token counter (usage).
+ALTER TABLE app.ai_model_pricing
+  ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
+ALTER TABLE app.ai_usage
+  ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER NOT NULL DEFAULT 0;
+
+-- 2. Re-key legacy analyst usage onto the real deployment name.
+UPDATE app.ai_usage SET model = 'gpt-5-mini' WHERE model = 'gpt-5.4-mini';
+
+-- 3. Drop the obsolete pricing row; ensure the correct one exists (non-clobbering).
+DELETE FROM app.ai_model_pricing WHERE model = 'gpt-5.4-mini';
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
+VALUES ('gpt-5-mini', 0.28, 0.030, 2.20, 'USD')
+ON CONFLICT (model) DO NOTHING;
+
+-- 4. Recompute frozen cost on gpt-5-mini rows (cached prefix billed at the cached rate,
+--    the rest of input at the full rate). Legacy rows have cached_input_tokens = 0.
+UPDATE app.ai_usage u
+   SET cost = ROUND(
+                ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
+                (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
+                (u.output_tokens                                                  / 1000000.0) * p.output_per_1m
+              , 6)
+  FROM app.ai_model_pricing p
+ WHERE p.model = 'gpt-5-mini' AND u.model = 'gpt-5-mini'
+   AND p.input_per_1m = 0.28 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.20
+   AND u.cost IS DISTINCT FROM ROUND(
+                ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
+                (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
+                (u.output_tokens                                                  / 1000000.0) * p.output_per_1m
+              , 6);
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-02_resize_plan_allowances.sql =====================
+
+-- ============================================================================
+--  2026-07-02_resize_plan_allowances.sql
+--  Resize the monthly AI token allowances alongside the analyst model change
+--  (see 2026-07-02_migrate_analyst_to_gpt5mini.sql). Allowances chosen to keep AI
+--  cost a comfortable share of plan revenue at the gpt-5-mini blended ~$0.66/1M:
+--
+--    Lite:     20M tokens (200 credits) -> 10M tokens (100 credits)
+--    Standard: 100M tokens (1,000 cr)   -> 30M tokens (300 credits)
+--    Pro:      unchanged (custom / unlimited)
+--
+--  Updates both the numeric limit (limits.ai_tokens) and the human "credits /
+--  month" feature label. Existing accounts pick this up automatically because the
+--  quota is resolved from the plan's current limit each period.
+--
+--  Idempotent AND non-clobbering: apply_migrations.cjs re-runs every file on every
+--  deploy, so each UPDATE is GUARDED to the original allowance (20M / 100M). Once
+--  resized - or once an admin edits the plan in Studio - the guard is false and
+--  this migration is a no-op, so Studio plan edits are preserved.
+--  Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- Lite -> 10,000,000 tokens (100 credits). Only touch the original 20M seed.
+UPDATE app.plans
+   SET limits   = jsonb_set(limits, '{ai_tokens}', '10000000'::jsonb),
+       features = REPLACE(features::text, '200 credits / month', '100 credits / month')::jsonb
+ WHERE id = 'lite'
+   AND limits->>'ai_tokens' = '20000000';
+
+-- Standard -> 30,000,000 tokens (300 credits). Only touch the original 100M seed.
+UPDATE app.plans
+   SET limits   = jsonb_set(limits, '{ai_tokens}', '30000000'::jsonb),
+       features = REPLACE(features::text, '1,000 credits / month', '300 credits / month')::jsonb
+ WHERE id = 'standard'
+   AND limits->>'ai_tokens' = '100000000';
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-03_attribute_multigroup.sql =====================
+
+-- ============================================================================
+-- 2026-07-03_attribute_multigroup.sql
+-- Multi-dimension attribute grouping.
+--
+-- Old model: ONE grouping dimension per attribute
+--   app.attributes.group_label        (e.g. 'Continent')
+--   app.attribute_values.group_name   (e.g. 'Asia')
+--
+-- New model: MANY dimensions per attribute (e.g. Country grouped by BOTH
+-- Continent and GDP at once). Within each dimension a value has exactly one group.
+--   app.attributes.group_dimensions   JSONB array  e.g. ["Continent","GDP"]
+--   app.attribute_values.group_map     JSONB object e.g. {"Continent":"Asia","GDP":"High"}
+--
+-- The legacy group_label/group_name columns are KEPT (dead after backfill) so this
+-- migration is non-destructive; a later cleanup can drop them.
+--
+-- Idempotent. New databases get these columns from 06_attributes.sql directly.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+ALTER TABLE app.attributes
+  ADD COLUMN IF NOT EXISTS group_dimensions JSONB NOT NULL DEFAULT '[]';
+
+ALTER TABLE app.attribute_values
+  ADD COLUMN IF NOT EXISTS group_map JSONB NOT NULL DEFAULT '{}';
+
+-- Backfill: existing single dimension → one-element dimensions array.
+UPDATE app.attributes
+SET group_dimensions = to_jsonb(ARRAY[group_label])
+WHERE group_label IS NOT NULL AND btrim(group_label) <> ''
+  AND (group_dimensions = '[]'::jsonb OR group_dimensions IS NULL);
+
+-- Backfill: existing group_name → {group_label: group_name} on each value.
+UPDATE app.attribute_values v
+SET group_map = jsonb_build_object(a.group_label, v.group_name)
+FROM app.attributes a
+WHERE v.attribute_id = a.id
+  AND a.group_label IS NOT NULL AND btrim(a.group_label) <> ''
+  AND v.group_name IS NOT NULL AND btrim(v.group_name) <> ''
+  AND (v.group_map = '{}'::jsonb OR v.group_map IS NULL);
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-03_ga_cubes.sql =====================
+
+-- ============================================================================
+--  2026-07-03_ga_cubes.sql  -  GA cube redesign: new conformed daily cube tables
+--  and per-workspace report config, for EXISTING databases (idempotent).
+--
+--  Fresh installs get these from 09_ga_landing.sql / 03_app_core.sql. This migration
+--  brings already-provisioned DBs up to the same schema + config. The DAG loader
+--  also CREATEs these tables at runtime, but WITHOUT the (company_id, date) index
+--  the app's UTM / channel queries need - so we declare table + index here.
+--  Generated helper: python scripts/gen_ga_catalog.py
+-- ============================================================================
+
+-- 1) New cube tables + (company_id, date) indexes ---------------------------------
+CREATE TABLE IF NOT EXISTS ga_landing.page_engagement_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  page_path                  TEXT,
+  user_engagement_duration   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_page_engagement_daily_cd_idx ON ga_landing.page_engagement_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.session_quality_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  screen_page_views_per_session DOUBLE PRECISION,
+  average_session_duration   DOUBLE PRECISION,
+  bounce_rate                DOUBLE PRECISION,
+  engagement_rate            DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_session_quality_daily_cd_idx ON ga_landing.session_quality_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.item_performance (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  item_name                  TEXT,
+  item_brand                 TEXT,
+  item_category              TEXT,
+  items_viewed               BIGINT,
+  items_added_to_cart        BIGINT,
+  items_purchased            BIGINT,
+  item_revenue               DOUBLE PRECISION,
+  cart_to_view_rate          DOUBLE PRECISION,
+  purchase_to_view_rate      DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_item_performance_cd_idx ON ga_landing.item_performance(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.item_attribution (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  item_id                    TEXT,
+  channel_group              TEXT,
+  item_revenue               DOUBLE PRECISION,
+  items_purchased            BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_item_attribution_cd_idx ON ga_landing.item_attribution(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.transaction_metrics (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  transactions               BIGINT,
+  purchase_revenue           DOUBLE PRECISION,
+  ecommerce_purchases        BIGINT,
+  first_time_purchasers      BIGINT,
+  average_purchase_revenue   DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_transaction_metrics_cd_idx ON ga_landing.transaction_metrics(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.acquisition_session_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  session_source_medium      TEXT,
+  session_campaign_name      TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_acquisition_session_daily_cd_idx ON ga_landing.acquisition_session_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.acquisition_firstuser_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  first_user_source_medium   TEXT,
+  first_user_channel_group   TEXT,
+  new_users                  BIGINT,
+  total_users                BIGINT,
+  active_users               BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_acquisition_firstuser_daily_cd_idx ON ga_landing.acquisition_firstuser_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.channel_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  channel_group              TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_channel_daily_cd_idx ON ga_landing.channel_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.landing_page_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  landing_page               TEXT,
+  sessions                   BIGINT,
+  engaged_sessions           BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  key_events                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_landing_page_daily_cd_idx ON ga_landing.landing_page_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.demographics_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  age_bracket                TEXT,
+  gender                     TEXT,
+  active_users               BIGINT,
+  new_users                  BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_demographics_daily_cd_idx ON ga_landing.demographics_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.audience_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  audience_name              TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_audience_daily_cd_idx ON ga_landing.audience_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.tech_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  device                     TEXT,
+  operating_system           TEXT,
+  browser                    TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  engagement_rate            DOUBLE PRECISION,
+  page_views                 BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_tech_daily_cd_idx ON ga_landing.tech_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.geo_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  country                    TEXT,
+  region                     TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_geo_daily_cd_idx ON ga_landing.geo_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.interest_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  interest                   TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_interest_daily_cd_idx ON ga_landing.interest_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.returning_daily (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  date                       TEXT,
+  new_vs_returning           TEXT,
+  active_users               BIGINT,
+  sessions                   BIGINT,
+  key_events                 BIGINT,
+  total_revenue              DOUBLE PRECISION,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_returning_daily_cd_idx ON ga_landing.returning_daily(company_id, date);
+
+CREATE TABLE IF NOT EXISTS ga_landing.cohort_weekly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_week            BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_cohort_weekly_c_idx ON ga_landing.cohort_weekly(company_id);
+
+CREATE TABLE IF NOT EXISTS ga_landing.cohort_monthly (
+  id                         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  company_id                 UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  cohort                     TEXT,
+  cohort_nth_month           BIGINT,
+  cohort_active_users        BIGINT,
+  cohort_total_users         BIGINT,
+  capsuite_ref               TEXT,
+  property_id                TEXT,
+  property_name              TEXT,
+  synced_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, id)
+);
+CREATE INDEX IF NOT EXISTS gal_cohort_monthly_c_idx ON ga_landing.cohort_monthly(company_id);
+
+-- 2) Enable the new cubes in every workspace's report config, drop the retired keys.
+--    jsonb `||` ADDS the new keys (existing surviving reports keep their debug flags);
+--    `- key` removes the retired flat utm/country reports. interest_daily is left out
+--    pending brandingInterest apiName verification (see cube_catalog).
+UPDATE app.company_report_config
+SET ga_reports = (ga_reports - 'utm_performance' - 'utm_daily_performance' - 'utm_daily_full_param_performance' - 'country_performance' - 'path_exploration_duration')
+  || '{"page_engagement_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "session_quality_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "item_performance": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "item_attribution": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "transaction_metrics": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "acquisition_session_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "acquisition_firstuser_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "channel_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "landing_page_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "demographics_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "audience_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "tech_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "geo_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "returning_daily": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "cohort_weekly": {"isDebugging": false, "debugStartDate": "2025-07-30"}, "cohort_monthly": {"isDebugging": false, "debugStartDate": "2025-07-30"}}'::jsonb;
+
+
+-- ===================== migrations/2026-07-03_rename_pro_to_enterprise.sql =====================
+
+-- 2026-07-03_rename_pro_to_enterprise.sql
+-- Rename the top tier from 'pro' to 'enterprise' (id + display name), keeping its
+-- pricing, features and limits. Idempotent: safe to run repeatedly and a no-op
+-- once applied (or on a fresh DB where 02_accounts_auth.sql already seeds
+-- 'enterprise').
+--
+-- Order matters because app.accounts.plan is a FK -> app.plans(id):
+--   1. materialise the 'enterprise' plan row (copied from 'pro' if present)
+--   2. repoint accounts + the denormalised companies.plan copy off 'pro'
+--   3. drop the old 'pro' plan row
+BEGIN;
+
+-- 1. Create the 'enterprise' plan from the current 'pro' config (no-op if either
+--    'enterprise' already exists or there is no 'pro' row to copy).
+INSERT INTO app.plans
+  (id, name, price_display, period, badge, description, cta_label, cta_href,
+   cta_external, is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
+SELECT 'enterprise', 'Enterprise', price_display, period, badge, description,
+       cta_label,
+       REPLACE(cta_href, 'Upgrade to Pro', 'Upgrade to Enterprise'),
+       cta_external, is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active
+FROM app.plans
+WHERE id = 'pro'
+ON CONFLICT (id) DO NOTHING;
+
+-- 2. Move any account/workspace still pointing at 'pro' onto 'enterprise'.
+UPDATE app.accounts  SET plan = 'enterprise' WHERE plan = 'pro';
+UPDATE app.companies SET plan = 'enterprise' WHERE plan = 'pro';
+
+-- 3. Remove the retired 'pro' catalog row (now unreferenced).
+DELETE FROM app.plans WHERE id = 'pro';
+
+COMMIT;

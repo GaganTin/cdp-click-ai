@@ -247,6 +247,14 @@ export async function handleAnalyticsTool(name, args, pool) {
     return { content: [{ type: "text", text: JSON.stringify({ error: "No workspace context - refusing to run (isolation guard)." }) }] };
   }
 
+  // Coerce a model-supplied numeric arg to a safe bounded number BEFORE it is
+  // interpolated into SQL. Without this, a non-numeric value (e.g. a crafted
+  // string) would break out of the SQL literal (injection). Non-finite → default.
+  const clampNum = (v, def, min, max) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : def;
+  };
+
   // ── RFM Scoring (RFM model) ──────────────────────────────────────────────
   if (name === "score_rfm") {
     try {
@@ -325,7 +333,7 @@ export async function handleAnalyticsTool(name, args, pool) {
                recency_days, frequency, monetary_proxy,
                r_score, f_score, m_score, rfm_total, rfm_segment
         FROM labelled
-        ${args.segment_label ? `WHERE rfm_segment = '${args.segment_label}'` : ''}
+        ${args.segment_label ? `WHERE rfm_segment = '${String(args.segment_label).replace(/'/g, "''")}'` : ''}
         ORDER BY rfm_total DESC
         LIMIT ${topN}
       `, [companyId]);
@@ -354,7 +362,7 @@ export async function handleAnalyticsTool(name, args, pool) {
   // ── CLV Estimation (BG/NBD-inspired) ────────────────────────────────────
   if (name === "estimate_clv") {
     try {
-      const horizon = args.horizon_days || 365;
+      const horizon = clampNum(args.horizon_days, 365, 1, 3650);
       const topN = Math.min(args.top_n || 50, 200);
 
       const { rows } = await pool.query(`
@@ -422,7 +430,7 @@ export async function handleAnalyticsTool(name, args, pool) {
   // ── Churn Risk Scoring (Survival Analysis-inspired hazard model) ─────────
   if (name === "score_churn_risk") {
     try {
-      const threshold = args.risk_threshold ?? 70;
+      const threshold = clampNum(args.risk_threshold, 70, 0, 100);
       const topN = Math.min(args.top_n || 100, 500);
 
       const { rows } = await pool.query(`
@@ -507,10 +515,13 @@ export async function handleAnalyticsTool(name, args, pool) {
           SELECT
             c.cohort_month,
             c.member_id,
-            EXTRACT(MONTH FROM AGE(
+            (EXTRACT(YEAR FROM AGE(
               DATE_TRUNC('month', COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date)),
               c.cohort_month
-            ))::int AS months_since_join
+            )) * 12 + EXTRACT(MONTH FROM AGE(
+              DATE_TRUNC('month', COALESCE(GREATEST(cp.ga_last_seen::timestamptz, cp.last_order_date, cp.member_last_update), cp.member_join_date)),
+              c.cohort_month
+            )))::int AS months_since_join
           FROM cohorts c
           JOIN app.customer_profiles cp ON cp.member_id = c.member_id AND cp.company_id = $1
         ),
@@ -610,7 +621,12 @@ export async function handleAnalyticsTool(name, args, pool) {
 
       const normalised = members.map(m => ({
         ...m,
-        _f: featureKeys.map(f => (Number(m[f]) - mins[f]) / (maxes[f] - mins[f])),
+        // Guard the divisor: a constant feature (max === min) would give 0/0 = NaN,
+        // which poisons every distance and collapses all members into one cluster.
+        _f: featureKeys.map(f => {
+          const range = maxes[f] - mins[f];
+          return range === 0 ? 0 : (Number(m[f]) - mins[f]) / range;
+        }),
       }));
 
       // K-Means++ initialisation: spread initial centroids
@@ -833,7 +849,7 @@ export async function handleAnalyticsTool(name, args, pool) {
   // ── Shapley / Multi-Touch Attribution ────────────────────────────────────
   if (name === "compute_channel_attribution") {
     try {
-      const days = args.days || 90;
+      const days = clampNum(args.days, 90, 1, 3650);
       const model = args.attribution_model || "shapley";
 
       const { rows: channels } = await pool.query(`
@@ -916,7 +932,7 @@ export async function handleAnalyticsTool(name, args, pool) {
   // ── Anomaly Detection (Z-score + IQR) ────────────────────────────────────
   if (name === "detect_anomalies") {
     try {
-      const days = args.days || 90;
+      const days = clampNum(args.days, 90, 1, 3650);
       const zThreshold = args.z_threshold || 2.5;
       const metric = args.metric;
 

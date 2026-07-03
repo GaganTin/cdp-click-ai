@@ -15,9 +15,11 @@ Two ways it runs:
 
 Broken down by purpose into chained child DAGs:
     - click_cdp_ai_integration_ga_reports_path_funnel
-    - click_cdp_ai_integration_ga_reports_utm
     - click_cdp_ai_integration_ga_reports_content
     - click_cdp_ai_integration_ga_reports_purchase
+    - click_cdp_ai_integration_ga_reports_ecommerce     (catalog-driven: item / transaction)
+    - click_cdp_ai_integration_ga_reports_acquisition   (catalog-driven: session/first-user/channel/landing)
+    - click_cdp_ai_integration_ga_reports_audience      (catalog-driven: demographics/audience/tech/geo/interest/returning)
 
 Config + run status live in Postgres (app.* tables); see lib/pg_config, lib/pg_state
 and lib/ga_reports. NOTE: keyword_performance is a Search Console report and is NOT
@@ -76,7 +78,8 @@ _CHILD_CONF = {
     # orchestrator's duplicate when the failure is just a child trigger. Keep the
     # task ids here in sync with the _trigger(...) calls below.
     on_failure_callback=tf.make_orchestrator_failure_callback(
-        ["run_path_funnel", "run_utm", "run_content", "run_purchase"]
+        ["run_path_funnel", "run_content", "run_purchase",
+         "run_ecommerce", "run_acquisition", "run_audience", "run_retention"]
     ),
 )
 def click_cdp_ai_integration_ga_reports():
@@ -106,9 +109,12 @@ def click_cdp_ai_integration_ga_reports():
     )
 
     task_path_funnel = _trigger('run_path_funnel', 'click_cdp_ai_integration_ga_reports_path_funnel')
-    task_utm = _trigger('run_utm', 'click_cdp_ai_integration_ga_reports_utm')
     task_content = _trigger('run_content', 'click_cdp_ai_integration_ga_reports_content')
     task_purchase = _trigger('run_purchase', 'click_cdp_ai_integration_ga_reports_purchase')
+    task_ecommerce = _trigger('run_ecommerce', 'click_cdp_ai_integration_ga_reports_ecommerce')
+    task_acquisition = _trigger('run_acquisition', 'click_cdp_ai_integration_ga_reports_acquisition')
+    task_audience = _trigger('run_audience', 'click_cdp_ai_integration_ga_reports_audience')
+    task_retention = _trigger('run_retention', 'click_cdp_ai_integration_ga_reports_retention')
 
     # Fires only when every report group succeeded -> reports completion to Postgres.
     task_report_success = PythonOperator(
@@ -118,30 +124,12 @@ def click_cdp_ai_integration_ga_reports():
         trigger_rule='all_success',
     )
 
-    # After a successful GA sync, (re)build the Profiles page off the fresh landing
-    # data and stitch anonymous visitors to known customers. A manual "Sync Data"
-    # run (carries str_client_name) rebuilds that workspace's AP profiles over the
-    # last 90 days (mode=full); the daily schedule refreshes only visitors active in
-    # the last 7 days (mode=incremental). Fire-and-forget: the profile build has its
-    # own failure handling and must not gate the GA sync's reported status.
-    task_build_profiles = TriggerDagRunOperator(
-        task_id='run_profile_mapping',
-        trigger_dag_id='click_cdp_ai_build_profile_mapping',
-        trigger_run_id="{{ run_id }}__run_profile_mapping",
-        conf={
-            "str_client_name": "{{ (dag_run.conf.get('str_client_name') or '') if dag_run.conf else '' }}",
-            "company_id": "{{ (dag_run.conf.get('company_id') or '') if dag_run.conf else '' }}",
-            "dag_run_id": "{{ (dag_run.conf.get('dag_run_id') or '') if dag_run.conf else '' }}",
-            "mode": "{{ 'full' if (dag_run.conf and dag_run.conf.get('str_client_name')) else 'incremental' }}",
-        },
-        wait_for_completion=False,
-        reset_dag_run=False,
-        trigger_rule='all_success',
-    )
-
-    task_dag_start >> [task_path_funnel, task_utm, task_content, task_purchase]
-    [task_path_funnel, task_utm, task_content, task_purchase] >> task_report_success
-    task_report_success >> task_build_profiles
+    _report_groups = [
+        task_path_funnel, task_content, task_purchase,
+        task_ecommerce, task_acquisition, task_audience, task_retention,
+    ]
+    task_dag_start >> _report_groups
+    _report_groups >> task_report_success
 
 
 click_cdp_ai_integration_ga_reports()

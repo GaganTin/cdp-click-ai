@@ -87,7 +87,10 @@ export default function Dashboard() {
     if (!stale.length) return;
     (async () => {
       for (const c of stale) {
-        try { await appClient.charts.refresh(c.id); } catch { /* leave snapshot as-is */ }
+        // A failed refresh keeps the old snapshot and the server stamps
+        // metadata.last_refresh_error, which the refetch below surfaces as a
+        // "Stale" warning on the card - so the failure isn't silent.
+        try { await appClient.charts.refresh(c.id); } catch { /* stale flag shown after refetch */ }
       }
       queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
     })();
@@ -388,10 +391,12 @@ export default function Dashboard() {
                   onDragOver={e => { if (dragChartId) e.preventDefault(); }}
                   onDrop={() => reorderChartsInTab(chart.id)}
                 >
-                  {/* Include last_refreshed in the key so a refresh remounts the card
-                      with the newly-fetched data and updated timestamp. */}
+                  {/* Include last_refreshed AND any refresh error in the key so a
+                      successful refresh remounts with new data/timestamp and a
+                      failed refresh (which only stamps metadata) remounts to show
+                      the stale-data warning. */}
                   <PinnedChartCard
-                    key={`${chart.id}:${chart.last_refreshed || ""}`}
+                    key={`${chart.id}:${chart.last_refreshed || ""}:${chart.metadata?.last_refresh_error ? "err" : ""}`}
                     chart={chart}
                     size={size}
                     onRemove={(c) => removeChartFromTab(activeTab, c.id)}

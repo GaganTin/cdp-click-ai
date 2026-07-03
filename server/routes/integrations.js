@@ -256,14 +256,25 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
   // interpolate. GA = everything its DAGs produce; GSC = the keyword report.
   const PURGE_TABLES = {
     googleAnalytics: [
-      // Small aggregate tables that power the UTM / dashboard analytics. Purged
+      // Small aggregate cubes that power the UTM / dashboard analytics. Purged
       // FIRST so the UI stops showing data almost immediately - the big event
       // tables below can be millions of rows and take far longer to delete.
-      "ga_landing.utm_performance", "ga_landing.utm_daily_performance",
-      "ga_landing.utm_daily_full_param_performance", "ga_landing.utm_daily_utm_id_performance",
-      "ga_landing.utm_ad_performance", "ga_landing.country_performance",
+      // (ga_gold.* are VIEWS over these cubes - they empty automatically, so they
+      // are not listed here.)
+      // New conformed daily cubes (lib/cube_catalog):
+      "ga_landing.acquisition_session_daily", "ga_landing.acquisition_firstuser_daily",
+      "ga_landing.channel_daily", "ga_landing.landing_page_daily",
+      "ga_landing.demographics_daily", "ga_landing.audience_daily", "ga_landing.tech_daily",
+      "ga_landing.geo_daily", "ga_landing.interest_daily", "ga_landing.returning_daily",
+      "ga_landing.item_performance", "ga_landing.item_attribution", "ga_landing.transaction_metrics",
+      "ga_landing.session_quality_daily", "ga_landing.page_engagement_daily",
+      "ga_landing.cohort_weekly", "ga_landing.cohort_monthly",
+      // Surviving cubes + retired flat tables (kept so pre-cutover data is cleaned too):
+      "ga_landing.utm_daily_utm_id_performance", "ga_landing.utm_ad_performance",
       "ga_landing.page_metrics", "ga_landing.page_utm_metrics", "ga_landing.website_metrics",
       "ga_landing.event_list", "ga_landing.funnel_report", "ga_landing.purchase_list",
+      "ga_landing.utm_performance", "ga_landing.utm_daily_performance",
+      "ga_landing.utm_daily_full_param_performance", "ga_landing.country_performance",
       // Large event-level tables (slowest) go last.
       "ga_landing.path_exploration", "ga_landing.path_exploration_duration",
       // Anonymous visitor profiles are derived from path_exploration, so they go
@@ -294,6 +305,13 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
   // reconnect re-runs the full plan-based backfill cleanly.
   const PURGE_REPORTS = {
     googleAnalytics: [
+      // New conformed daily cubes (watermark key = cube name; see lib/pg_state).
+      "acquisition_session_daily", "acquisition_firstuser_daily", "channel_daily",
+      "landing_page_daily", "demographics_daily", "audience_daily", "tech_daily",
+      "geo_daily", "interest_daily", "returning_daily", "item_performance",
+      "item_attribution", "transaction_metrics", "session_quality_daily",
+      "page_engagement_daily", "cohort_weekly", "cohort_monthly",
+      // Surviving + retired report keys (cleared so a reconnect re-backfills cleanly).
       "path_exploration", "path_exploration_duration", "funnel_report", "utm_performance",
       "utm_daily_performance", "utm_daily_full_param_performance", "utm_daily_utm_id_performance",
       "utm_ad_performance", "country_performance", "page_metrics", "page_utm_metrics",
@@ -929,7 +947,33 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
     // on all of them and post a once-per-day "daily sync completed" notification.
     if (scheduled || !company_id) {
       try {
-        if (!is_synced) return ok(res, { scheduled: true, updated: 0 }); // failures: DAG on_failure handles alerts
+        const label = integrationLabel(integration_type);
+        const day = new Date().toISOString().slice(0, 10);
+
+        // Failure: flag the sync error on every connected workspace of this type and
+        // post a once-per-day "daily sync failed" notification to each. (The DAG's
+        // on_failure also fires an internal Teams alert - this is the user-facing side.)
+        if (!is_synced) {
+          const { rows } = await pool.query(
+            `UPDATE app.data_integrations
+             SET is_sync_error=true, sync_error=$2, updated_date=NOW()
+             WHERE is_connected=true AND integration_type=$1
+             RETURNING company_id`,
+            [integration_type, sync_error || "Scheduled daily sync failed"]
+          );
+          for (const r of rows) {
+            await notifyCompany(pool, {
+              companyId: r.company_id, type: "sync_status",
+              title: `${label} daily sync failed`,
+              body: "We couldn't complete your scheduled daily sync. Open Integrations to check the connection.",
+              link: "/integrations",
+              metadata: { integration_type, status: "failed", scheduled: true, trigger: "daily" },
+              dedupeKey: `daily-sync:${integration_type}:failed:${day}`,
+            });
+          }
+          return ok(res, { scheduled: true, updated: rows.length, status: "failed" });
+        }
+
         const { rows } = await pool.query(
           `UPDATE app.data_integrations
            SET is_synced=true, last_synced_date=NOW(), is_sync_error=false, sync_error=NULL, updated_date=NOW()
@@ -937,8 +981,6 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
            RETURNING company_id`,
           [integration_type]
         );
-        const label = integrationLabel(integration_type);
-        const day = new Date().toISOString().slice(0, 10);
         for (const r of rows) {
           await notifyCompany(pool, {
             companyId: r.company_id, type: "sync_status",
@@ -946,10 +988,10 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
             body: "Your scheduled daily sync has finished.",
             link: "/integrations",
             metadata: { integration_type, status: "completed", scheduled: true, trigger: "daily" },
-            dedupeKey: `daily-sync:${integration_type}:${day}`,
+            dedupeKey: `daily-sync:${integration_type}:completed:${day}`,
           });
         }
-        return ok(res, { scheduled: true, updated: rows.length });
+        return ok(res, { scheduled: true, updated: rows.length, status: "completed" });
       } catch (e) { return err(res, e.message, 500); }
     }
 

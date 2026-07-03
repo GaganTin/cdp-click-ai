@@ -337,7 +337,7 @@ function ValuePages({ valueId }) {
 // ── Value row in the detail dialog ────────────────────────────
 function ValueRow({
   value, siblings, onApprove, onMerge, onDelete, canDelete = true, canMerge = true,
-  groupingEnabled, groups = [], onSetGroup,
+  groupDimensions = [], groupsByDim = {}, onSetGroup,
   selectable, selected, onToggleSelect, suggestion, onAcceptSuggestion,
 }) {
   const { t } = usePreferences();
@@ -367,23 +367,27 @@ function ValueRow({
             <GitMerge className="w-3 h-3" /> {suggestion.display_label || suggestion.value}?
           </button>
         )}
-        {groupingEnabled && value.is_approved && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground whitespace-nowrap">
-                {value.group_name || t("+ group")}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
-              {groups.map((g) => (
-                <DropdownMenuItem key={g} onClick={() => onSetGroup(value, g)}>{g}</DropdownMenuItem>
-              ))}
-              {groups.length > 0 && <DropdownMenuSeparator />}
-              <DropdownMenuItem onClick={() => { const g = window.prompt(t("New group name")); if (g && g.trim()) onSetGroup(value, g.trim()); }}>{t("New group…")}</DropdownMenuItem>
-              {value.group_name && <DropdownMenuItem onClick={() => onSetGroup(value, null)}>{t("Clear group")}</DropdownMenuItem>}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        {value.is_approved && groupDimensions.map((dim) => {
+          const cur = value.group_map?.[dim];
+          const single = groupDimensions.length === 1;
+          return (
+            <DropdownMenu key={dim}>
+              <DropdownMenuTrigger asChild>
+                <button className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${cur ? "border-border text-foreground" : "border-dashed border-border text-muted-foreground"} hover:text-foreground`}>
+                  {cur ? (single ? cur : `${dim}: ${cur}`) : `+ ${dim}`}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
+                {(groupsByDim[dim] || []).map((g) => (
+                  <DropdownMenuItem key={g} onClick={() => onSetGroup(value, dim, g)}>{g}</DropdownMenuItem>
+                ))}
+                {(groupsByDim[dim] || []).length > 0 && <DropdownMenuSeparator />}
+                <DropdownMenuItem onClick={() => { const g = window.prompt(`${t("New")} ${dim} ${t("group")}`); if (g && g.trim()) onSetGroup(value, dim, g.trim()); }}>{t("New group…")}</DropdownMenuItem>
+                {cur && <DropdownMenuItem onClick={() => onSetGroup(value, dim, null)}>{t("Clear")}</DropdownMenuItem>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          );
+        })}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {pending && (
             <button title={t("Approve")} onClick={() => onApprove(value)} className="p-1 hover:text-foreground text-muted-foreground"><Check className="w-3.5 h-3.5" /></button>
@@ -560,8 +564,11 @@ function TestTab({
               <div key={l.id} className="flex items-center gap-2 py-1.5 group">
                 <input type="checkbox" checked={l.is_selected} className="accent-foreground flex-shrink-0"
                   onChange={() => selectLinkMut.mutate({ ids: [l.id], is_selected: !l.is_selected })} />
-                <span className="text-xs truncate flex-1" title={decodeUrl(l.url)}>{decodeUrl(l.url)}</span>
-                <button onClick={() => delLinkMut.mutate(l.id)} title={t("Remove from the set")} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
+                <div className="min-w-0 flex-1">
+                  {l.title && <p className="text-xs font-medium truncate" title={l.title}>{l.title}</p>}
+                  <p className={`truncate ${l.title ? "text-[10px] text-muted-foreground" : "text-xs"}`} title={decodeUrl(l.url)}>{decodeUrl(l.url)}</p>
+                </div>
+                <button onClick={() => delLinkMut.mutate(l.id)} title={t("Remove from the set")} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
               </div>
             ))}
           </div>
@@ -598,10 +605,12 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
   const [newValue, setNewValue] = useState("");
   const [testUrl, setTestUrl] = useState("");
   const [testResults, setTestResults] = useState(null);
-  const [groupLabel, setGroupLabel] = useState("");
   const [valueSearch, setValueSearch] = useState("");
-  const [extraGroups, setExtraGroups] = useState([]); // manually-created groups not yet assigned a value
-  const [addGroupOpen, setAddGroupOpen] = useState(false);
+  const [pageSearch, setPageSearch] = useState("");       // Tagged-pages tab search
+  const [pageValueFilter, setPageValueFilter] = useState(""); // Tagged-pages tab value filter
+  const [newDimension, setNewDimension] = useState("");   // add-dimension input
+  const [extraGroups, setExtraGroups] = useState({});     // manually-created empty groups, keyed by dimension
+  const [addGroupDim, setAddGroupDim] = useState(null);   // which dimension the Add-group dialog targets
   const [reviewSel, setReviewSel] = useState(() => new Set()); // selected review-queue values for bulk actions
   const [approvedSel, setApprovedSel] = useState(() => new Set()); // selected approved values for bulk merge/group
   const [showHistory, setShowHistory] = useState(false);
@@ -647,7 +656,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
     mutationFn: (v) => appClient.attributes.addValue(attributeId, v),
     onSuccess: () => {
       setNewValue(""); invalidate();
-      if (attr?.group_label) toast.warning(t("Assign this value a") + ` ${attr.group_label} ` + t("group in the Groups tab."));
+      if (attr?.group_dimensions?.length) toast.warning(t("Assign this value to a group in the Groups tab."));
     },
     onError: (e) => toast.error(e.message),
   });
@@ -669,17 +678,28 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
     mutationFn: ({ pageId, valueId }) => appClient.attributes.deletePageTag(pageId, valueId),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["attribute-pages", attributeId] }); invalidate(); },
   });
-  const groupLabelMut = useMutation({
-    mutationFn: (label) => appClient.attributes.update(attributeId, { group_label: label || null }),
+  const addDimensionMut = useMutation({
+    mutationFn: (name) => appClient.attributes.addDimension(attributeId, name),
     onSuccess: invalidate,
+    onError: (e) => toast.error(e.message),
+  });
+  const renameDimensionMut = useMutation({
+    mutationFn: ({ oldName, newName }) => appClient.attributes.renameDimension(attributeId, oldName, newName),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e.message),
+  });
+  const removeDimensionMut = useMutation({
+    mutationFn: (name) => appClient.attributes.removeDimension(attributeId, name),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(e.message),
   });
   const autogroupMut = useMutation({
-    mutationFn: (label) => appClient.attributes.autogroup(attributeId, label),
+    mutationFn: (dimension) => appClient.attributes.autogroup(attributeId, dimension),
     onSuccess: (r) => { toast.success(`${t("Grouped")} ${r.grouped} ${r.grouped === 1 ? t("value") : t("values")}`); invalidate(); },
     onError: (e) => toast.error(e.message),
   });
   const setGroupMut = useMutation({
-    mutationFn: ({ id, group_name }) => appClient.attributes.updateValue(id, { group_name }),
+    mutationFn: ({ id, dimension, group_value }) => appClient.attributes.updateValue(id, { dimension, group_value }),
     onSuccess: invalidate,
   });
   const testMut = useMutation({
@@ -713,17 +733,20 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
     onSuccess: invalidateTestLinks,
   });
 
-  useEffect(() => { setGroupLabel(attr?.group_label || ""); }, [attr?.group_label]);
-
   const values = attr?.values || [];
   const pending = values.filter((v) => v.is_exception && !v.is_approved && !v.merged_into && !v.is_blocked);
   const approved = values.filter((v) => v.is_approved && !v.merged_into);
   const merged = values.filter((v) => v.merged_into);
   const valueById = Object.fromEntries(values.map((v) => [v.id, v]));
-  const groupingEnabled = !!attr?.group_label;
-  const groupNames = [...new Set(approved.map((v) => v.group_name).filter(Boolean))].sort();
-  const allGroups = [...new Set([...groupNames, ...extraGroups])].sort();
-  const setGroup = (v, g) => setGroupMut.mutate({ id: v.id, group_name: g });
+  const dimensions = attr?.group_dimensions || [];
+  const groupingEnabled = dimensions.length > 0;
+  // Groups present per dimension, unioned with any manually-added empty groups.
+  const groupsByDim = Object.fromEntries(dimensions.map((dim) => {
+    const present = approved.map((v) => v.group_map?.[dim]).filter(Boolean);
+    const extra = extraGroups[dim] || [];
+    return [dim, [...new Set([...present, ...extra])].sort()];
+  }));
+  const setGroup = (v, dim, g) => setGroupMut.mutate({ id: v.id, dimension: dim, group_value: g });
   const toggleReview = (v) => setReviewSel((s) => { const n = new Set(s); n.has(v.id) ? n.delete(v.id) : n.add(v.id); return n; });
   const toggleApproved = (v) => setApprovedSel((s) => { const n = new Set(s); n.has(v.id) ? n.delete(v.id) : n.add(v.id); return n; });
   // Near-duplicate suggestion per pending value: closest approved sibling.
@@ -779,18 +802,13 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                   <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setShowHistory((s) => !s)} title={t("Run history")}>
                     <History className="w-3.5 h-3.5" /> {t("History")}
                   </Button>
-                  {attr.status === "active" ? (
-                    <Button size="sm" className="h-8 gap-1.5" disabled={ACTIVE_JOB(job) || runMut.isPending}
-                      onClick={() => runMut.mutate()}>
-                      <RefreshCw className="w-3.5 h-3.5" /> {t("Reconstruct")}
-                    </Button>
-                  ) : (
-                    <Button size="sm" className="h-8 gap-1.5" disabled={ACTIVE_JOB(job) || runMut.isPending || statusMut.isPending}
-                      title={t("Activates this attribute, then runs a reconstruct")}
-                      onClick={() => statusMut.mutate("active", { onSuccess: () => runMut.mutate() })}>
-                      <Play className="w-3.5 h-3.5" /> {t("Activate & Reconstruct")}
-                    </Button>
-                  )}
+                  <Button size="sm" className="h-8 gap-1.5" disabled={ACTIVE_JOB(job) || runMut.isPending}
+                    title={attr.status === "active"
+                      ? t("Re-tag your crawled pages and update targeting.")
+                      : t("Tag your crawled pages so you can preview and verify results. Values only reach profiles once this attribute is Active.")}
+                    onClick={() => runMut.mutate()}>
+                    <RefreshCw className="w-3.5 h-3.5" /> {t("Reconstruct")}
+                  </Button>
                 </div>
               )}
             </div>
@@ -809,7 +827,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
 
             {/* Tabs (Test sits between Values and Groups) */}
             <div className="flex gap-4 border-b border-border text-sm">
-              {[["values", `${t("Values")} (${approved.length})`], ...(attr.source === "web_content" ? [["test", t("Test")]] : []), ["groups", attr.group_label ? `${t("Groups")} (${groupNames.length})` : t("Groups")], ["pages", t("Tagged pages")]].map(([k, label]) => (
+              {[["values", `${t("Values")} (${approved.length})`], ...(attr.source === "web_content" ? [["test", t("Test")]] : []), ["groups", dimensions.length ? `${t("Groups")} (${dimensions.length})` : t("Groups")], ["pages", t("Tagged pages")]].map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)}
                   className={`pb-2 border-b-2 transition-colors ${tab === k ? "border-foreground text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
                   {label}
@@ -915,23 +933,23 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                                 ))}
                               </DropdownMenuContent>
                             </DropdownMenu>
-                            {groupingEnabled && (
-                              <DropdownMenu>
+                            {dimensions.map((dim) => (
+                              <DropdownMenu key={dim}>
                                 <DropdownMenuTrigger asChild>
                                   <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={bulkMut.isPending}>
-                                    <Layers className="w-3 h-3" /> {t("Set")} {attr.group_label}…
+                                    <Layers className="w-3 h-3" /> {t("Set")} {dim}…
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start" className="max-h-64 overflow-auto">
-                                  {allGroups.map((g) => (
-                                    <DropdownMenuItem key={g} onClick={() => bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { group_name: g } })}>{g}</DropdownMenuItem>
+                                  {(groupsByDim[dim] || []).map((g) => (
+                                    <DropdownMenuItem key={g} onClick={() => bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { dimension: dim, group_value: g } })}>{g}</DropdownMenuItem>
                                   ))}
-                                  {allGroups.length > 0 && <DropdownMenuSeparator />}
-                                  <DropdownMenuItem onClick={() => { const g = window.prompt(`${t("New")} ${attr.group_label} ${t("group")}`); if (g && g.trim()) bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { group_name: g.trim() } }); }}>{t("New group…")}</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { group_name: null } })}>{t("Clear group")}</DropdownMenuItem>
+                                  {(groupsByDim[dim] || []).length > 0 && <DropdownMenuSeparator />}
+                                  <DropdownMenuItem onClick={() => { const g = window.prompt(`${t("New")} ${dim} ${t("group")}`); if (g && g.trim()) bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { dimension: dim, group_value: g.trim() } }); }}>{t("New group…")}</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => bulkMut.mutate({ ids: [...approvedSel], action: "set_group", extra: { dimension: dim, group_value: null } })}>{t("Clear")} {dim}</DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
-                            )}
+                            ))}
                             <button onClick={() => setApprovedSel(new Set())} className="text-[11px] text-muted-foreground hover:text-foreground ml-auto">{t("Cancel")}</button>
                           </div>
                         )}
@@ -947,7 +965,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             {shown.map((v) => (
                               <ValueRow key={v.id} value={v} siblings={values}
                                 selectable selected={approvedSel.has(v.id)} onToggleSelect={toggleApproved}
-                                groupingEnabled={groupingEnabled} groups={allGroups} onSetGroup={setGroup}
+                                groupDimensions={dimensions} groupsByDim={groupsByDim} onSetGroup={setGroup}
                                 onApprove={(x) => approveMut.mutate(x.id)}
                                 onMerge={(x, t) => mergeMut.mutate({ id: x.id, target: t })}
                                 onDelete={(x) => delValueMut.mutate(x.id)} />
@@ -984,92 +1002,135 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                 />
               ) : tab === "groups" ? (
                 <div className="space-y-3">
-                  {/* Grouping dimension */}
+                  {/* Grouping dimensions manager */}
                   <div className="rounded-lg border border-border p-3 space-y-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Layers className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                      <Input value={groupLabel} onChange={(e) => setGroupLabel(e.target.value)}
-                        placeholder={t("Group values by… e.g. Continent, Faculty")} className="h-8 text-sm"
-                        onKeyDown={(e) => { if (e.key === "Enter") groupLabelMut.mutate(groupLabel.trim()); }} />
-                      {groupLabel.trim() !== (attr.group_label || "") && (
-                        <Button size="sm" variant="outline" className="h-8" onClick={() => groupLabelMut.mutate(groupLabel.trim())}>{t("Save")}</Button>
-                      )}
-                      <Button size="sm" variant="outline" className="h-8 flex-shrink-0" disabled={!groupingEnabled}
-                        onClick={() => setAddGroupOpen(true)}>
-                        {t("Add group")}
-                      </Button>
-                      <Button size="sm" className="h-8 flex-shrink-0" disabled={!groupLabel.trim() || autogroupMut.isPending || approved.length === 0}
-                        onClick={() => autogroupMut.mutate(groupLabel.trim())}>
-                        {autogroupMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t("Group with AI")}
-                      </Button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">{t("Roll values up into a higher-level dimension (e.g. Country → Continent) so you can target a whole group in Segments. Set a dimension, then group with AI - or add groups and assign values yourself. To delete a value, use the")} <strong>{t("Values")}</strong> {t("tab.")}</p>
-                  </div>
-
-                  {/* No ungrouped values allowed once a dimension exists. */}
-                  {groupingEnabled && (() => {
-                    const ungrouped = approved.filter((v) => !v.group_name);
-                    if (!ungrouped.length) return null;
-                    return (
-                      <div className="rounded-lg border border-yellow-500/40 bg-yellow-500/5 p-3 flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-yellow-600 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-yellow-700">{ungrouped.length} {ungrouped.length === 1 ? t("value") : t("values")} {t("not yet in a")} {attr.group_label} {t("group")}</p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            {t("Every value must belong to a group so it can be targeted. Assign")} {ungrouped.length === 1 ? t("it") : t("them")} {t("below, or group automatically.")}
-                          </p>
-                        </div>
-                        <Button size="sm" variant="outline" className="h-7 gap-1 text-xs flex-shrink-0" disabled={autogroupMut.isPending}
-                          onClick={() => autogroupMut.mutate(attr.group_label)}>
-                          {autogroupMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} {t("Group with AI")}
-                        </Button>
+                      {dimensions.map((dim) => (
+                        <span key={dim} className="h-7 pl-2.5 pr-1 rounded-full bg-secondary/60 border border-border flex items-center gap-1 text-xs">
+                          {dim}
+                          <button title={t("Rename dimension")} className="p-0.5 text-muted-foreground hover:text-foreground"
+                            onClick={() => { const n = window.prompt(t("Rename dimension"), dim); if (n && n.trim() && n.trim() !== dim) renameDimensionMut.mutate({ oldName: dim, newName: n.trim() }); }}>
+                            <Pencil className="w-2.5 h-2.5" />
+                          </button>
+                          <button title={t("Remove dimension")} className="p-0.5 text-muted-foreground hover:text-destructive"
+                            onClick={() => { if (window.confirm(`${t("Remove the")} "${dim}" ${t("dimension? Values keep their other groups.")}`)) removeDimensionMut.mutate(dim); }}>
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </span>
+                      ))}
+                      <div className="flex items-center gap-1">
+                        <Input value={newDimension} onChange={(e) => setNewDimension(e.target.value)}
+                          placeholder={t("Add a dimension… e.g. Continent")} className="h-7 text-xs w-48"
+                          onKeyDown={(e) => { if (e.key === "Enter" && newDimension.trim()) { addDimensionMut.mutate(newDimension.trim()); setNewDimension(""); } }} />
+                        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!newDimension.trim() || addDimensionMut.isPending}
+                          onClick={() => { addDimensionMut.mutate(newDimension.trim()); setNewDimension(""); }}>{t("Add")}</Button>
                       </div>
-                    );
-                  })()}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">{t("Roll values up into higher-level dimensions (e.g. Country → Continent AND GDP) so you can target a whole group in Segments. Each value takes one group per dimension. To delete a value, use the")} <strong>{t("Values")}</strong> {t("tab.")}</p>
+                  </div>
 
                   {!groupingEnabled ? (
                     <div className="border border-dashed border-border rounded-lg p-8 text-center">
                       <Layers className="w-7 h-7 text-muted-foreground mx-auto mb-2 opacity-40" />
                       <p className="text-sm font-medium mb-1">{t("No grouping yet")}</p>
-                      <p className="text-xs text-muted-foreground">{t("Name a dimension above (e.g. “Continent”), then")} <strong>{t("Group with AI")}</strong> {t("to organise your")} {approved.length} {approved.length === 1 ? t("value") : t("values")} - {t("or add groups and assign values by hand.")}</p>
+                      <p className="text-xs text-muted-foreground">{t("Add a dimension above (e.g. “Continent”), then")} <strong>{t("Group with AI")}</strong> {t("to organise your")} {approved.length} {approved.length === 1 ? t("value") : t("values")} - {t("or add groups and assign values by hand. Add more than one dimension to group the same values several ways at once.")}</p>
                     </div>
                   ) : approved.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-4 text-center border border-dashed border-border rounded">{t("No values to group yet.")}</p>
                   ) : (
-                    [...allGroups, null].map((gname) => {
-                      const inGroup = approved.filter((v) => (v.group_name || null) === gname);
-                      if (gname === null && !inGroup.length) return null; // hide empty "Ungrouped"
-                      const reach = inGroup.reduce((s, v) => s + Number(v.profile_count || 0), 0);
+                    dimensions.map((dim) => {
+                      const ungrouped = approved.filter((v) => !v.group_map?.[dim]);
                       return (
-                        <div key={gname || "__ungrouped"} className="rounded-lg border border-border p-3">
-                          <div className="flex items-center justify-between mb-1">
-                            <p className="text-xs font-semibold">{gname || t("Ungrouped")}</p>
-                            <span className="text-[10px] text-muted-foreground">{inGroup.length} {inGroup.length === 1 ? t("value") : t("values")}{reach ? ` · ${reach.toLocaleString()} ${t("profile tags")}` : ""}</span>
+                        <div key={dim} className="rounded-lg border border-border p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <p className="text-xs font-semibold flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-muted-foreground" /> {dim}</p>
+                            <div className="flex items-center gap-1.5">
+                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddGroupDim(dim)}>{t("Add group")}</Button>
+                              <Button size="sm" className="h-7 gap-1 text-xs" disabled={autogroupMut.isPending}
+                                onClick={() => autogroupMut.mutate(dim)}>
+                                {autogroupMut.isPending && autogroupMut.variables === dim ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} {t("Group with AI")}
+                              </Button>
+                            </div>
                           </div>
-                          {inGroup.length === 0 ? (
-                            <p className="text-[11px] text-muted-foreground">{t("Empty - open a value's group menu and choose")} “{gname}”.</p>
-                          ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-                              {inGroup.map((v) => (
-                                <ValueRow key={v.id} value={v} siblings={values} groupingEnabled groups={allGroups} onSetGroup={setGroup}
-                                  canDelete={false} canMerge={false}
-                                  onApprove={(x) => approveMut.mutate(x.id)} />
-                              ))}
+
+                          {ungrouped.length > 0 && (
+                            <div className="rounded-md border border-yellow-500/40 bg-yellow-500/5 p-2 flex items-start gap-2">
+                              <AlertCircle className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                              <p className="text-[11px] text-muted-foreground flex-1">
+                                <span className="font-medium text-yellow-700">{ungrouped.length} {ungrouped.length === 1 ? t("value") : t("values")}</span> {t("not yet in a")} {dim} {t("group. Assign below, or group automatically - ungrouped values can't be targeted by this dimension.")}
+                              </p>
                             </div>
                           )}
+
+                          {[...(groupsByDim[dim] || []), null].map((gname) => {
+                            const inGroup = approved.filter((v) => (v.group_map?.[dim] || null) === gname);
+                            if (gname === null && !inGroup.length) return null; // hide empty "Ungrouped"
+                            const reach = inGroup.reduce((s, v) => s + Number(v.profile_count || 0), 0);
+                            return (
+                              <div key={gname || "__ungrouped"} className="rounded-md border border-border/70 p-2.5">
+                                <div className="flex items-center justify-between mb-1">
+                                  <p className="text-[11px] font-semibold">{gname || t("Ungrouped")}</p>
+                                  <span className="text-[10px] text-muted-foreground">{inGroup.length} {inGroup.length === 1 ? t("value") : t("values")}{reach ? ` · ${reach.toLocaleString()} ${t("profile tags")}` : ""}</span>
+                                </div>
+                                {inGroup.length === 0 ? (
+                                  <p className="text-[11px] text-muted-foreground">{t("Empty - open a value's")} “{dim}” {t("menu and choose")} “{gname}”.</p>
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+                                    {inGroup.map((v) => (
+                                      <ValueRow key={v.id} value={v} siblings={values} groupDimensions={[dim]} groupsByDim={groupsByDim} onSetGroup={setGroup}
+                                        canDelete={false} canMerge={false}
+                                        onApprove={(x) => approveMut.mutate(x.id)} />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       );
                     })
                   )}
                 </div>
-              ) : (
+              ) : (() => {
+                // Client-side search + value filter over the tagged-pages list.
+                const shownPages = pages.filter((pg) => {
+                  if (pageValueFilter && !(pg.values || []).some((v) => v.id === pageValueFilter)) return false;
+                  if (!pageSearch) return true;
+                  const q = pageSearch.toLowerCase();
+                  return (pg.title || "").toLowerCase().includes(q)
+                    || decodeUrl(pg.url).toLowerCase().includes(q)
+                    || (pg.values || []).some((v) => (v.value || "").toLowerCase().includes(q));
+                });
+                return (
                 <div className="space-y-2">
                   <p className="text-[11px] text-muted-foreground">{t("Pages tagged by this attribute, with the values the AI assigned. Remove any wrong tag with the ✕ - it updates targeting immediately.")}</p>
+                  {pages.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="relative flex-1 min-w-[12rem] max-w-xs">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                        <input value={pageSearch} onChange={(e) => setPageSearch(e.target.value)} placeholder={t("Search pages or values…")}
+                          className="w-full h-8 pl-7 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
+                      </div>
+                      {approved.length > 0 && (
+                        <Select value={pageValueFilter || "__all"} onValueChange={(v) => setPageValueFilter(v === "__all" ? "" : v)}>
+                          <SelectTrigger className="h-8 w-44 text-xs"><SelectValue placeholder={t("All values")} /></SelectTrigger>
+                          <SelectContent className="max-h-64">
+                            <SelectItem value="__all">{t("All values")}</SelectItem>
+                            {approved.map((v) => <SelectItem key={v.id} value={v.id}>{v.display_label || v.value}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <span className="text-[11px] text-muted-foreground ml-auto">{shownPages.length} {t("of")} {pages.length}</span>
+                    </div>
+                  )}
                   {pages.length === 0 ? (
                     <p className="text-xs text-muted-foreground py-6 text-center">{t("No tagged pages yet. Run Reconstruct to tag your crawled pages.")}</p>
+                  ) : shownPages.length === 0 ? (
+                    <p className="text-xs text-muted-foreground py-6 text-center">{t("No pages match that search.")}</p>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {pages.map((pg) => (
+                      {shownPages.map((pg) => (
                     <div key={pg.id} className="border border-border rounded-lg p-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -1097,14 +1158,15 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                     </div>
                   )}
                 </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         )}
 
-      <AddGroupDialog open={addGroupOpen} onClose={() => setAddGroupOpen(false)}
-        dimension={attr?.group_label} existing={allGroups}
-        onAdd={(g) => setExtraGroups((p) => [...new Set([...p, g])])} />
+      <AddGroupDialog open={!!addGroupDim} onClose={() => setAddGroupDim(null)}
+        dimension={addGroupDim} existing={addGroupDim ? (groupsByDim[addGroupDim] || []) : []}
+        onAdd={(g) => setExtraGroups((p) => ({ ...p, [addGroupDim]: [...new Set([...(p[addGroupDim] || []), g])] }))} />
     </div>
   );
 }
@@ -1631,10 +1693,20 @@ function ReviewPanel() {
   const { t } = usePreferences();
   const qc = useQueryClient();
   const [filter, setFilter] = useState("new"); // new | all | untagged
+  const [attrFilter, setAttrFilter] = useState(""); // attribute id, "" = all
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");      // debounced
+  const [sel, setSel] = useState(() => new Set()); // selected page ids for bulk verify
+  const [confirmAll, setConfirmAll] = useState(false);
+
+  // Debounce the search so typing doesn't refetch every keystroke.
+  useEffect(() => { const id = setTimeout(() => setSearch(searchInput.trim()), 350); return () => clearTimeout(id); }, [searchInput]);
+  // A changed filter/attribute/search invalidates the current selection.
+  useEffect(() => { setSel(new Set()); }, [filter, attrFilter, search]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["attr-tagged-pages", filter],
-    queryFn: () => appClient.attributes.taggedPages(filter === "all" ? null : filter),
+    queryKey: ["attr-tagged-pages", filter, attrFilter, search],
+    queryFn: () => appClient.attributes.taggedPages(filter === "all" ? null : filter, { attribute_id: attrFilter || undefined, search: search || undefined }),
   });
   const pages = data?.pages || [];
   const summary = data?.summary || { new_pages: 0, new_labels: 0 };
@@ -1648,19 +1720,41 @@ function ReviewPanel() {
     qc.invalidateQueries({ queryKey: ["attributes"] });
   };
   const reviewMut = useMutation({ mutationFn: (pageId) => appClient.attributes.reviewPage(pageId), onSuccess: invalidate });
-  const reviewAllMut = useMutation({ mutationFn: () => appClient.attributes.reviewAllPages(filter === "untagged" ? "untagged" : null), onSuccess: () => { toast.success(t("All pages marked reviewed")); invalidate(); } });
+  // Filter-aware "verify all": marks the WHOLE matching slice reviewed server-side.
+  const reviewAllMut = useMutation({
+    mutationFn: () => appClient.attributes.reviewAllPages({ filter: filter === "all" ? null : filter, attribute_id: attrFilter || undefined, search: search || undefined }),
+    onSuccess: (r) => { setSel(new Set()); toast.success(`${r?.verified ?? 0} ${t("pages verified")}`); invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+  // Verify an explicit selection.
+  const verifySelMut = useMutation({
+    mutationFn: (ids) => appClient.attributes.reviewAllPages({ page_ids: ids }),
+    onSuccess: (r) => { setSel(new Set()); toast.success(`${r?.verified ?? 0} ${t("pages verified")}`); invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
+  // Verify-by-value: approving a pending value cascades to auto-verify every page
+  // whose tags are now all approved (backend markFullyApprovedPagesReviewed).
+  const approveValueMut = useMutation({
+    mutationFn: (valueId) => appClient.attributes.updateValue(valueId, { is_approved: true }),
+    onSuccess: () => { toast.success(t("Value verified - pages using only verified values are now cleared.")); invalidate(); },
+    onError: (e) => toast.error(e.message),
+  });
   const untagMut = useMutation({ mutationFn: ({ pageId, valueId }) => appClient.attributes.deletePageTag(pageId, valueId), onSuccess: invalidate });
+
+  const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const needsReviewPages = pages.filter((p) => p.needs_review);
+  const allNeedsSelected = needsReviewPages.length > 0 && needsReviewPages.every((p) => sel.has(p.id));
 
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">{t("Loading…")}</p>;
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div>
           <p className="text-xs text-muted-foreground max-w-xl">
             {filter === "untagged"
               ? t("Valid pages the AI left untagged. Verify a page to confirm it needs no tags, or add one yourself with + Tag.")
-              : t("Pages the AI has tagged. Verify a page to confirm its labels; remove a wrong tag with the ✕ or add one with + Tag - it updates targeting immediately.")}
+              : t("Pages the AI has tagged. Verify a page to confirm its labels, or verify a value (✓ on a pending tag) to clear every page that uses it. Remove a wrong tag with the ✕.")}
           </p>
           {(summary.new_pages > 0 || summary.new_labels > 0) && (
             <p className="text-[11px] text-yellow-600 mt-1 flex items-center gap-1">
@@ -1669,7 +1763,7 @@ function ReviewPanel() {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
           <div className="flex items-center gap-1">
             {[["new", t("New to review")], ["all", t("All tagged")], ["untagged", t("Untagged")]].map(([k, label]) => (
               <button key={k} onClick={() => setFilter(k)}
@@ -1678,34 +1772,72 @@ function ReviewPanel() {
               </button>
             ))}
           </div>
-          {pages.some((p) => p.needs_review) && (
-            <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={reviewAllMut.isPending}
-              onClick={() => reviewAllMut.mutate()}>
-              <CheckCheck className="w-3 h-3" /> {t("Mark all reviewed")}
-            </Button>
+          {filter !== "untagged" && (
+            <Select value={attrFilter || "__all"} onValueChange={(v) => setAttrFilter(v === "__all" ? "" : v)}>
+              <SelectTrigger className="h-7 w-40 text-xs"><SelectValue placeholder={t("All attributes")} /></SelectTrigger>
+              <SelectContent className="max-h-64">
+                <SelectItem value="__all">{t("All attributes")}</SelectItem>
+                {contentAttrs.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           )}
+          <div className="relative w-44">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search pages…")}
+              className="w-full h-7 pl-7 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
+          </div>
         </div>
       </div>
+
+      {/* Bulk-verify toolbar */}
+      {needsReviewPages.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap mb-3 px-2 py-1.5 rounded-md border border-border bg-secondary/30">
+          <button className="text-[11px] text-muted-foreground hover:text-foreground"
+            onClick={() => setSel(allNeedsSelected ? new Set() : new Set(needsReviewPages.map((p) => p.id)))}>
+            {allNeedsSelected ? t("Clear") : t("Select all to review")}
+          </button>
+          {sel.size > 0 && (
+            <>
+              <span className="text-[11px] text-muted-foreground">{sel.size} {t("selected")}</span>
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={verifySelMut.isPending}
+                onClick={() => verifySelMut.mutate([...sel])}>
+                <Check className="w-3 h-3" /> {t("Verify selected")}
+              </Button>
+            </>
+          )}
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs ml-auto" disabled={reviewAllMut.isPending}
+            onClick={() => setConfirmAll(true)}
+            title={t("Verify every page matching the current filter, search and attribute - not just the ones shown.")}>
+            <CheckCheck className="w-3 h-3" /> {t("Mark all verified")}
+          </Button>
+        </div>
+      )}
 
       {pages.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg p-10 text-center max-w-lg mx-auto mt-6">
           <ListChecks className="w-7 h-7 text-muted-foreground mx-auto mb-2 opacity-40" />
-          <p className="text-sm font-medium mb-1">{filter === "new" ? t("Nothing new to review") : filter === "untagged" ? t("No untagged pages") : t("No tagged pages yet")}</p>
-          <p className="text-xs text-muted-foreground">{filter === "new" ? t("New pages and labels show up here after a reconstruct.") : filter === "untagged" ? t("Every valid page has at least one tag.") : t("Run Reconstruct to tag your crawled pages.")}</p>
+          <p className="text-sm font-medium mb-1">{search || attrFilter ? t("No pages match") : filter === "new" ? t("Nothing new to review") : filter === "untagged" ? t("No untagged pages") : t("No tagged pages yet")}</p>
+          <p className="text-xs text-muted-foreground">{search || attrFilter ? t("Try a different search or attribute.") : filter === "new" ? t("New pages and labels show up here after a reconstruct.") : filter === "untagged" ? t("Every valid page has at least one tag.") : t("Run Reconstruct to tag your crawled pages.")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {pages.map((pg) => (
             <div key={pg.id} className={`border rounded-lg p-3 ${pg.needs_review ? "border-yellow-500/40 bg-yellow-500/5" : "border-border"}`}>
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium truncate flex items-center gap-1.5">
-                    {pg.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" title={t("Needs review")} />}
-                    {pg.title || decodeUrl(pg.url)}
-                  </p>
-                  <a href={pg.url} target="_blank" rel="noreferrer" className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 truncate">
-                    <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> {decodeUrl(pg.url)}
-                  </a>
+                <div className="flex items-start gap-2 min-w-0">
+                  {pg.needs_review && (
+                    <input type="checkbox" checked={sel.has(pg.id)} onChange={() => toggleSel(pg.id)}
+                      className="accent-foreground mt-0.5 flex-shrink-0" title={t("Select for bulk verify")} />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium truncate flex items-center gap-1.5">
+                      {pg.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" title={t("Needs review")} />}
+                      {pg.title || decodeUrl(pg.url)}
+                    </p>
+                    <a href={pg.url} target="_blank" rel="noreferrer" className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 truncate">
+                      <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" /> {decodeUrl(pg.url)}
+                    </a>
+                  </div>
                 </div>
                 {pg.needs_review && (
                   <Button size="sm" variant="outline" className="h-6 px-2 gap-1 text-[11px] flex-shrink-0" disabled={reviewMut.isPending}
@@ -1723,7 +1855,13 @@ function ReviewPanel() {
                         : "bg-background border-border"
                     }`}
                     title={`${tg.attribute}: ${tg.label || tg.value}${tg.is_approved ? ` · ${t("verified")}` : tg.is_new ? ` · ${t("new")}` : ` · ${t("pending")}`}`}>
-                    {tg.is_approved && <Check className="w-2.5 h-2.5 flex-shrink-0" />}
+                    {tg.is_approved
+                      ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
+                      : (
+                        <button title={t("Verify this value everywhere")} disabled={approveValueMut.isPending}
+                          onClick={() => approveValueMut.mutate(tg.value_id)}
+                          className="hover:text-foreground text-yellow-600 flex-shrink-0"><Check className="w-2.5 h-2.5" /></button>
+                      )}
                     <span className="text-muted-foreground">{tg.attribute}:</span> {tg.label || tg.value}
                     <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: tg.value_id })}
                       className="opacity-0 group-hover/tag:opacity-100 hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
@@ -1735,6 +1873,25 @@ function ReviewPanel() {
           ))}
         </div>
       )}
+
+      {/* Confirm filter-aware verify-all */}
+      <Dialog open={confirmAll} onOpenChange={setConfirmAll}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><CheckCheck className="w-4 h-4" /> {t("Mark all verified?")}</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t("This verifies every page matching the current view")}
+            {attrFilter ? ` (${contentAttrs.find((a) => a.id === attrFilter)?.name || t("attribute")})` : ""}
+            {search ? ` · “${search}”` : ""}
+            {t(" - including pages beyond the ones shown here. It can't be undone in bulk.")}
+          </p>
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmAll(false)}>{t("Cancel")}</Button>
+            <Button size="sm" disabled={reviewAllMut.isPending} onClick={() => { setConfirmAll(false); reviewAllMut.mutate(); }}>
+              {reviewAllMut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} {t("Verify all")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

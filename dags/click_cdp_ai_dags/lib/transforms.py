@@ -76,6 +76,18 @@ def transform_path_duration_response(response, dimension_order):
     return list_transformed
 
 
+def transform_page_duration_response(response):
+    """page_engagement_daily: page-level daily engagement seconds (slimmed report)."""
+    list_transformed = []
+    for i in type(response).to_dict(response)['rows']:
+        tmp = {}
+        tmp['date'] = i['dimension_values'][0]['value']
+        tmp['page_path'] = i['dimension_values'][1]['value']
+        tmp['user_engagement_duration'] = int(i['metric_values'][0]['value'])
+        list_transformed.append(tmp)
+    return list_transformed
+
+
 def transform_utm_response(response, tz='Asia/Hong_Kong'):
     """Transform the minute-level UTM report.
 
@@ -199,6 +211,8 @@ def transform_utm_ad_response(response):
         tmp['advertiser_ad_clicks'] = int(i['metric_values'][1]['value'])
         tmp['advertiser_ad_cost'] = float(i['metric_values'][2]['value'])
         tmp['advertiser_ad_cost_per_click'] = float(i['metric_values'][3]['value'])
+        tmp['key_events'] = int(float(i['metric_values'][4]['value']))
+        tmp['return_on_ad_spend'] = float(i['metric_values'][5]['value'])
         list_transformed.append(tmp)
     return list_transformed
 
@@ -220,6 +234,7 @@ def transform_page_response(response):
         tmp = {}
         tmp['date'] = datetime.strptime(i['dimension_values'][0]['value'], '%Y%m%d').strftime('%Y-%m-%d')
         tmp['page_path'] = i['dimension_values'][1]['value']
+        tmp['page_title'] = i['dimension_values'][2]['value']
         tmp['active_users'] = int(i['metric_values'][0]['value'])
         tmp['new_users'] = int(i['metric_values'][1]['value'])
         tmp['engagement_rate'] = float(i['metric_values'][2]['value'])
@@ -237,8 +252,7 @@ def transform_page_utm_response(response):
         tmp = {}
         tmp['date'] = datetime.strptime(i['dimension_values'][0]['value'], '%Y%m%d').strftime('%Y-%m-%d')
         tmp['page_path'] = i['dimension_values'][1]['value']
-        tmp['session_source'] = i['dimension_values'][2]['value']
-        tmp['session_medium'] = i['dimension_values'][3]['value']
+        tmp['channel_group'] = i['dimension_values'][2]['value']
         tmp['active_users'] = int(i['metric_values'][0]['value'])
         tmp['new_users'] = int(i['metric_values'][1]['value'])
         tmp['page_views'] = int(i['metric_values'][2]['value'])
@@ -264,16 +278,28 @@ def transform_website_response(response):
     return list_transformed
 
 
-def transform_purchase_response(response):
+def transform_purchase_response(response, dimension_order):
     list_transformed = []
     for i in type(response).to_dict(response)['rows']:
         tmp = {}
         tmp['date'] = i['dimension_values'][0]['value']
         tmp['trxn_id'] = i['dimension_values'][1]['value']
-        tmp['capsuite_sid'] = i['dimension_values'][2]['value']
-        tmp['capsuite_apid'] = i['dimension_values'][3]['value']
-        tmp['capsuite_uid'] = i['dimension_values'][4]['value']
-        tmp['capsuite_identifier'] = i['dimension_values'][5]['value']
+        if 'capsuite_sid' in dimension_order:
+            tmp['capsuite_sid'] = i['dimension_values'][dimension_order['capsuite_sid']]['value']
+        else:
+            tmp['capsuite_sid'] = ''
+        if 'capsuite_uid' in dimension_order:
+            tmp['capsuite_uid'] = i['dimension_values'][dimension_order['capsuite_uid']]['value']
+        else:
+            tmp['capsuite_uid'] = ''
+        if 'capsuite_apid' in dimension_order:
+            tmp['capsuite_apid'] = i['dimension_values'][dimension_order['capsuite_apid']]['value']
+        else:
+            tmp['capsuite_apid'] = ''
+        if 'capsuite_identifier' in dimension_order:
+            tmp['capsuite_identifier'] = i['dimension_values'][dimension_order['capsuite_identifier']]['value']
+        else:
+            tmp['capsuite_identifier'] = ''
         list_transformed.append(tmp)
     return list_transformed
 

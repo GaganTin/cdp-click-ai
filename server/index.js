@@ -100,21 +100,34 @@ try {
 let mcpClient = null;
 
 const TABLE_SCHEMA_MAP = {
-  country_performance: "ga_landing",
+  // GA cubes (lib/cube_catalog) - the retired flat utm/country tables were dropped.
+  path_exploration: "ga_landing",
+  page_engagement_daily: "ga_landing",
   event_list: "ga_landing",
-  keyword_performance: "ga_landing",
   page_metrics: "ga_landing",
   page_utm_metrics: "ga_landing",
-  path_exploration: "ga_landing",
-  path_exploration_duration: "ga_landing",
+  website_metrics: "ga_landing",
+  session_quality_daily: "ga_landing",
   funnel_report: "ga_landing",
   purchase_list: "ga_landing",
+  keyword_performance: "ga_landing",
+  acquisition_session_daily: "ga_landing",
+  acquisition_firstuser_daily: "ga_landing",
+  channel_daily: "ga_landing",
+  landing_page_daily: "ga_landing",
   utm_ad_performance: "ga_landing",
-  utm_daily_full_param_performance: "ga_landing",
-  utm_daily_performance: "ga_landing",
   utm_daily_utm_id_performance: "ga_landing",
-  utm_performance: "ga_landing",
-  website_metrics: "ga_landing",
+  demographics_daily: "ga_landing",
+  audience_daily: "ga_landing",
+  tech_daily: "ga_landing",
+  geo_daily: "ga_landing",
+  interest_daily: "ga_landing",
+  returning_daily: "ga_landing",
+  item_performance: "ga_landing",
+  item_attribution: "ga_landing",
+  transaction_metrics: "ga_landing",
+  cohort_weekly: "ga_landing",
+  cohort_monthly: "ga_landing",
   customer_profiles: "app",
   anonymous_profiles: "app",
   profile_identities: "app",
@@ -174,6 +187,13 @@ function normalizeRow(row) {
   }
   if (r.metadata == null) r.metadata = {};
   return r;
+}
+
+/** Coerce a jsonb column (object from pg, or a JSON string) to a plain object. */
+function toObj(v) {
+  if (v == null) return {};
+  if (typeof v === "string") { try { return JSON.parse(v); } catch { return {}; } }
+  return v;
 }
 
 /** Build safe ORDER BY clause from a sort expression like "-created_date". */
@@ -622,7 +642,10 @@ Lead with the business implication. Then show the numbers.
 ═══ DATABASE ═══
 PostgreSQL with 4 schemas:
 
-ga_landing - Google Analytics 4 data (traffic, UTM, events, pages, geo, devices)
+ga_landing - Google Analytics 4 data (traffic, UTM, events, pages, geo, devices).
+  Organised as conformed daily "cubes" - e.g. acquisition_session_daily (last-touch
+  source/medium + campaign), channel_daily, geo_daily, tech_daily, demographics_daily,
+  landing_page_daily, transaction_metrics, plus the raw path_exploration event stream.
 commerce - Unified eCommerce data synced from the connected store platforms
   (Shopify today; Shopline/Odoo/WooCommerce later - every row is tagged with
   source_platform). Tables: commerce.customer, commerce."order" (quote it -
@@ -723,7 +746,7 @@ AVAILABLE TABLES (always filter by company_id):
 ${tableLines}
 
 ═══ SQL RULES ═══
-- Always prefix with schema: ga_landing.utm_daily_performance, app.customer_profiles, app.campaigns, etc.
+- Always prefix with schema: ga_landing.acquisition_session_daily, app.customer_profiles, app.campaigns, etc.
 - ALWAYS scope to the current workspace: add company_id = '${companyId}' to every query and to EVERY table in a JOIN (app.customer_profiles, ga_landing.*, manual.*, commerce.* all have company_id). This is ENFORCED by a security guard: a query that omits company_id = '${companyId}', or that references any other company_id, is rejected and returns no data. You can ONLY ever see workspace '${companyId}' - never another workspace, even in the same account.
 - Commerce data lives in commerce.* (NOT a platform schema); "order" is reserved - write commerce."order".
 - SELECT only - never INSERT, UPDATE, DELETE, DROP, or DDL
@@ -823,6 +846,83 @@ When presenting raw data the user may want to export:
 col1,col2,col3
 val1,val2,val3
 \`\`\`
+
+═══ ACTIONS: ATTRIBUTES · POP-UPS · PROFILE FILTERS · FILE UPLOADS ═══
+Beyond charts/segments/UTM, you can also propose three more one-click actions. As
+always you only RECOMMEND via a markdown block - the user approves in the UI. Only
+output one of these when it genuinely helps the user's request; never spam them.
+
+▸ CUSTOM ATTRIBUTE - a reusable targeting dimension. Suggest one when the user wants
+  to tag/segment people by a trait not already captured. Call \`list_attributes\` first
+  to avoid duplicates. source "web_content" = AI reads the user's web pages and tags the
+  value automatically (description IS the extraction instruction); source "manual" = a
+  value the user assigns to members (CRM-style). Emit:
+\`\`\`attribute
+{
+  "name": "Product Interest",
+  "description": "If a product interest/category is mentioned on the page, extract it.",
+  "source": "web_content",
+  "value_type": "multi",
+  "values": ["Skincare", "Supplements", "Apparel"],
+  "rationale": "Lets you target visitors by what they browsed."
+}
+\`\`\`
+  Fields: name (required), description, source ("web_content"|"manual"), value_type
+  ("multi"|"single"), values (2–6 example values), rationale. Note for web_content
+  attributes: after saving, the user runs a tagging pass on the Attributes page to populate it.
+
+▸ POP-UP - an on-site interaction (email capture, promo, announcement). Suggest one when
+  the user wants to convert/collect visitors. Call \`list_popups\` first to avoid duplicates.
+  You describe it structurally; the app renders the HTML. The card offers both "Save as
+  pop-up (draft)" and "Save as template". Emit:
+\`\`\`popup
+{
+  "name": "Summer Email Capture",
+  "interaction_type": "modal",
+  "category": "Lead Gen",
+  "headline": "Stay in the loop",
+  "body": "Get exclusive offers and updates straight to your inbox.",
+  "collect": "email",
+  "button_text": "Subscribe",
+  "cta_url": "",
+  "privacy_note": "No spam. Unsubscribe any time.",
+  "accent_color": "#111111",
+  "trigger": { "visit": 2, "exit_threshold": 50 },
+  "rationale": "Grow your opted-in list from existing web traffic."
+}
+\`\`\`
+  Fields: name (required), interaction_type (banner|modal|slide_in|notification),
+  category, headline, body, collect ("email"|"email_name"|"none"), button_text,
+  cta_url (only when collect="none"), privacy_note, accent_color (hex), trigger.visit
+  (show after N visits), trigger.exit_threshold (exit-intent scroll %), rationale.
+  Pop-ups are saved as DRAFT so the user reviews before going live.
+
+▸ FILTER PROFILES - deep-link the Profiles page with filters pre-applied so the user can
+  eyeball / export the exact people. Use it whenever you describe a specific slice of
+  members or visitors. Emit:
+\`\`\`filter_profiles
+{
+  "tab": "customer",
+  "label": "High-value buyers 30-39",
+  "description": "Members aged 30-39 who have ordered and spent 500+.",
+  "filters": { "age_group": ["30-39"], "has_transactions": "true", "min_spend": "500" }
+}
+\`\`\`
+  tab "customer" (known members) filter keys: reg_channel[], education_level[], age_group[],
+  gender[], nationality[], preferred_language[], employment_status[], income_level[],
+  member_type[], preferred_channel[] (arrays of exact values); has_ga "true",
+  min_ga_sessions "N", has_seminars "true", has_attributes "true", opt_in_email "true"/"false",
+  is_subscriber "true", is_imported "true", has_transactions "true", min_orders "N",
+  min_spend "N", ordered_within "N" (days).
+  tab "anonymous" (web visitors) filter keys: source[], medium[], has_form_complete "true",
+  is_resolved "true"(identified)/"false"(still anonymous).
+  Use only keys from this list; array values must be exact category strings from the data.
+
+▸ FILE UPLOADS - the user can attach a file in chat. When they do, its contents are inlined
+  right after their message as "[Attached file: name]" with a preview. Analyse that data
+  directly (summarise, chart it, spot issues). Only CSV/TSV/TXT/JSON/MD are readable; if a
+  file shows as "binary/not readable", tell the user which formats you can read. You may
+  propose a manual attribute or a segment derived from an uploaded list.
 
 ═══ COMBINED AUDIENCE RESPONSE PATTERN ═══
 When a user asks to "build an audience for [criteria]", "suggest a segment for [audience]", "who should I target", or names a target group, follow this EXACT flow - no shortcuts. (Email campaigns are coming soon and out of scope - never draft one here; the deliverable is an analysed, saveable segment plus optional UTM tracking.)
@@ -1131,6 +1231,61 @@ IMPORTANT EDM RULES:
 - You are only recommending. The user approves via "Save as Draft" or "Open in Editor" in the UI.
    END_REMOVED_EDM_PROMPT */
 
+// ── Uploaded-file ingestion ───────────────────────────────────────────────────
+// The chat "Upload file" button stores files under uploadsDir and attaches their
+// /uploads/<name> URLs to the message. This turns readable text/CSV/JSON files
+// into a compact preview that gets inlined into the model prompt so the analyst
+// can actually reason over uploaded data (previously file_urls were dropped).
+const READABLE_EXT = new Set([".csv", ".tsv", ".txt", ".json", ".md"]);
+async function buildAttachmentPreview(fileUrls, companyId) {
+  if (!Array.isArray(fileUrls) || fileUrls.length === 0 || !companyId) return "";
+  let budget = 48 * 1024; // total bytes inlined across all attachments
+  const parts = [];
+  for (const url of fileUrls.slice(0, 5)) {
+    let rel;
+    try { rel = new URL(url).pathname; } catch { rel = String(url || ""); }
+    // Only read files under THIS workspace's folder (/uploads/<companyId>/<file>)
+    // so a crafted file_url can't make the analyst read another tenant's upload.
+    const m = /^\/uploads\/([^/]+)\/(.+)$/.exec(rel);
+    if (!m || m[1] !== String(companyId)) {
+      parts.push(`[Attached file: ${path.basename(rel) || "unknown"} - not accessible in this workspace]`);
+      continue;
+    }
+    // path.basename defends against ../ traversal in a crafted url.
+    const base = path.basename(m[2]);
+    const label = base.replace(/^\d+-/, ""); // strip the Date.now()- prefix
+    const ext = path.extname(base).toLowerCase();
+    if (!base) continue;
+    if (!READABLE_EXT.has(ext)) {
+      parts.push(`[Attached file: ${label} - ${ext || "binary"} file, contents not readable by the analyst]`);
+      continue;
+    }
+    try {
+      const filePath = path.join(uploadsDir, String(companyId), base);
+      const stat = fs.statSync(filePath);
+      const readBytes = Math.min(stat.size, 32 * 1024, budget);
+      if (readBytes <= 0) { parts.push(`[Attached file: ${label} - skipped, attachment size budget reached]`); continue; }
+      const fd = fs.openSync(filePath, "r");
+      const buf = Buffer.alloc(readBytes);
+      fs.readSync(fd, buf, 0, readBytes, 0);
+      fs.closeSync(fd);
+      const text = buf.toString("utf8");
+      // Control bytes (excluding tab/newline/CR) → treat as binary, don't inline.
+      if (/[\x00-\x08\x0E-\x1F]/.test(text)) { parts.push(`[Attached file: ${label} - binary, not readable]`); continue; }
+      budget -= readBytes;
+      const lines = text.split(/\r?\n/);
+      const shown = lines.slice(0, 40);
+      const fence = ext === ".json" ? "json" : (ext === ".csv" || ext === ".tsv") ? "csv" : "";
+      const trunc = (stat.size > readBytes || lines.length > shown.length)
+        ? `\n… (showing the first ${shown.length} lines; the file is larger)` : "";
+      parts.push(`[Attached file: ${label}]\n\`\`\`${fence}\n${shown.join("\n")}\n\`\`\`${trunc}`);
+    } catch {
+      parts.push(`[Attached file: ${label} - could not be read from storage]`);
+    }
+  }
+  return parts.length ? "\n\n" + parts.join("\n\n") : "";
+}
+
 // ── AI agent loop (MCP-based) ─────────────────────────────────────────────────
 // Tools are served by the MCP server (server/mcp/server.js).
 // Tool groups: DB Connector, Segments, UTM - all read-only; no writes without user approval.
@@ -1154,16 +1309,32 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
   const { tools: mcpTools } = await mcpClient.listTools();
   const aiTools = toOpenAITools(mcpTools);
 
+  const convoMsgs = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  // Inline a preview of any files attached to the LATEST user turn (only the last
+  // turn, to bound token cost) so the analyst can actually read uploaded data.
+  let lastUserWithFiles = -1;
+  for (let j = convoMsgs.length - 1; j >= 0; j--) {
+    if (convoMsgs[j].role === "user" && convoMsgs[j].file_urls?.length) { lastUserWithFiles = j; break; }
+  }
+  const filePreview = lastUserWithFiles >= 0
+    ? await buildAttachmentPreview(convoMsgs[lastUserWithFiles].file_urls, companyId)
+    : "";
+
   const aiMessages = [
     { role: "system", content: buildSystemPrompt(customContext, skillsContext, companyId) },
-    ...messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({ role: m.role, content: m.content || "" })),
+    ...convoMsgs.map((m, idx) => ({
+      role: m.role,
+      content: (m.content || "") + (idx === lastUserWithFiles ? filePreview : ""),
+    })),
   ];
 
   let totalInputTokens = 0;
   let totalCachedTokens = 0;
   let totalOutputTokens = 0;
+  // Transparency log of tools the analyst ran, surfaced on the assistant message
+  // for the FunctionDisplay UI. Display-only: these are NOT replayed to the model
+  // (the aiMessages rebuild maps role+content only), so no orphaned-tool_call error.
+  const toolCallLog = [];
 
   for (let i = 0; i < 12; i++) {
     const response = await aiClient.chat.completions.create({
@@ -1208,6 +1379,14 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
         } catch (err) {
           toolResult = JSON.stringify({ error: String(err.message || err) });
         }
+        // Record for the UI (result truncated so the conversation JSON stays small).
+        const resultStr = typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
+        toolCallLog.push({
+          name: tc.function.name,
+          arguments_string: tc.function.arguments,
+          results: resultStr.length > 4000 ? resultStr.slice(0, 4000) + "…(truncated)" : resultStr,
+          status: "completed",
+        });
         aiMessages.push({ role: "tool", tool_call_id: tc.id, content: toolResult });
       }
       continue;
@@ -1215,12 +1394,14 @@ async function runAnalystAgent(messages, skillsContext = "", companyId = null) {
 
     return {
       content: msg.content || "",
+      toolCalls: toolCallLog,
       usage: { input: totalInputTokens, cached: totalCachedTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
     };
   }
 
   return {
     content: "I reached the analysis limit for this request. Please try a more specific question.",
+    toolCalls: toolCallLog,
     usage: { input: totalInputTokens, cached: totalCachedTokens, output: totalOutputTokens, total: totalInputTokens + totalOutputTokens },
   };
 }
@@ -1391,6 +1572,63 @@ app.patch("/api/entities/:entity/:id", authenticate, async (req, res) => {
   }
 });
 
+// Re-run a pinned chart's stored SELECT (read-only) and persist the fresh rows
+// into chart_config.data + last_refreshed. Shared by the manual refresh endpoint
+// and the nightly cron. Never throws for a bad/failed query - it records the
+// failure on the chart (metadata.last_refresh_error) so the UI can flag stale
+// data instead of silently showing it, and keeps the existing snapshot. Returns:
+//   { status: "refreshed", chart }  - query ran, snapshot + timestamp updated
+//   { status: "no_query" }          - nothing to run, snapshot kept
+//   { status: "invalid", error, chart }  - query is not a lone read-only SELECT
+//   { status: "failed",  error, chart }  - query threw (snapshot kept)
+async function refreshChartData(p, chart, companyId) {
+  // Stamp an error onto the chart's metadata and return it, keeping the snapshot.
+  const recordError = async (message) => {
+    const meta = { ...toObj(chart.metadata), last_refresh_error: message };
+    const { rows } = await p.query(
+      `UPDATE app.pinned_charts SET metadata = $1 WHERE id = $2 AND company_id = $3 RETURNING *`,
+      [JSON.stringify(meta), chart.id, companyId]
+    );
+    return rows[0] ? normalizeRow(rows[0]) : normalizeRow(chart);
+  };
+
+  // Strip a single trailing semicolon; must be a lone read-only SELECT.
+  const sql = String(chart.query || "").trim().replace(/;\s*$/, "");
+  if (!sql) return { status: "no_query" };
+  if (!/^select\b/i.test(sql) || sql.includes(";")) {
+    const msg = "Chart query must be a single read-only SELECT statement.";
+    return { status: "invalid", error: msg, chart: await recordError(msg) };
+  }
+
+  // Execute inside a READ ONLY transaction with a statement timeout and hard row
+  // cap so a stored query can never write or run away.
+  const client = await p.connect();
+  let rows;
+  try {
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    await client.query("SET LOCAL statement_timeout = 15000");
+    const result = await client.query(`SELECT * FROM (${sql}) AS _chart_refresh LIMIT 1000`);
+    rows = result.rows;
+    await client.query("COMMIT");
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+    return { status: "failed", error: e.message, chart: await recordError(e.message) };
+  } finally {
+    client.release();
+  }
+
+  const nextConfig = { ...toObj(chart.chart_config), data: rows };
+  // Success clears any prior refresh error so a recovered chart drops the flag.
+  const nextMeta = { ...toObj(chart.metadata) };
+  delete nextMeta.last_refresh_error;
+  const { rows: updated } = await p.query(
+    `UPDATE app.pinned_charts SET chart_config = $1, metadata = $2, last_refreshed = NOW()
+     WHERE id = $3 AND company_id = $4 RETURNING *`,
+    [JSON.stringify(nextConfig), JSON.stringify(nextMeta), chart.id, companyId]
+  );
+  return { status: "refreshed", chart: normalizeRow(updated[0]) };
+}
+
 // POST /api/charts/:id/refresh - re-run a pinned chart's stored SELECT query
 // (read-only) and refresh its data snapshot + last_refreshed. Charts that were
 // pinned without a stored query keep their snapshot and report refreshed:false.
@@ -1405,45 +1643,14 @@ app.post("/api/charts/:id/refresh", authenticate, async (req, res) => {
       [req.params.id, companyId]
     );
     if (!found.length) return res.status(404).json({ error: "Not found" });
-    const chart = found[0];
 
-    // Strip a single trailing semicolon; must be a lone read-only SELECT.
-    const sql = String(chart.query || "").trim().replace(/;\s*$/, "");
-    if (!sql) {
-      return res.json({ refreshed: false, reason: "no_query", chart: normalizeRow(chart) });
+    const r = await refreshChartData(p, found[0], companyId);
+    if (r.status === "no_query") {
+      return res.json({ refreshed: false, reason: "no_query", chart: normalizeRow(found[0]) });
     }
-    if (!/^select\b/i.test(sql) || sql.includes(";")) {
-      return res.status(400).json({ error: "Chart query must be a single read-only SELECT statement." });
-    }
-
-    // Execute inside a READ ONLY transaction with a statement timeout and hard row
-    // cap so a stored query can never write or run away.
-    const client = await p.connect();
-    let rows;
-    try {
-      await client.query("BEGIN TRANSACTION READ ONLY");
-      await client.query("SET LOCAL statement_timeout = 15000");
-      const result = await client.query(`SELECT * FROM (${sql}) AS _chart_refresh LIMIT 1000`);
-      rows = result.rows;
-      await client.query("COMMIT");
-    } catch (e) {
-      try { await client.query("ROLLBACK"); } catch { /* ignore */ }
-      return res.status(400).json({ error: `Query failed: ${e.message}` });
-    } finally {
-      client.release();
-    }
-
-    const cfg = typeof chart.chart_config === "string"
-      ? (() => { try { return JSON.parse(chart.chart_config); } catch { return {}; } })()
-      : (chart.chart_config || {});
-    const nextConfig = { ...cfg, data: rows };
-
-    const { rows: updated } = await p.query(
-      `UPDATE app.pinned_charts SET chart_config = $1, last_refreshed = NOW()
-       WHERE id = $2 AND company_id = $3 RETURNING *`,
-      [JSON.stringify(nextConfig), req.params.id, companyId]
-    );
-    res.json({ refreshed: true, chart: normalizeRow(updated[0]) });
+    if (r.status === "invalid") return res.status(400).json({ error: r.error, chart: r.chart });
+    if (r.status === "failed") return res.status(400).json({ error: `Query failed: ${r.error}`, chart: r.chart });
+    res.json({ refreshed: true, chart: r.chart });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }
@@ -1635,11 +1842,13 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
       }
 
       let replyContent;
+      let toolCalls = [];
       let usage = { input: 0, cached: 0, output: 0, total: 0 };
       try {
         const result = await runAnalystAgent(updatedMessages, skillsContext, companyId);
         replyContent = result.content;
         usage = result.usage;
+        toolCalls = result.toolCalls || [];
       } catch (err) {
         console.error("AI agent error:", err.message);
         replyContent = `I encountered an error while processing your request: ${err.message}`;
@@ -1662,6 +1871,7 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
         content: replyContent,
         created_date: new Date().toISOString(),
         token_usage: usage,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
       };
 
       const { rows: finalConv } = await p.query(
@@ -3290,14 +3500,21 @@ app.get("/track/u/:sendId", async (req, res) => {
 });
 
 // ── File upload ───────────────────────────────────────────────────────────────
-app.post("/api/integrations/upload", upload.single("file"), (req, res) => {
+// Authenticated + workspace-scoped: files are stored under a per-company folder
+// (uploads/<companyId>/…) so the analyst's file-reader can verify ownership and
+// one tenant can't read another's uploads by guessing a filename.
+app.post("/api/integrations/upload", authenticate, upload.single("file"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) { try { fs.unlinkSync(req.file.path); } catch {} return; }
   const safeName = `${Date.now()}-${req.file.originalname}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
-  const finalPath = path.join(uploadsDir, safeName);
+  const dir = path.join(uploadsDir, companyId);
+  fs.mkdirSync(dir, { recursive: true });
+  const finalPath = path.join(dir, safeName);
   fs.renameSync(req.file.path, finalPath);
   // Return absolute URL so images work inside email HTML sent via Resend
   const origin = process.env.BACKEND_URL || `${req.protocol}://${req.get("host")}`;
-  res.json({ file_url: `${origin}/uploads/${safeName}`, relative_url: `/uploads/${safeName}` });
+  res.json({ file_url: `${origin}/uploads/${companyId}/${safeName}`, relative_url: `/uploads/${companyId}/${safeName}` });
 });
 
 // ── Route registration (module-level - happens at process start, not after DB init) ───
@@ -3545,6 +3762,37 @@ async function start() {
       }
     });
     console.log("  Attributes: Nightly test-link rollup cron scheduled (2:45 AM daily)");
+  }
+
+  // ── Nightly dashboard-chart refresh (3:00 AM) ────────────────────────────
+  // Re-runs the stored SELECT for every pinned chart with auto-refresh on, so the
+  // dashboard is fresh even when nobody opens it (the client-side refresh only
+  // fires on a Dashboard visit). Charts with auto_refresh:false or no stored query
+  // are skipped and keep their snapshot. Failures are recorded on the chart
+  // (metadata.last_refresh_error, surfaced in the UI) and logged, not swallowed.
+  if (pool) {
+    cron.schedule("0 3 * * *", async () => {
+      try {
+        const { rows: charts } = await pool.query(
+          `SELECT * FROM app.pinned_charts
+            WHERE query IS NOT NULL AND btrim(query) <> ''
+              AND COALESCE(metadata->>'auto_refresh', 'true') <> 'false'`
+        );
+        let ok = 0, failed = 0;
+        for (const c of charts) {
+          const r = await refreshChartData(pool, c, c.company_id);
+          if (r.status === "refreshed") ok++;
+          else if (r.status === "failed" || r.status === "invalid") {
+            failed++;
+            console.error(`[Chart refresh] Chart ${c.id} failed: ${r.error}`);
+          }
+        }
+        if (charts.length) console.log(`[Chart refresh] Refreshed ${ok}/${charts.length} chart(s); ${failed} failed.`);
+      } catch (e) {
+        console.error("[Chart refresh] Fatal error:", e.message);
+      }
+    });
+    console.log("  Dashboard: Nightly chart refresh cron scheduled (3:00 AM daily)");
   }
 
   // ── No nightly profile cron (intentionally) ────────────────────────────────

@@ -8,7 +8,7 @@ dynamic task mapping fans each client out to its own ``sync_client`` instance;
 datasets run sequentially within a client (one store at a time) while different
 clients run in parallel (max_active_runs / max_active_tasks). The neutral
 ``commerce`` layer is refreshed inline per client. First-run backfill depth is
-plan-based (3y trial / 5y pro) via lib/pg_state.
+plan-based (3 years for every tier by default) via lib/pg_state.
 
 Set ``SHOPLINE_API_POOL`` to add a global API ceiling across all runs.
 """

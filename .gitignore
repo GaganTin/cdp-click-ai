@@ -33,3 +33,6 @@ dist-ssr
 # Separate service - managed in its own repo (capsuite-technology/interaction-service-meritma)
 interaction-service/
 interaction-service-meritma/
+
+# Airflow DAGs - managed/deployed separately
+dags/

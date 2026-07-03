@@ -6,27 +6,61 @@ import { authenticate, resolveCompanyId } from "../middleware/auth.js";
 // x-company-id header). Dimension / metric / column names are validated against
 // fixed whitelists so they can never be injected. Aggregation runs in Postgres
 // (using the (company_id, date) indexes) so payloads stay small for large data.
+//
+// GA cube redesign: the old high-cardinality full-param UTM table was retired
+// (cardinality budget - see lib/cube_catalog). This route now reads the conformed
+// daily cubes:
+//   - acquisition_session_daily : last-touch source/medium + campaign + metrics
+//                                 (session_source_medium is "source / medium";
+//                                  we split it in SQL for the separate columns).
+//   - geo_daily                 : country / region (replaces country_performance).
+//   - tech_daily                : device / OS / browser.
+//   - utm_daily_utm_id_performance : per-UTM-id (survives, moved to acquisition).
+// session_content / session_term are no longer fetched by any cube, so they are
+// gone from the breakdowns, links grid and filters. bounce_rate is not stored
+// (GA4 identity: bounce = 1 - engagement_rate) so we derive it here.
 
-const FULL = "ga_landing.utm_daily_full_param_performance";
-const COUNTRY = "ga_landing.country_performance";
+const ACQ = "ga_landing.acquisition_session_daily";
+const GEO = "ga_landing.geo_daily";
+const TECH = "ga_landing.tech_daily";
 const UTM_ID = "ga_landing.utm_daily_utm_id_performance";
+// Base cubes for channel attribution (joined in-app instead of via ga_gold views).
+const CHANNEL = "ga_landing.channel_daily";
+const TRANSACTIONS = "ga_landing.transaction_metrics";
+const FIRSTUSER = "ga_landing.acquisition_firstuser_daily";
+
+// GA4 sessionSourceMedium arrives as "source / medium"; split on that separator.
+const SRC_EXPR = "split_part(session_source_medium, ' / ', 1)";
+const MED_EXPR = "split_part(session_source_medium, ' / ', 2)";
 
 // GA auto-assigned values we exclude from "real UTM" breakdowns.
 const AUTO_VALUES = ["(not set)", "(none)", "(organic)", "(direct)", "(referral)", "(cross-network)"];
 
-// Whitelisted filterable / groupable dimension columns on the full-param table.
-const DIM_COLS = new Set([
-  "session_source", "session_medium", "session_campaign_name",
-  "session_content", "session_term", "session_utm_id", "device", "country",
-]);
+// Whitelisted filterable / groupable dimensions -> their SQL expression on ACQ.
+const DIM_EXPR = {
+  session_source: SRC_EXPR,
+  session_medium: MED_EXPR,
+  session_campaign_name: "session_campaign_name",
+};
+const DIM_COLS = new Set(Object.keys(DIM_EXPR));
 
-// Whitelisted metrics with their aggregation semantics.
+// Whitelisted metrics with their aggregation semantics. Rate metrics aggregate as
+// AVG of the stored 0..1 rate; bounce is derived from engagement_rate.
 const METRICS = {
-  sessions:        { col: "sessions",        agg: "SUM", rate: false },
-  active_users:    { col: "active_users",    agg: "SUM", rate: false },
-  new_users:       { col: "new_users",       agg: "SUM", rate: false },
-  bounce_rate:     { col: "bounce_rate",     agg: "AVG", rate: true },
-  engagement_rate: { col: "engagement_rate", agg: "AVG", rate: true },
+  sessions:        { sum: "SUM(sessions)",     rate: false },
+  active_users:    { sum: "SUM(active_users)", rate: false },
+  new_users:       { sum: "SUM(new_users)",    rate: false },
+  bounce_rate:     { rateExpr: "(1 - AVG(engagement_rate))", rate: true },
+  engagement_rate: { rateExpr: "AVG(engagement_rate)",       rate: true },
+};
+
+// Distinct-value sources for the filter dropdowns (col -> {table, expr}).
+const PARAM_SOURCES = {
+  session_source:        { table: ACQ,  expr: SRC_EXPR },
+  session_medium:        { table: ACQ,  expr: MED_EXPR },
+  session_campaign_name: { table: ACQ,  expr: "session_campaign_name" },
+  device:                { table: TECH, expr: "device" },
+  country:               { table: GEO,  expr: "country" },
 };
 
 const ymd = (d) => {
@@ -47,7 +81,7 @@ function dateRange(q) {
   return { start, end };
 }
 
-// Build `AND col = $n` predicates for any whitelisted dimension passed in the query.
+// Build `AND <expr> = $n` predicates for any whitelisted dimension passed in the query.
 function paramFilters(q, startIdx) {
   const parts = [];
   const params = [];
@@ -55,7 +89,7 @@ function paramFilters(q, startIdx) {
   for (const col of DIM_COLS) {
     const v = q[col];
     if (v != null && v !== "") {
-      parts.push(`AND ${col} = $${idx++}`);
+      parts.push(`AND ${DIM_EXPR[col]} = $${idx++}`);
       params.push(String(v));
     }
   }
@@ -79,9 +113,9 @@ export function createUtmRouter(pool) {
         `SELECT SUM(sessions) AS total_sessions,
                 SUM(active_users) AS total_users,
                 SUM(new_users) AS total_new_users,
-                ROUND(AVG(bounce_rate)::numeric, 3) AS avg_bounce_rate,
+                ROUND((1 - AVG(engagement_rate))::numeric, 3) AS avg_bounce_rate,
                 ROUND(AVG(engagement_rate)::numeric, 3) AS avg_engagement_rate
-         FROM ${FULL}
+         FROM ${ACQ}
          WHERE company_id = $1 AND date >= $2 AND date <= $3 ${f.clause}`,
         [cid, start, end, ...f.params]
       );
@@ -90,10 +124,13 @@ export function createUtmRouter(pool) {
   });
 
   // GET /api/utm/breakdown?dim=&metric=&limit=&excludeAuto=&minSessions=
+  // dim is one of session_source / session_medium / session_campaign_name (device
+  // and country have their own endpoints since they live in separate cubes).
   router.get("/breakdown", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
     const dim = String(req.query.dim || "");
     if (!DIM_COLS.has(dim)) return res.status(400).json({ error: "invalid dim" });
+    const dimExpr = DIM_EXPR[dim];
     const metricMeta = METRICS[String(req.query.metric || "sessions")];
     if (!metricMeta) return res.status(400).json({ error: "invalid metric" });
 
@@ -107,22 +144,22 @@ export function createUtmRouter(pool) {
     const params = [cid, start, end, ...f.params];
     if (req.query.excludeAuto === "true" || req.query.excludeAuto === "1") {
       params.push(AUTO_VALUES);
-      autoClause = `AND ${dim} <> ALL($${f.nextIdx}::text[])`;
-      if (dim === "session_campaign_name") autoClause += ` AND ${dim} NOT LIKE '{%'`;
+      autoClause = `AND ${dimExpr} <> ALL($${f.nextIdx}::text[])`;
+      if (dim === "session_campaign_name") autoClause += ` AND ${dimExpr} NOT LIKE '{%'`;
     }
 
     const value = metricMeta.rate
-      ? `ROUND((AVG(${metricMeta.col}) * 100)::numeric, 1)`
-      : `SUM(${metricMeta.col})`;
+      ? `ROUND((${metricMeta.rateExpr} * 100)::numeric, 1)`
+      : metricMeta.sum;
     const having = metricMeta.rate && minSessions ? `HAVING SUM(sessions) >= ${minSessions}` : "";
     const order = metricMeta.rate ? "SUM(sessions) DESC" : "value DESC";
 
     try {
       const { rows } = await pool.query(
-        `SELECT ${dim} AS name, ${value} AS value
-         FROM ${FULL}
+        `SELECT ${dimExpr} AS name, ${value} AS value
+         FROM ${ACQ}
          WHERE company_id = $1 AND date >= $2 AND date <= $3 ${f.clause} ${autoClause}
-         GROUP BY ${dim} ${having}
+         GROUP BY ${dimExpr} ${having}
          ORDER BY ${order}
          LIMIT ${limit}`,
         params
@@ -139,7 +176,7 @@ export function createUtmRouter(pool) {
     try {
       const { rows } = await pool.query(
         `SELECT TO_CHAR(TO_DATE(date, 'YYYYMMDD'), 'YYYY-MM-DD') AS name, SUM(sessions) AS value
-         FROM ${FULL}
+         FROM ${ACQ}
          WHERE company_id = $1 AND date >= $2 AND date <= $3 ${f.clause}
          GROUP BY date
          ORDER BY date ASC`,
@@ -149,7 +186,7 @@ export function createUtmRouter(pool) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // GET /api/utm/countries - top countries by sessions (country_performance)
+  // GET /api/utm/countries - top countries by sessions (geo_daily)
   router.get("/countries", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
     const { start, end } = dateRange(req.query);
@@ -157,10 +194,30 @@ export function createUtmRouter(pool) {
     try {
       const { rows } = await pool.query(
         `SELECT country AS name, SUM(sessions) AS value
-         FROM ${COUNTRY}
+         FROM ${GEO}
          WHERE company_id = $1 AND date >= $2 AND date <= $3
            AND country NOT IN ('(not set)', '')
          GROUP BY country
+         ORDER BY value DESC
+         LIMIT ${limit}`,
+        [cid, start, end]
+      );
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/utm/devices - top devices by sessions (tech_daily)
+  router.get("/devices", async (req, res) => {
+    const cid = await companyId(req, res); if (!cid) return;
+    const { start, end } = dateRange(req.query);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    try {
+      const { rows } = await pool.query(
+        `SELECT device AS name, SUM(sessions) AS value
+         FROM ${TECH}
+         WHERE company_id = $1 AND date >= $2 AND date <= $3
+           AND device NOT IN ('(not set)', '')
+         GROUP BY device
          ORDER BY value DESC
          LIMIT ${limit}`,
         [cid, start, end]
@@ -193,14 +250,15 @@ export function createUtmRouter(pool) {
   router.get("/param-values", async (req, res) => {
     const cid = await companyId(req, res); if (!cid) return;
     const col = String(req.query.col || "");
-    if (!DIM_COLS.has(col)) return res.status(400).json({ error: "invalid col" });
+    const src = PARAM_SOURCES[col];
+    if (!src) return res.status(400).json({ error: "invalid col" });
     const { start, end } = dateRange(req.query);
     try {
       const { rows } = await pool.query(
-        `SELECT DISTINCT ${col} AS val
-         FROM ${FULL}
+        `SELECT DISTINCT ${src.expr} AS val
+         FROM ${src.table}
          WHERE company_id = $1 AND date >= $2 AND date <= $3
-           AND ${col} NOT IN ('(not set)', '(none)', '')
+           AND ${src.expr} NOT IN ('(not set)', '(none)', '')
          ORDER BY val
          LIMIT 200`,
         [cid, start, end]
@@ -249,17 +307,17 @@ export function createUtmRouter(pool) {
 
     try {
       const { rows } = await pool.query(
-        `SELECT session_source, session_medium, session_campaign_name,
-                session_content, session_term, session_utm_id,
+        `SELECT ${SRC_EXPR} AS session_source,
+                ${MED_EXPR} AS session_medium,
+                session_campaign_name,
                 SUM(sessions) AS sessions,
                 SUM(active_users) AS active_users,
                 SUM(new_users) AS new_users,
-                ROUND(AVG(bounce_rate)::numeric, 3) AS bounce_rate,
+                ROUND((1 - AVG(engagement_rate))::numeric, 3) AS bounce_rate,
                 ROUND(AVG(engagement_rate)::numeric, 3) AS engagement_rate
-         FROM ${FULL}
+         FROM ${ACQ}
          WHERE company_id = $1${dateClause}
-         GROUP BY session_source, session_medium, session_campaign_name,
-                  session_content, session_term, session_utm_id
+         GROUP BY session_source_medium, session_campaign_name
          ORDER BY sessions DESC NULLS LAST
          LIMIT 500`,
         params
@@ -277,16 +335,94 @@ export function createUtmRouter(pool) {
     const start = ymd(new Date(Date.now() - days * 86400000));
     try {
       const { rows } = await pool.query(
-        `SELECT session_source, session_medium, session_campaign_name,
+        `SELECT ${SRC_EXPR} AS session_source,
+                ${MED_EXPR} AS session_medium,
+                session_campaign_name,
                 SUM(sessions) AS total_sessions,
                 SUM(active_users) AS total_users,
                 SUM(new_users) AS total_new_users,
-                ROUND(AVG(bounce_rate)::numeric, 3) AS avg_bounce_rate,
+                ROUND((1 - AVG(engagement_rate))::numeric, 3) AS avg_bounce_rate,
                 ROUND(AVG(engagement_rate)::numeric, 3) AS avg_engagement_rate
-         FROM ${FULL}
+         FROM ${ACQ}
          WHERE company_id = $1 AND date >= $2 AND session_campaign_name = ANY($3::text[])
-         GROUP BY session_source, session_medium, session_campaign_name`,
+         GROUP BY session_source_medium, session_campaign_name`,
         [cid, start, names]
+      );
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/utm/channel-commerce - traffic -> GA revenue by default channel group.
+  // Joins the base cubes directly (channel_daily = traffic, transaction_metrics =
+  // GA ecommerce) on channel_group, aggregated over the window. Equivalent to the
+  // ga_gold.channel_commerce_daily view but self-contained (no dependency on the
+  // ga_gold build step existing).
+  router.get("/channel-commerce", async (req, res) => {
+    const cid = await companyId(req, res); if (!cid) return;
+    const { start, end } = dateRange(req.query);
+    try {
+      const { rows } = await pool.query(
+        `SELECT COALESCE(c.name, t.name) AS name,
+                c.sessions, c.engaged_sessions, c.active_users, c.new_users, c.key_events,
+                t.transactions, t.purchase_revenue, t.ecommerce_purchases
+         FROM (
+           SELECT channel_group AS name,
+                  SUM(sessions) AS sessions, SUM(engaged_sessions) AS engaged_sessions,
+                  SUM(active_users) AS active_users, SUM(new_users) AS new_users,
+                  SUM(key_events) AS key_events
+           FROM ${CHANNEL}
+           WHERE company_id = $1 AND date >= $2 AND date <= $3
+             AND channel_group IS NOT NULL AND channel_group NOT IN ('(not set)', '')
+           GROUP BY channel_group
+         ) c
+         FULL OUTER JOIN (
+           SELECT channel_group AS name,
+                  SUM(transactions) AS transactions,
+                  ROUND(SUM(purchase_revenue)::numeric, 2) AS purchase_revenue,
+                  SUM(ecommerce_purchases) AS ecommerce_purchases
+           FROM ${TRANSACTIONS}
+           WHERE company_id = $1 AND date >= $2 AND date <= $3
+             AND channel_group IS NOT NULL AND channel_group NOT IN ('(not set)', '')
+           GROUP BY channel_group
+         ) t ON t.name = c.name
+         ORDER BY COALESCE(c.sessions, 0) DESC NULLS LAST`,
+        [cid, start, end]
+      );
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/utm/channel-touch - first-touch vs last-touch by channel, pivoted.
+  // UNIONs last-touch (channel_daily) + first-touch (acquisition_firstuser_daily,
+  // keyed on first_user_channel_group) then pivots. Equivalent to the
+  // ga_gold.channel_touch_daily view, self-contained (no ga_gold dependency).
+  router.get("/channel-touch", async (req, res) => {
+    const cid = await companyId(req, res); if (!cid) return;
+    const { start, end } = dateRange(req.query);
+    try {
+      const { rows } = await pool.query(
+        `SELECT name,
+                SUM(active_users) FILTER (WHERE touch_type = 'first') AS first_active_users,
+                SUM(active_users) FILTER (WHERE touch_type = 'last')  AS last_active_users,
+                SUM(new_users)    FILTER (WHERE touch_type = 'first') AS first_new_users,
+                SUM(new_users)    FILTER (WHERE touch_type = 'last')  AS last_new_users,
+                SUM(key_events)   FILTER (WHERE touch_type = 'first') AS first_key_events,
+                SUM(key_events)   FILTER (WHERE touch_type = 'last')  AS last_key_events
+         FROM (
+           SELECT channel_group AS name, 'last'::text AS touch_type,
+                  active_users, new_users, key_events
+           FROM ${CHANNEL}
+           WHERE company_id = $1 AND date >= $2 AND date <= $3
+           UNION ALL
+           SELECT first_user_channel_group AS name, 'first'::text AS touch_type,
+                  active_users, new_users, key_events
+           FROM ${FIRSTUSER}
+           WHERE company_id = $1 AND date >= $2 AND date <= $3
+         ) u
+         WHERE name IS NOT NULL AND name NOT IN ('(not set)', '')
+         GROUP BY name
+         ORDER BY last_active_users DESC NULLS LAST`,
+        [cid, start, end]
       );
       res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -300,11 +436,11 @@ export function createUtmRouter(pool) {
     const start = ymd(new Date(Date.now() - 90 * 86400000));
     try {
       const { rows } = await pool.query(
-        `SELECT 1 FROM ${FULL}
-         WHERE company_id = $1 AND session_source = $2 AND session_medium = $3
-           AND session_campaign_name = $4 AND date >= $5
+        `SELECT 1 FROM ${ACQ}
+         WHERE company_id = $1 AND session_source_medium = $2
+           AND session_campaign_name = $3 AND date >= $4
          LIMIT 1`,
-        [cid, String(source), String(medium), String(campaign), start]
+        [cid, `${String(source)} / ${String(medium)}`, String(campaign), start]
       );
       res.json({ exists: rows.length > 0 });
     } catch (e) { res.status(500).json({ error: e.message }); }

@@ -81,12 +81,10 @@ def notify_dag_complete(params, is_synced, error=None, records_synced=None):
         "sync_error": (str(error) if error else None),
         "records_synced": records_synced,
     }
-    secret = _webhook_secret()
-    headers = {"X-Webhook-Secret": secret} if secret else {}
     try:
         r = requests.post(
             f"{endpoint.rstrip('/')}/api/data-integrations/webhook/dag-complete",
-            json=payload, headers=headers, timeout=30,
+            json=payload, timeout=30,
         )
         _log.info(f"[ga] dag-complete webhook ({'scheduled' if scheduled else 'job'}) -> {r.status_code}")
     except Exception as e:
@@ -223,7 +221,7 @@ def resolve_incremental_start_date(dict_config, report_key, prefix2, blob=None, 
     """Resolve the ``str_start_date`` for a daily incremental report.
 
     The resume point comes from the Postgres ``ga_sync_control`` table: first run
-    -> plan-based historical backfill (3y free / 5y pro), otherwise
+    -> plan-based historical backfill (3 years for every tier by default), otherwise
     last_sync_date - overlap_days. ``report_key`` / ``prefix2`` / ``blob`` /
     ``default_days`` are kept for call-site compatibility; the control report name
     is derived from ``prefix2`` (the trailing ``_2`` is stripped).
@@ -231,3 +229,29 @@ def resolve_incremental_start_date(dict_config, report_key, prefix2, blob=None, 
     from dags.click_cdp_ai_dags.lib import pg_state
     report = prefix2[:-2] if prefix2.endswith("_2") else prefix2
     return pg_state.resolve_start_date(dict_config["client"], report)
+
+
+# --------------------------------------------------------------------------- #
+# Data-quality recording (sampling / (other)-row / thresholding / totals drift)
+# --------------------------------------------------------------------------- #
+def record_report_quality(client, report, property_id, quality, df=None,
+                          metric_cols=("sessions",), start_date=None):
+    """Persist a report's GA4 data-quality signals to ``ga_report_quality``.
+
+    ``quality`` is the dict from ``GoogleAnalytics.extract_quality`` (compute it
+    on the FIRST page, before pagination reassigns ``response``). ``df`` is the
+    fully-paginated frame; the named ``metric_cols`` are summed and compared
+    against GA's own TOTAL to quantify (other)-row loss. Best-effort.
+    """
+    from dags.click_cdp_ai_dags.lib import pg_state
+    summed = {}
+    if df is not None and hasattr(df, "columns"):
+        for col in metric_cols:
+            if col in df.columns:
+                try:
+                    summed[col] = float(df[col].sum())
+                except Exception:  # noqa: BLE001  - non-numeric column, skip
+                    pass
+    return pg_state.record_report_quality(
+        client, report, str(property_id), quality,
+        summed_metrics=summed, start_date=start_date)

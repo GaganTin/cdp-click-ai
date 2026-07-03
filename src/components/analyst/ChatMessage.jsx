@@ -1,11 +1,22 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar, Plug } from "lucide-react";
+import { Copy, Pin, Download, Check, Zap, Loader2, CheckCircle2, AlertCircle, Clock, ChevronRight, TrendingUp, Link as LinkIcon, Users, PlusCircle, Mail, Pencil, Calendar, Plug, Tag, Filter, AppWindow, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fmtCredits } from "@/lib/credits";
 import MiniChart from "../dashboard/MiniChart";
+
+// True when a value looks like an ISO-ish date (2026-06-01, 2026/06/01, or a
+// datetime). Used to detect a time-series x-axis regardless of chart_type so a
+// date-based BAR chart is ordered chronologically, not scrambled by value.
+const looksLikeDate = (v) => {
+  if (v == null || v === "") return false;
+  const s = String(v).trim();
+  if (!/^\d{4}[-/]\d{2}([-/]\d{2})?/.test(s)) return false;
+  return !Number.isNaN(new Date(s.replace(" ", "T")).getTime());
+};
+const dateVal = (v) => new Date(String(v).replace(" ", "T")).getTime();
 
 const FunctionDisplay = ({ toolCall }) => {
   const [expanded, setExpanded] = useState(false);
@@ -19,7 +30,11 @@ const FunctionDisplay = ({ toolCall }) => {
     if (!results) return null;
     try { return typeof results === "string" ? JSON.parse(results) : results; } catch { return results; }
   })();
-  const isError = results && ((typeof results === "string" && /error|failed/i.test(results)) || parsedResults?.success === false);
+  // Key the error state off the result's actual error field, not a substring scan
+  // (a successful query whose rows contain the word "error" is not a failure).
+  const isError = !!(parsedResults && typeof parsedResults === "object"
+    ? (parsedResults.error != null || parsedResults.success === false)
+    : (typeof results === "string" && /error|failed/i.test(results)));
 
   const statusConfig = {
     pending: { icon: Clock, color: "text-muted-foreground", text: "Pending" },
@@ -533,7 +548,146 @@ function EDMCard({ data, onAdd, onOpenInEditor }) {
   );
 }
 
-export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor }) {
+// AI-suggested custom attribute (targeting dimension). One-click "Create attribute".
+function AttributeCard({ data, onAdd }) {
+  const [added, setAdded] = useState(false);
+  const values = Array.isArray(data.values) ? data.values : [];
+  const handleAdd = async () => { await onAdd?.(data); setAdded(true); };
+  return (
+    <div className="my-3 border border-border rounded-xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
+        <div className="w-6 h-6 rounded-md bg-secondary flex items-center justify-center flex-shrink-0">
+          <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-semibold">{data.name}</span>
+          <span className="text-[10px] text-muted-foreground ml-2">AI-suggested attribute</span>
+        </div>
+        <Button size="sm" variant={added ? "secondary" : "default"} className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={handleAdd} disabled={added}>
+          {added ? <><Check className="w-3 h-3" /> Created</> : <><PlusCircle className="w-3 h-3" /> Create attribute</>}
+        </Button>
+      </div>
+      <div className="px-4 py-3 space-y-2.5">
+        {data.description && <p className="text-xs text-muted-foreground leading-relaxed">{data.description}</p>}
+        {values.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {values.map((v, i) => (
+              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border">{v}</span>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-4 text-[11px] text-muted-foreground">
+          <span>Source: <strong className="text-foreground">{data.source === "manual" ? "Manual (you assign)" : "Web content (AI-tagged)"}</strong></span>
+          <span>Values: <strong className="text-foreground">{data.value_type === "single" ? "Single" : "Multiple"}</strong></span>
+        </div>
+        {data.rationale && <p className="text-[10px] text-muted-foreground/70 italic">{data.rationale}</p>}
+      </div>
+      <div className="px-4 py-2 border-t border-border bg-secondary/20">
+        <p className="text-[10px] text-muted-foreground">
+          Saved to your Attributes page{data.source !== "manual" ? " - run a tagging pass there to populate it from your web pages" : ""}.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// AI-suggested pop-up. Renders a lightweight visual preview plus two actions:
+// save as a draft pop-up, or save as a reusable template.
+function PopupCard({ data, onSavePopup, onSaveTemplate }) {
+  const [popupSaved, setPopupSaved] = useState(false);
+  const [tplSaved, setTplSaved] = useState(false);
+  const collect = data.collect || "email";
+  const accent = data.accent_color || "#111111";
+  return (
+    <div className="my-3 border border-border rounded-xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
+        <div className="w-6 h-6 rounded-md bg-secondary flex items-center justify-center flex-shrink-0">
+          <AppWindow className="w-3.5 h-3.5 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-semibold">{data.name}</span>
+          <span className="text-[10px] text-muted-foreground ml-2">AI-suggested pop-up</span>
+        </div>
+      </div>
+      {data.rationale && (
+        <div className="px-4 py-2.5 bg-secondary/30 border-b border-border/50">
+          <p className="text-xs text-muted-foreground leading-relaxed">{data.rationale}</p>
+        </div>
+      )}
+      <div className="px-4 py-3 space-y-3">
+        {/* Visual preview (approximation of the rendered pop-up) */}
+        <div className="rounded-lg border border-border bg-white px-4 py-4 text-center mx-auto" style={{ maxWidth: 300 }}>
+          {data.headline && <p className="text-sm font-bold" style={{ color: "#111" }}>{data.headline}</p>}
+          {data.body && <p className="text-xs mt-1" style={{ color: "#555" }}>{data.body}</p>}
+          {collect !== "none" ? (
+            <div className="mt-3 space-y-1.5">
+              {collect === "email_name" && <div className="h-7 rounded border border-neutral-300 bg-white" />}
+              <div className="h-7 rounded border border-neutral-300 bg-white" />
+              <div className="h-7 rounded text-white text-[11px] flex items-center justify-center font-medium" style={{ background: accent }}>{data.button_text || "Subscribe"}</div>
+            </div>
+          ) : (
+            <div className="mt-3 h-7 rounded text-white text-[11px] flex items-center justify-center font-medium" style={{ background: accent }}>{data.button_text || "Learn more"}</div>
+          )}
+          {data.privacy_note && <p className="text-[9px] mt-1.5" style={{ color: "#aaa" }}>{data.privacy_note}</p>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border capitalize">{(data.interaction_type || "modal").replace("_", " ")}</span>
+          {data.category && <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">{data.category}</span>}
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground border border-border">after {data.trigger?.visit ?? 3} visits</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button size="sm" variant={popupSaved ? "secondary" : "default"} className="h-7 text-xs gap-1.5" disabled={popupSaved}
+            onClick={async () => { await onSavePopup?.(data); setPopupSaved(true); }}>
+            {popupSaved ? <><Check className="w-3 h-3" /> Saved draft</> : <><PlusCircle className="w-3 h-3" /> Save as pop-up</>}
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5" disabled={tplSaved}
+            onClick={async () => { await onSaveTemplate?.(data); setTplSaved(true); }}>
+            {tplSaved ? <><Check className="w-3 h-3" /> Template saved</> : "Save as template"}
+          </Button>
+        </div>
+      </div>
+      <div className="px-4 py-2 border-t border-border bg-secondary/20">
+        <p className="text-[10px] text-muted-foreground">Saved as a draft on your Pop-ups page - review and activate it there.</p>
+      </div>
+    </div>
+  );
+}
+
+// AI-suggested profile filter. Deep-links the Profiles page with filters applied.
+function FilterProfilesCard({ data, onApply }) {
+  const filters = data.filters || {};
+  const chips = Object.entries(filters).flatMap(([k, v]) =>
+    Array.isArray(v) ? v.map((x) => `${k}: ${x}`) : (v !== "" && v != null ? [`${k}: ${v}`] : [])
+  );
+  return (
+    <div className="my-3 border border-border rounded-xl overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2 px-4 py-3 bg-secondary/40 border-b border-border">
+        <div className="w-6 h-6 rounded-md bg-secondary flex items-center justify-center flex-shrink-0">
+          <Filter className="w-3.5 h-3.5 text-muted-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-semibold">{data.label || "Filter profiles"}</span>
+          <span className="text-[10px] text-muted-foreground ml-2">{data.tab === "anonymous" ? "Anonymous visitors" : "Members"}</span>
+        </div>
+        <Button size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onApply?.(data)}>
+          Open in Profiles <ArrowRight className="w-3 h-3" />
+        </Button>
+      </div>
+      <div className="px-4 py-3 space-y-2.5">
+        {data.description && <p className="text-xs text-muted-foreground leading-relaxed">{data.description}</p>}
+        {chips.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map((c, i) => (
+              <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-secondary text-muted-foreground border border-border font-mono">{c}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor, onCreateAttribute, onCreatePopup, onCreatePopupTemplate, onFilterProfiles }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
@@ -575,22 +729,43 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
       const chartConfig = JSON.parse(jsonStr);
       const chartType = chartConfig.chart_type || "bar";
       const primaryKey = chartConfig.series?.[0]?.dataKey || chartConfig.dataKey || "value";
-      const isTimeSeries = chartType === "line" || chartType === "area";
+      const xKey = chartConfig.xKey || "name";
+      // Every series' value column (not just the first) so multi-series charts
+      // are coerced/validated across all of them.
+      const seriesKeys = (Array.isArray(chartConfig.series) && chartConfig.series.length)
+        ? chartConfig.series.map(s => s.dataKey).filter(Boolean)
+        : [primaryKey];
+      // Time-series if the x-axis holds dates (works for bar/line/area alike),
+      // detected from the data rather than trusting chart_type.
+      const rows = Array.isArray(chartConfig.data) ? chartConfig.data : [];
+      const isTimeSeries = rows.length > 0
+        && rows.filter(d => looksLikeDate(d?.[xKey])).length >= Math.ceil(rows.length / 2);
 
-      // Coerce string values to numbers; sort descending for categorical charts
+      // Coerce every series value to a number (null when missing so line/area
+      // draw a gap instead of a false dip to zero). Time-series sort ascending by
+      // date; categorical sort descending by the primary value.
       const sortedData = (() => {
-        if (!chartConfig.data?.length) return chartConfig.data;
-        const coerced = chartConfig.data.map(d => ({ ...d, [primaryKey]: Number(d[primaryKey]) || 0 }));
-        if (isTimeSeries) return coerced;
-        return [...coerced].sort((a, b) => b[primaryKey] - a[primaryKey]);
+        if (!rows.length) return rows;
+        const coerced = rows.map(d => {
+          const next = { ...d };
+          for (const k of seriesKeys) {
+            const n = Number(next[k]);
+            next[k] = Number.isFinite(n) ? n : null;
+          }
+          return next;
+        });
+        if (isTimeSeries) return [...coerced].sort((a, b) => dateVal(a[xKey]) - dateVal(b[xKey]));
+        return [...coerced].sort((a, b) => (Number(b[primaryKey]) || 0) - (Number(a[primaryKey]) || 0));
       })();
 
       const displayConfig = { ...chartConfig, data: sortedData };
 
-      // Guard against empty / all-zero chart data - never render a chart on non-data.
+      // Guard against empty / all-zero chart data - never render a chart on
+      // non-data. Checks EVERY series so a chart whose first series is all zeros
+      // but has real values elsewhere still renders.
       const hasRealData = Array.isArray(sortedData)
         && sortedData.length > 0
-        && sortedData.some(d => { const v = Number(d?.[primaryKey]); return Number.isFinite(v) && v !== 0; });
+        && sortedData.some(d => seriesKeys.some(k => { const v = Number(d?.[k]); return Number.isFinite(v) && v !== 0; }));
 
       if (!hasRealData) {
         return (
@@ -716,6 +891,9 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     const utmRegex = /```utm_link\n([\s\S]*?)```/g;
     const segmentRegex = /```segment\n([\s\S]*?)```/g;
     const edmRegex = /```edm\n([\s\S]*?)```/g;
+    const attributeRegex = /```attribute\n([\s\S]*?)```/g;
+    const popupRegex = /```popup\n([\s\S]*?)```/g;
+    const filterProfilesRegex = /```filter_profiles\n([\s\S]*?)```/g;
     const tableRegex = /(\|.+\|\n\|[-| :]+\|\n(?:\|.+\|\n?)+)/g;
 
     let parts = [];
@@ -746,6 +924,18 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
     while ((match = edmRegex.exec(content)) !== null) {
       edmBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
     }
+    const attributeBlocks = [];
+    while ((match = attributeRegex.exec(content)) !== null) {
+      attributeBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
+    }
+    const popupBlocks = [];
+    while ((match = popupRegex.exec(content)) !== null) {
+      popupBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
+    }
+    const filterProfilesBlocks = [];
+    while ((match = filterProfilesRegex.exec(content)) !== null) {
+      filterProfilesBlocks.push({ index: match.index, end: match.index + match[0].length, json: match[1] });
+    }
     const tables = [];
     while ((match = tableRegex.exec(content)) !== null) {
       const before = content.slice(0, match.index);
@@ -762,6 +952,9 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
       ...utmBlocks.map(c => ({ ...c, type: "utm_link" })),
       ...segmentBlocks.map(c => ({ ...c, type: "segment" })),
       ...edmBlocks.map(c => ({ ...c, type: "edm" })),
+      ...attributeBlocks.map(c => ({ ...c, type: "attribute" })),
+      ...popupBlocks.map(c => ({ ...c, type: "popup" })),
+      ...filterProfilesBlocks.map(c => ({ ...c, type: "filter_profiles" })),
       ...tables.map(c => ({ ...c, type: "table" })),
     ].sort((a, b) => a.index - b.index);
 
@@ -858,6 +1051,33 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
           parts.push(<EDMCard key={`edm-${i}`} data={data} onAdd={onAddEDM} onOpenInEditor={onOpenEDMInEditor} />);
         } catch {
           parts.push(<p key={`edm-err-${i}`} className="text-xs text-destructive">Invalid EDM data</p>);
+        }
+      }
+
+      if (block.type === "attribute") {
+        try {
+          const data = JSON.parse(block.json);
+          parts.push(<AttributeCard key={`attr-${i}`} data={data} onAdd={onCreateAttribute} />);
+        } catch {
+          parts.push(<p key={`attr-err-${i}`} className="text-xs text-destructive">Invalid attribute data</p>);
+        }
+      }
+
+      if (block.type === "popup") {
+        try {
+          const data = JSON.parse(block.json);
+          parts.push(<PopupCard key={`popup-${i}`} data={data} onSavePopup={onCreatePopup} onSaveTemplate={onCreatePopupTemplate} />);
+        } catch {
+          parts.push(<p key={`popup-err-${i}`} className="text-xs text-destructive">Invalid pop-up data</p>);
+        }
+      }
+
+      if (block.type === "filter_profiles") {
+        try {
+          const data = JSON.parse(block.json);
+          parts.push(<FilterProfilesCard key={`fp-${i}`} data={data} onApply={onFilterProfiles} />);
+        } catch {
+          parts.push(<p key={`fp-err-${i}`} className="text-xs text-destructive">Invalid profile-filter data</p>);
         }
       }
 

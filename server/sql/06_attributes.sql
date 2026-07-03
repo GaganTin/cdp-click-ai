@@ -23,7 +23,8 @@ CREATE TABLE app.attributes (
   status          TEXT        NOT NULL DEFAULT 'draft',       -- draft | active | archived
   scope           TEXT        NOT NULL DEFAULT 'both',        -- customer | anonymous | both
   extract_from    TEXT        NOT NULL DEFAULT 'both',        -- title | content | both
-  group_label     TEXT,                                       -- optional grouping dimension
+  group_label     TEXT,                                       -- DEPRECATED (see group_dimensions): legacy single grouping dimension
+  group_dimensions JSONB      NOT NULL DEFAULT '[]',          -- grouping dimensions, e.g. ["Continent","GDP"]
   content_applied BOOLEAN     NOT NULL DEFAULT false,         -- true once tags have been applied to content → locks extract_from/value_type
   rule            JSONB       NOT NULL DEFAULT '{}',          -- for source='rule'
   last_run_date   TIMESTAMPTZ,
@@ -45,7 +46,8 @@ CREATE TABLE app.attribute_values (
   attribute_id  UUID        NOT NULL REFERENCES app.attributes(id) ON DELETE CASCADE,
   value         TEXT        NOT NULL,
   display_label TEXT,
-  group_name    TEXT,                                  -- group under attribute.group_label
+  group_name    TEXT,                                  -- DEPRECATED (see group_map): legacy single group
+  group_map     JSONB       NOT NULL DEFAULT '{}',     -- group per dimension, e.g. {"Continent":"Asia","GDP":"High"}
   is_exception  BOOLEAN     NOT NULL DEFAULT false,    -- AI-discovered, pending review
   is_approved   BOOLEAN     NOT NULL DEFAULT false,    -- curated/approved → used for targeting
   is_blocked    BOOLEAN     NOT NULL DEFAULT false,    -- stoplist: never resurrect/propagate

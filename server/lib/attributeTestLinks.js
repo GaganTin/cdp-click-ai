@@ -120,9 +120,11 @@ export async function syncTestLinksFromRank(pool, companyId) {
   await pool.query(`DELETE FROM app.web_content_test_links WHERE company_id = $1 AND source = 'ga'`, [companyId]);
   for (const p of picked) {
     await pool.query(
-      `INSERT INTO app.web_content_test_links (company_id, url, source, hits, is_selected)
-       VALUES ($1, $2, 'ga', $3, true)
-       ON CONFLICT (company_id, url) DO UPDATE SET hits = EXCLUDED.hits, updated_date = NOW()`,
+      `INSERT INTO app.web_content_test_links (company_id, url, title, source, hits, is_selected)
+       VALUES ($1, $2,
+         (SELECT title FROM app.web_pages wp WHERE wp.company_id = $1 AND app.norm_url(wp.url) = app.norm_url($2) LIMIT 1),
+         'ga', $3, true)
+       ON CONFLICT (company_id, url) DO UPDATE SET title = EXCLUDED.title, hits = EXCLUDED.hits, updated_date = NOW()`,
       [companyId, p.url, p.hits]
     );
   }
@@ -132,7 +134,49 @@ export async function syncTestLinksFromRank(pool, companyId) {
   );
   // belt-and-suspenders: also clear any manual rows that went bad
   await pruneBadTestLinks(pool, companyId);
+  // Guarantee a full sample pool where the workspace has enough valid pages.
+  await topUpTestLinks(pool, companyId);
   return picked.length;
+}
+
+// Fill the test-link set up to MAX_TEST_LINKS with random valid, non-excluded,
+// not-already-present crawled pages (titles included). No-op once the set is full
+// or the workspace genuinely has fewer than MAX_TEST_LINKS valid pages. Runs on
+// every read so the pool is reliably reported as N/50, not 48/50.
+export async function topUpTestLinks(pool, companyId) {
+  const { rows: cnt } = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM app.web_content_test_links WHERE company_id = $1`,
+    [companyId]
+  );
+  const room = MAX_TEST_LINKS - (cnt[0]?.n || 0);
+  if (room <= 0) return 0;
+  const { rows: extra } = await pool.query(
+    `SELECT wp.url, wp.title FROM app.web_pages wp
+     WHERE wp.company_id = $1 AND wp.is_valid = true AND wp.is_excluded = false AND wp.content <> ''
+       AND NOT EXISTS (
+         SELECT 1 FROM app.web_content_test_links tl
+         WHERE tl.company_id = $1 AND app.norm_url(tl.url) = app.norm_url(wp.url)
+       )
+     ORDER BY random()
+     LIMIT $2`,
+    [companyId, room]
+  );
+  let added = 0;
+  const seen = new Set();
+  for (const r of extra) {
+    if (added >= room) break;
+    const key = normUrl(r.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const { rowCount } = await pool.query(
+      `INSERT INTO app.web_content_test_links (company_id, url, title, source, hits, is_selected)
+       VALUES ($1, $2, $3, 'ga', 0, true)
+       ON CONFLICT (company_id, url) DO NOTHING`,
+      [companyId, r.url, r.title || null]
+    );
+    if (rowCount) added++;
+  }
+  return added;
 }
 
 // Public "Load top 50 from GA" action: reads the rollup (cheap); lazily builds it
@@ -273,8 +317,10 @@ export async function addManualTestLinks(pool, companyId, urls) {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     const { rowCount } = await pool.query(
-      `INSERT INTO app.web_content_test_links (company_id, url, source, is_selected)
-       VALUES ($1, $2, 'manual', true)
+      `INSERT INTO app.web_content_test_links (company_id, url, title, source, is_selected)
+       VALUES ($1, $2,
+         (SELECT title FROM app.web_pages wp WHERE wp.company_id = $1 AND app.norm_url(wp.url) = app.norm_url($2) LIMIT 1),
+         'manual', true)
        ON CONFLICT (company_id, url) DO NOTHING`,
       [companyId, u]
     );

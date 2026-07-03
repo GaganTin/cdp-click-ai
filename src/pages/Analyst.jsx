@@ -20,6 +20,29 @@ import SuggestedPrompts from "../components/analyst/SuggestedPrompts";
 import DashboardPreviewPanel from "../components/dashboard/DashboardPreviewPanel";
 import ConversationSidebar from "../components/analyst/ConversationSidebar";
 import CampaignEditor from "@/components/edm/CampaignEditor";
+import { generateHtml, DEFAULT_CONTAINER } from "@/components/popup/TemplateBuilder";
+
+// Turn a compact AI pop-up spec into the app's real builder state (container +
+// blocks) and rendered HTML, mirroring the built-in "email-collection" template
+// so an AI-suggested pop-up saves exactly like a hand-built one.
+function buildPopupDesign(data) {
+  const accent = data.accent_color || "#111111";
+  const collect = data.collect || "email";
+  const container = { ...DEFAULT_CONTAINER };
+  const blocks = [];
+  if (data.headline) {
+    blocks.push({ type: "heading", id: "h1", content: data.headline, level: "2", color: "#111111", align: "center", fontSize: "22", fontWeight: "700", lineHeight: "1.3", letterSpacing: "0", marginBottom: "12" });
+  }
+  if (data.body) {
+    blocks.push({ type: "text", id: "t1", content: data.body, color: "#555555", align: "center", fontSize: "14", fontWeight: "400", lineHeight: "1.6", marginBottom: "16" });
+  }
+  if (collect === "none") {
+    blocks.push({ type: "button", id: "b1", content: data.button_text || "Learn more", href: data.cta_url || "#", align: "center", bg: accent, color: "#ffffff", borderRadius: "8", paddingY: "12", paddingX: "32", fontSize: "14", fontWeight: "600", fullWidth: false, borderWidth: "0", borderColor: accent, marginBottom: "0" });
+  } else {
+    blocks.push({ type: "email_form", id: "f1", placeholder: data.placeholder || "your@email.com", buttonText: data.button_text || "Subscribe", buttonBg: accent, buttonColor: "#ffffff", inputBg: "#ffffff", inputColor: "#111111", inputBorderColor: "#dddddd", borderRadius: "8", privacyNote: data.privacy_note || "", showName: collect === "email_name" });
+  }
+  return { container, blocks, content: generateHtml(container, blocks) };
+}
 
 export default function Analyst() {
   const location = useLocation();
@@ -167,16 +190,24 @@ export default function Analyst() {
   };
 
   const startNewConversation = async (name) => {
+    // Carry any skills the user activated before sending the first message into
+    // the new conversation's metadata so they apply from message #1. (The server
+    // reads active_skill_ids off the conversation row, not the request.)
     const conv = await appClient.agents.createConversation({
       agent_name: "cdp_analyst",
-      metadata: { name: name || `Analysis - ${new Date().toLocaleDateString()}` },
+      metadata: {
+        name: name || `Analysis - ${new Date().toLocaleDateString()}`,
+        ...(activeSkillIds.length > 0 ? { active_skill_ids: activeSkillIds } : {}),
+      },
     });
     contextInjectedRef.current = false;
     setConversationId(conv.id);
     setConversationName(conv.metadata?.name || null);
     setMessages([]);
     setTokenUsage({ input: 0, output: 0, total: 0 });
-    setActiveSkillIds([]);
+    // NOTE: do NOT clear activeSkillIds here - that would drop the user's
+    // selection on the first send. The explicit "New chat" button (handleNewChat)
+    // is what resets skills.
     return conv;
   };
 
@@ -237,10 +268,6 @@ export default function Analyst() {
     }
   };
 
-  const handleUseTemplate = async (skill) => {
-    setSkillsOpen(false);
-    await handleSend(skill.content);
-  };
 
   const handleSaveSkill = async () => {
     if (!skillDraft.name.trim()) return toast.error("Name is required");
@@ -342,7 +369,23 @@ export default function Analyst() {
   };
 
   const handleDownloadCSV = (csvData) => {
-    const blob = new Blob([csvData], { type: "text/csv" });
+    // Neutralise CSV/formula injection: a cell that begins with = + - @ (or a
+    // tab/CR) is executed as a formula by Excel/Sheets, so prefix it with a
+    // single quote. Split on real row boundaries, guarding quoted newlines.
+    const sanitizeCell = (cell) => {
+      const raw = cell ?? "";
+      const unquoted = /^"[\s\S]*"$/.test(raw) ? raw.slice(1, -1) : raw;
+      if (/^[=+\-@\t\r]/.test(unquoted)) {
+        return `"'${unquoted.replace(/"/g, '""')}"`;
+      }
+      return raw;
+    };
+    const safeData = csvData
+      .split(/\r?\n/)
+      .map(line => line.split(",").map(sanitizeCell).join(","))
+      .join("\r\n");
+    // Prepend a UTF-8 BOM so Excel decodes accented / CJK data correctly.
+    const blob = new Blob(["﻿" + safeData], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -370,6 +413,73 @@ export default function Analyst() {
     } catch (err) {
       toast.error(err.message || "Failed to save segment");
     }
+  };
+
+  // Create an AI-suggested custom attribute (targeting dimension). Created active
+  // so it's usable immediately; web_content attributes still need a tagging pass.
+  const handleCreateAttribute = async (data) => {
+    if (!data?.name?.trim()) return toast.error("Attribute needs a name");
+    try {
+      await appClient.attributes.create({
+        name: data.name.trim(),
+        description: data.description || "",
+        source: data.source === "manual" ? "manual" : "web_content",
+        value_type: data.value_type === "single" ? "single" : "multi",
+        status: "active",
+        values: Array.isArray(data.values) ? data.values.filter(v => typeof v === "string" && v.trim()) : [],
+      });
+      toast.success(`Attribute "${data.name}" created - see the Attributes page`);
+    } catch (err) {
+      if (err.status === 409 || err.payload?.code === "DUPLICATE_NAME") {
+        toast.error(`An attribute named "${data.name}" already exists`);
+      } else {
+        toast.error(err.message || "Failed to create attribute");
+      }
+    }
+  };
+
+  // Save an AI-suggested pop-up as a draft (reviewed/activated on the Pop-ups page).
+  const handleCreatePopup = async (data) => {
+    if (!data?.name?.trim()) return toast.error("Pop-up needs a name");
+    try {
+      const { content } = buildPopupDesign(data);
+      const t = data.trigger || {};
+      const type = ["banner", "modal", "slide_in", "notification"].includes(data.interaction_type) ? data.interaction_type : "modal";
+      await appClient.popup.create({
+        name: data.name.trim(),
+        interaction_type: type,
+        content,
+        is_active: false,
+        rules: { visit: Number(t.visit) || 3, exit_threshold: Number(t.exit_threshold) || 50 },
+      });
+      toast.success(`Pop-up "${data.name}" saved as draft - see the Pop-ups page`);
+    } catch (err) {
+      toast.error(err.message || "Failed to save pop-up");
+    }
+  };
+
+  // Save an AI-suggested pop-up as a reusable template (design + editable state).
+  const handleCreatePopupTemplate = async (data) => {
+    if (!data?.name?.trim()) return toast.error("Template needs a name");
+    try {
+      const { container, blocks, content } = buildPopupDesign(data);
+      await appClient.popup.createTemplate({
+        name: data.name.trim(),
+        category: data.category || "Lead Gen",
+        description: data.rationale || data.description || "",
+        content,
+        builder_state: { container, blocks },
+      });
+      toast.success(`Template "${data.name}" saved - see the Pop-ups page`);
+    } catch (err) {
+      toast.error(err.message || "Failed to save template");
+    }
+  };
+
+  // Deep-link the Profiles page with the AI's filters pre-applied.
+  const handleFilterProfiles = (data) => {
+    const tab = data.tab === "anonymous" ? "anonymous" : "customer";
+    navigate("/profiles", { state: { tab, profileFilters: data.filters || {} } });
   };
 
   const resolveSegmentAndUTM = async (data) => {
@@ -530,11 +640,14 @@ ${JSON.stringify(tableBlock)}
     // Embed the chart itself (its data already reflects the applied filter/period) as a
     // ```chart block so the message renders the real chart in-chat instead of raw JSON.
     // The block still carries the data, so the AI can analyse it.
+    // Keep more rows when the chart shows a delta - the % change needs the
+    // current window PLUS the preceding one (~60 daily rows for a 30d filter).
+    const rowCap = (cfg.show_delta || cfg.date_filter) ? 120 : 50;
     const chartBlock = {
       ...cfg,
       title: cfg.title || c.title,
       chart_type: cfg.chart_type || c.chart_type,
-      data: (cfg.data || []).slice(0, 50),
+      data: (cfg.data || []).slice(0, rowCap),
     };
     if (c.description && !chartBlock.description) chartBlock.description = c.description;
     return `${message}
@@ -649,6 +762,10 @@ ${JSON.stringify(chartBlock)}
                   onAddSegment={handleAddSegment}
                   onAddEDM={handleAddEDM}
                   onOpenEDMInEditor={handleOpenEDMInEditor}
+                  onCreateAttribute={handleCreateAttribute}
+                  onCreatePopup={handleCreatePopup}
+                  onCreatePopupTemplate={handleCreatePopupTemplate}
+                  onFilterProfiles={handleFilterProfiles}
                 />
               ))}
               {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (

@@ -3,7 +3,8 @@ import { Toaster as SonnerToaster } from "sonner"
 import { Check, X, AlertTriangle, Info } from "lucide-react"
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { PreferencesProvider } from '@/lib/PreferencesContext';
@@ -29,6 +30,23 @@ import ResetPassword from './pages/auth/ResetPassword';
 import Landing from './pages/Landing';
 import GetStarted from './pages/GetStarted';
 import ImportData from './pages/ImportData';
+import JoinInvite, { PENDING_INVITE_KEY } from './pages/auth/JoinInvite';
+
+// After any sign-in/registration, resume a workspace invite the user opened while
+// logged out (its token is parked in localStorage). Covers every auth method,
+// including the OAuth round-trip that loses URL params. Rendered only inside the
+// authenticated branches; JoinInvite clears the token on any terminal outcome.
+const PendingInviteRedirect = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    const tok = localStorage.getItem(PENDING_INVITE_KEY);
+    if (tok && !location.pathname.startsWith('/join/')) {
+      navigate(`/join/${tok}`, { replace: true });
+    }
+  }, [location.pathname, navigate]);
+  return null;
+};
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isAuthenticated, authChecked, user, currentCompany } = useAuth();
@@ -50,6 +68,7 @@ const AuthenticatedApp = () => {
         <Route path="/verify-email" element={<VerifyEmail />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/join/:token" element={<JoinInvite />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
@@ -59,18 +78,25 @@ const AuthenticatedApp = () => {
   // Platform owners can still reach Studio even without a workspace context.
   if (!currentCompany) {
     return (
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/companies" element={<CompanySelect />} />
-        <Route path="/studio" element={user?.is_platform_admin ? <Studio /> : <Navigate to="/companies" replace />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="*" element={<Navigate to="/companies" replace />} />
-      </Routes>
+      <>
+        <PendingInviteRedirect />
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/join/:token" element={<JoinInvite />} />
+          <Route path="/companies" element={<CompanySelect />} />
+          <Route path="/studio" element={user?.is_platform_admin ? <Studio /> : <Navigate to="/companies" replace />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<Navigate to="/companies" replace />} />
+        </Routes>
+      </>
     );
   }
 
   return (
+    <>
+    <PendingInviteRedirect />
     <Routes>
+      <Route path="/join/:token" element={<JoinInvite />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Analyst />} />
         <Route path="/dashboard" element={<Dashboard />} />
@@ -93,6 +119,7 @@ const AuthenticatedApp = () => {
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="*" element={<PageNotFound />} />
     </Routes>
+    </>
   );
 };
 

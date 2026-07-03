@@ -27,7 +27,8 @@ export const utmTools = [
     name: "analyze_utm_performance",
     description:
       "Analyze UTM campaign performance from Google Analytics data. " +
-      "Returns sessions, conversions, and bounce rate grouped by source/medium/campaign. " +
+      "Returns sessions, active/new users, conversions (key events), revenue, bounce rate and " +
+      "engagement rate grouped by source/medium/campaign. " +
       "Use this to identify top performers, underperformers, and gaps before suggesting new UTM links. " +
       "Also useful for UTM optimisation recommendations.",
     inputSchema: {
@@ -88,40 +89,48 @@ export async function handleUtmTool(name, args, pool) {
   }
 
   if (name === "analyze_utm_performance") {
-    const days = args.days || 30;
+    // Coerce to a safe bounded integer before interpolation (injection guard).
+    const nDays = Number(args.days);
+    const days = Number.isFinite(nDays) ? Math.min(Math.max(nDays, 1), 3650) : 30;
     const groupBy = args.group_by || "source_medium";
 
-    // NOTE: ga_landing.utm_daily_performance stores UTM dimensions under the GA4
-    // column names session_source / session_medium / session_campaign_name (NOT
-    // utm_source / utm_medium / campaign) and has no "conversions" column. We
-    // alias to friendly utm_* names in the output so the analyst reads clean rows.
+    // NOTE: reads ga_landing.acquisition_session_daily (the GA cube-redesign
+    // replacement for the retired utm_daily_performance). It stores source/medium
+    // combined as session_source_medium ("source / medium"), so we split it into
+    // utm_source / utm_medium. It has no bounce_rate column - GA4 bounce is the
+    // inverse of engagement (bounce = 1 - engagement_rate), derived here. Unlike
+    // the old table it DOES carry conversions (key_events) and revenue.
+    const SRC = "split_part(session_source_medium, ' / ', 1)";
+    const MED = "split_part(session_source_medium, ' / ', 2)";
     const params = [companyId];
     const conditions = ["company_id = $1", `date >= TO_CHAR(NOW() - INTERVAL '${days} days', 'YYYYMMDD')`];
 
-    if (args.utm_source) { params.push(args.utm_source); conditions.push(`session_source = $${params.length}`); }
-    if (args.utm_medium) { params.push(args.utm_medium); conditions.push(`session_medium = $${params.length}`); }
+    if (args.utm_source) { params.push(args.utm_source); conditions.push(`${SRC} = $${params.length}`); }
+    if (args.utm_medium) { params.push(args.utm_medium); conditions.push(`${MED} = $${params.length}`); }
     if (args.utm_campaign) { params.push(args.utm_campaign); conditions.push(`session_campaign_name = $${params.length}`); }
 
     const groupCols = groupBy === "campaign"
       ? "session_campaign_name"
       : groupBy === "full"
-      ? "session_source, session_medium, session_campaign_name"
-      : "session_source, session_medium";
+      ? "session_source_medium, session_campaign_name"
+      : "session_source_medium";
 
     const selectCols = groupBy === "campaign"
       ? "session_campaign_name AS utm_campaign"
       : groupBy === "full"
-      ? "session_source AS utm_source, session_medium AS utm_medium, session_campaign_name AS utm_campaign"
-      : "session_source AS utm_source, session_medium AS utm_medium";
+      ? `${SRC} AS utm_source, ${MED} AS utm_medium, session_campaign_name AS utm_campaign`
+      : `${SRC} AS utm_source, ${MED} AS utm_medium`;
 
     const sql = `
       SELECT ${selectCols},
              SUM(sessions)                        AS total_sessions,
              SUM(active_users)                    AS total_active_users,
              SUM(new_users)                       AS total_new_users,
-             ROUND(AVG(bounce_rate)::numeric, 2)     AS avg_bounce_rate,
+             SUM(key_events)                      AS total_conversions,
+             ROUND(SUM(total_revenue)::numeric, 2)   AS total_revenue,
+             ROUND((1 - AVG(engagement_rate))::numeric, 2) AS avg_bounce_rate,
              ROUND(AVG(engagement_rate)::numeric, 2) AS avg_engagement_rate
-      FROM ga_landing.utm_daily_performance
+      FROM ga_landing.acquisition_session_daily
       WHERE ${conditions.join(" AND ")}
       GROUP BY ${groupCols}
       ORDER BY total_sessions DESC

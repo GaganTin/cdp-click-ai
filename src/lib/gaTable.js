@@ -2,18 +2,15 @@
 // Kept free of React/DOM so they can be unit-tested directly.
 
 // Composite identity for a GA link row. MUST include every column the /links
-// query groups by (session_source, medium, campaign, content, term, utm_id) so
-// that (a) row selection is unambiguous and (b) the previous-period delta lookup
-// matches the exact same grouped row. Omitting utm_id here silently collapses
-// rows that differ only by UTM ID and mis-attributes their deltas.
+// query groups by (session_source, medium, campaign) so that (a) row selection is
+// unambiguous and (b) the previous-period delta lookup matches the exact same
+// grouped row. (content / term / utm_id were dropped with the GA cube redesign -
+// no cube fetches them, so the /links grid no longer carries them.)
 export function gaRowKey(row) {
   return [
     row.session_source,
     row.session_medium,
     row.session_campaign_name,
-    row.session_content,
-    row.session_term,
-    row.session_utm_id,
   ].map((v) => (v == null ? "" : String(v))).join("|");
 }
 

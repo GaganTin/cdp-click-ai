@@ -123,7 +123,7 @@ const UTM_EXPORT_COLS = ["name", "status", "utm_source", "utm_medium", "utm_camp
 const ANALYTICS_COLS = {
   "segments-overview": ["name", "segment_type", "status", "estimated_size", "is_used", "daily_refresh", "last_refreshed"],
   "attributes-coverage": ["name", "source", "status", "value_count", "pending_count", "profiles_covered"],
-  "utm-ga-links": ["session_source", "session_medium", "session_campaign_name", "session_content", "session_term", "session_utm_id"],
+  "utm-ga-links": ["session_source", "session_medium", "session_campaign_name", "sessions", "active_users", "new_users", "bounce_rate", "engagement_rate"],
   "edm-performance": ["name", "subject", "segment_name", "total_recipients", "delivered_count", "open_count", "click_count", "bounce_count", "unsubscribe_count", "sent_at"],
   "popup-performance": ["name", "interaction_type", "status", "segment_name", "impressions", "unique_views", "clicks", "emails", "dismissals", "start_time", "end_time"],
 };

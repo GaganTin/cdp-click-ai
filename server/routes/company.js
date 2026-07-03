@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { authenticate } from "../middleware/auth.js";
 import { registerCompanyWithInteractionService } from "../lib/interactionService.js";
 import { slugify, uniqueSlug } from "../lib/slug.js";
+import { sendInvitationEmail } from "../services/email.js";
 
 // capsuite_ref is globally unique (external ETL maps it → company_id). Readable
 // underscore-cased root from the name + a short random suffix, retry on collision.
@@ -479,7 +480,28 @@ export function createCompanyRouter(pool) {
         [id, req.user.id, inv.id, JSON.stringify({ email, role })]
       );
 
-      res.status(201).json(inv);
+      // Email the invite link (best-effort: a delivery failure must not fail the
+      // invite - the record exists and the admin can still copy the link from the UI).
+      let email_delivery = { sent: false, simulated: false, error: null };
+      try {
+        const { rows: [ctx] } = await pool.query(
+          `SELECT c.name AS company_name, u.full_name AS inviter_name
+             FROM app.companies c, app.users u
+            WHERE c.id = $1 AND u.id = $2`,
+          [id, req.user.id]
+        );
+        const r = await sendInvitationEmail(inv.email, inv.token, {
+          companyName: ctx?.company_name,
+          inviterName: ctx?.inviter_name,
+        });
+        email_delivery = { sent: !r?.simulated, simulated: !!r?.simulated, error: null };
+        if (r?.simulated) console.warn("[company] invitation email simulated (RESEND_API_KEY unset) for", inv.email);
+      } catch (e) {
+        console.error("[company] invitation email FAILED for", inv.email, "-", e.message);
+        email_delivery = { sent: false, simulated: false, error: e.message };
+      }
+
+      res.status(201).json({ ...inv, email_delivery });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -498,6 +520,38 @@ export function createCompanyRouter(pool) {
         [invId, id]
       );
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/companies/invitation/:token - public invite preview (no auth).
+  // Lets the /join landing page show who invited whom, and which email to sign in
+  // with, before the recipient has an account. Never exposes anything sensitive.
+  router.get("/invitation/:token", async (req, res) => {
+    const { token } = req.params;
+    try {
+      const { rows } = await pool.query(
+        `SELECT ci.email, ci.role, ci.status, (ci.expires_at <= NOW()) AS expired,
+                c.name AS company_name, u.full_name AS inviter_name
+           FROM app.company_invitations ci
+           JOIN app.companies c ON c.id = ci.company_id
+           JOIN app.users u ON u.id = ci.invited_by
+          WHERE ci.token = $1`,
+        [token]
+      );
+      if (!rows.length) return res.status(404).json({ error: "Invitation not found" });
+      const inv = rows[0];
+      const valid = inv.status === "pending" && !inv.expired;
+      res.json({
+        email: inv.email,
+        role: inv.role,
+        company_name: inv.company_name,
+        inviter_name: inv.inviter_name,
+        status: inv.status,
+        expired: inv.expired,
+        valid,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

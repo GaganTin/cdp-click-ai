@@ -4,7 +4,7 @@ import { processNextAttributeJob, repropagate, retagPagesScoped } from "../lib/a
 import { crawlPage, contentHash, matchesExclusion, decodeUrl, isValidTitle } from "../lib/webCrawler.js";
 import { tagPage, isAIConfigured, groupValues, suggestAttributes } from "../lib/attributeAI.js";
 import { recordAiUsage, enforceAiQuota } from "../lib/aiUsage.js";
-import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, gaTopValidPagesForTest, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
+import { refreshGaTestLinks, addManualTestLinks, pruneBadTestLinks, gaTopValidPagesForTest, topUpTestLinks, MAX_TEST_LINKS } from "../lib/attributeTestLinks.js";
 import { triggerContentScrape, cancelContentScrape } from "../lib/contentScrapeTrigger.js";
 import { ruleFieldRegistry, previewRule, repropagateRule } from "../lib/attributeRules.js";
 import { assignEntities, unassign, resolveSegmentEntities, resolveIdentifiers, findSingleConflicts, findMultiAssigned, recomputeManualCounts } from "../lib/attributeManual.js";
@@ -173,8 +173,10 @@ export function createAttributesRouter(pool) {
   // ── Test links (managed dry-run sample set) ─────────────────
   router.get("/test-links", async (req, res) => {
     try {
-      // Guarantee: test links never include failed/excluded URLs (prune on read).
+      // Guarantee: test links never include failed/excluded URLs (prune on read),
+      // then top the pool back up to MAX_TEST_LINKS so it reliably reads N/50.
       await pruneBadTestLinks(pool, req.companyId).catch(() => {});
+      await topUpTestLinks(pool, req.companyId).catch(() => {});
       const { rows } = await pool.query(
         `SELECT id, url, title, source, is_selected, hits
          FROM app.web_content_test_links WHERE company_id = $1
@@ -272,8 +274,10 @@ export function createAttributesRouter(pool) {
   router.get("/options", async (req, res) => {
     try {
       const { rows } = await pool.query(
-        `SELECT a.id AS attribute_id, a.name AS attribute_name, a.source, a.scope, a.group_label,
-                v.id AS value_id, COALESCE(v.display_label, v.value) AS value, v.group_name, v.profile_count
+        `SELECT a.id AS attribute_id, a.name AS attribute_name, a.source, a.scope,
+                a.group_label, a.group_dimensions,
+                v.id AS value_id, COALESCE(v.display_label, v.value) AS value,
+                v.group_name, v.group_map, v.profile_count
          FROM app.attributes a
          JOIN app.attribute_values v
            ON v.attribute_id = a.id AND v.is_approved = true AND v.merged_into IS NULL
@@ -283,8 +287,8 @@ export function createAttributesRouter(pool) {
       );
       const byAttr = {};
       for (const r of rows) {
-        (byAttr[r.attribute_id] ||= { id: r.attribute_id, name: r.attribute_name, source: r.source, scope: r.scope, group_label: r.group_label, values: [] })
-          .values.push({ id: r.value_id, value: r.value, group_name: r.group_name, profile_count: r.profile_count });
+        (byAttr[r.attribute_id] ||= { id: r.attribute_id, name: r.attribute_name, source: r.source, scope: r.scope, group_label: r.group_label, group_dimensions: r.group_dimensions || [], values: [] })
+          .values.push({ id: r.value_id, value: r.value, group_name: r.group_name, group_map: r.group_map || {}, profile_count: r.profile_count });
       }
       res.json(Object.values(byAttr));
     } catch (err) { fail(res, err); }
@@ -745,24 +749,36 @@ export function createAttributesRouter(pool) {
   // needs_review when the page is new or gained a label since it was last reviewed.
   router.get("/tagged-pages", async (req, res) => {
     try {
+      const search = String(req.query.search || "").trim();
+      const attributeId = /^[0-9a-fA-F-]{32,36}$/.test(req.query.attribute_id || "") ? req.query.attribute_id : null;
       // Untagged feed: valid, non-excluded pages the AI assigned NO tags to, so the
       // user can confirm they're correctly untagged (Verify sets last_reviewed_date).
       if (req.query.filter === "untagged") {
+        const params = [req.companyId];
+        let where = "wp.company_id = $1 AND wp.is_excluded = false AND wp.is_valid = true";
+        if (search) { params.push(`%${search}%`); where += ` AND (wp.url ILIKE $${params.length} OR wp.title ILIKE $${params.length})`; }
         const { rows } = await pool.query(
           `SELECT wp.id, wp.url, wp.title, wp.word_count, wp.last_crawled, wp.last_reviewed_date,
                   (wp.last_reviewed_date IS NULL) AS needs_review,
                   '[]'::json AS tags
            FROM app.web_pages wp
-           WHERE wp.company_id = $1 AND wp.is_excluded = false AND wp.is_valid = true
+           WHERE ${where}
              AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id)
            ORDER BY needs_review DESC, wp.last_crawled DESC NULLS LAST
            LIMIT 300`,
-          [req.companyId]
+          params
         );
         return res.json({ pages: rows, summary: { new_pages: 0, new_labels: 0 } });
       }
       const onlyNew = req.query.filter === "new";
       const params = [req.companyId];
+      let where = "wp.company_id = $1 AND wp.is_excluded = false";
+      // Filter to pages carrying at least one tag from a given attribute.
+      if (attributeId) {
+        params.push(attributeId);
+        where += ` AND EXISTS (SELECT 1 FROM app.page_attribute_values x WHERE x.page_id = wp.id AND x.attribute_id = $${params.length})`;
+      }
+      if (search) { params.push(`%${search}%`); where += ` AND (wp.url ILIKE $${params.length} OR wp.title ILIKE $${params.length})`; }
       let having = "";
       if (onlyNew) {
         having = `HAVING wp.last_reviewed_date IS NULL
@@ -782,7 +798,7 @@ export function createAttributesRouter(pool) {
          JOIN app.attribute_values av       ON av.id = pav.attribute_value_id
          LEFT JOIN app.attribute_values cav ON cav.id = av.merged_into
          JOIN app.attributes a              ON a.id = pav.attribute_id
-         WHERE wp.company_id = $1 AND wp.is_excluded = false
+         WHERE ${where}
          GROUP BY wp.id
          ${having}
          ORDER BY needs_review DESC, wp.last_crawled DESC NULLS LAST
@@ -818,27 +834,58 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   });
 
-  // Mark all pages in the current feed reviewed at once (tagged feed by default,
-  // or the valid untagged pages when reviewing the Untagged tab).
+  // Bulk-verify pages. Accepts filters/ids in the body OR query (back-compat):
+  //   page_ids     - verify exactly these pages ("Verify selected")
+  //   filter       - untagged | new | all (default all)
+  //   attribute_id - restrict to pages carrying a tag from this attribute
+  //   search       - restrict to pages whose url/title match
+  // With no page_ids, verifies every page matching the filter/attribute/search
+  // slice server-side (covers more than the 300 shown in the feed).
   router.post("/tagged-pages/review-all", async (req, res) => {
+    const b = req.body || {};
+    const filter = b.filter || req.query.filter;
+    const pageIds = Array.isArray(b.page_ids) ? b.page_ids.filter((x) => /^[0-9a-fA-F-]{32,36}$/.test(x)) : null;
+    const search = String(b.search || req.query.search || "").trim();
+    const attributeId = /^[0-9a-fA-F-]{32,36}$/.test(b.attribute_id || req.query.attribute_id || "")
+      ? (b.attribute_id || req.query.attribute_id) : null;
     try {
-      if (req.query.filter === "untagged") {
-        await pool.query(
+      // Verify an explicit selection.
+      if (pageIds) {
+        if (!pageIds.length) return res.json({ ok: true, verified: 0 });
+        const { rowCount } = await pool.query(
           `UPDATE app.web_pages SET last_reviewed_date = NOW()
-           WHERE company_id = $1 AND is_excluded = false AND is_valid = true
-             AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = web_pages.id)`,
-          [req.companyId]
+           WHERE company_id = $1 AND is_excluded = false AND id = ANY($2::uuid[])`,
+          [req.companyId, pageIds]
         );
-        return res.json({ ok: true });
+        await approveFullyReviewedValues(req.companyId);
+        return res.json({ ok: true, verified: rowCount });
       }
-      await pool.query(
-        `UPDATE app.web_pages SET last_reviewed_date = NOW()
-         WHERE company_id = $1 AND is_excluded = false
-           AND id IN (SELECT DISTINCT page_id FROM app.page_attribute_values WHERE company_id = $1)`,
-        [req.companyId]
+      // Untagged slice.
+      if (filter === "untagged") {
+        const params = [req.companyId];
+        let where = "company_id = $1 AND is_excluded = false AND is_valid = true";
+        if (search) { params.push(`%${search}%`); where += ` AND (url ILIKE $${params.length} OR title ILIKE $${params.length})`; }
+        const { rowCount } = await pool.query(
+          `UPDATE app.web_pages SET last_reviewed_date = NOW()
+           WHERE ${where}
+             AND NOT EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = web_pages.id)`,
+          params
+        );
+        return res.json({ ok: true, verified: rowCount });
+      }
+      // Tagged slice (optionally scoped by attribute/search).
+      const params = [req.companyId];
+      let where = "wp.company_id = $1 AND wp.is_excluded = false";
+      where += ` AND EXISTS (SELECT 1 FROM app.page_attribute_values pav WHERE pav.page_id = wp.id`;
+      if (attributeId) { params.push(attributeId); where += ` AND pav.attribute_id = $${params.length}`; }
+      where += `)`;
+      if (search) { params.push(`%${search}%`); where += ` AND (wp.url ILIKE $${params.length} OR wp.title ILIKE $${params.length})`; }
+      const { rowCount } = await pool.query(
+        `UPDATE app.web_pages wp SET last_reviewed_date = NOW() WHERE ${where}`,
+        params
       );
       await approveFullyReviewedValues(req.companyId);
-      res.json({ ok: true });
+      res.json({ ok: true, verified: rowCount });
     } catch (err) { fail(res, err); }
   });
 
@@ -1033,6 +1080,14 @@ export function createAttributesRouter(pool) {
         [req.params.id, req.companyId, ...vals]
       );
       if (!rows.length) return res.status(404).json({ error: "Attribute not found" });
+      // Status changes flip targeting eligibility: propagate() only writes profile
+      // tags for Active attributes, so re-resolving on any status change both APPLIES
+      // tags on activate and REMOVES them on deactivate (no crawl/LLM - reuses the
+      // already-tagged pages). Only relevant for web_content attributes.
+      if ("status" in req.body && rows[0].source === "web_content") {
+        try { await repropagate(pool, req.companyId, [req.params.id]); }
+        catch (e) { console.error("[attr] repropagate after status change failed:", e.message); }
+      }
       res.json(rows[0]);
     } catch (err) {
       if (err.code === "23505") return res.status(409).json({ error: "An attribute with that name already exists.", code: "DUPLICATE_NAME" });
@@ -1070,16 +1125,16 @@ export function createAttributesRouter(pool) {
       }
       const { rows } = await pool.query(
         `INSERT INTO app.attributes
-           (company_id, created_by, name, description, source, value_type, scope, extract_from, group_label, rule, status, content_applied)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'draft',false) RETURNING *`,
+           (company_id, created_by, name, description, source, value_type, scope, extract_from, group_label, group_dimensions, rule, status, content_applied)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'draft',false) RETURNING *`,
         [req.companyId, req.user.id, name, a.description, a.source, a.value_type, a.scope,
-         a.extract_from, a.group_label, a.rule]
+         a.extract_from, a.group_label, JSON.stringify(a.group_dimensions || []), a.rule]
       );
       const clone = rows[0];
-      // copy approved, non-merged values as the starting vocabulary
+      // copy approved, non-merged values as the starting vocabulary (incl. grouping)
       await pool.query(
-        `INSERT INTO app.attribute_values (company_id, attribute_id, value, display_label, group_name, is_approved, is_exception)
-         SELECT company_id, $1, value, display_label, group_name, true, false
+        `INSERT INTO app.attribute_values (company_id, attribute_id, value, display_label, group_name, group_map, is_approved, is_exception)
+         SELECT company_id, $1, value, display_label, group_name, group_map, true, false
          FROM app.attribute_values
          WHERE attribute_id = $2 AND is_approved = true AND merged_into IS NULL
          ON CONFLICT (attribute_id, lower(value)) DO NOTHING`,
@@ -1122,6 +1177,27 @@ export function createAttributesRouter(pool) {
 
   // Approve / rename / un-approve / block a value (review-queue workflow).
   router.patch("/values/:valueId", async (req, res) => {
+    // Per-dimension group assignment: { dimension, group_value }. Sets one key of
+    // group_map (or drops it when group_value is null/empty). Metadata only - never
+    // changes which profiles get tagged, so no repropagate.
+    if ("dimension" in (req.body || {})) {
+      const dim = String(req.body.dimension || "").trim();
+      if (!dim) return res.status(400).json({ error: "dimension is required" });
+      const raw = req.body.group_value;
+      const gv = raw == null || String(raw).trim() === "" ? null : String(raw).trim();
+      try {
+        const { rows } = await pool.query(
+          gv === null
+            ? `UPDATE app.attribute_values SET group_map = group_map - $3, updated_date = NOW()
+               WHERE id = $1 AND company_id = $2 RETURNING *`
+            : `UPDATE app.attribute_values SET group_map = group_map || jsonb_build_object($3::text, $4::text), updated_date = NOW()
+               WHERE id = $1 AND company_id = $2 RETURNING *`,
+          gv === null ? [req.params.valueId, req.companyId, dim] : [req.params.valueId, req.companyId, dim, gv]
+        );
+        if (!rows.length) return res.status(404).json({ error: "Value not found" });
+        return res.json(rows[0]);
+      } catch (err) { return fail(res, err); }
+    }
     const allowed = ["is_approved", "display_label", "value", "is_blocked", "group_name"];
     const cols = allowed.filter((k) => k in (req.body || {}));
     if (!cols.length) return res.status(400).json({ error: "No valid fields" });
@@ -1177,12 +1253,18 @@ export function createAttributesRouter(pool) {
           [sources, req.companyId, target, tgt[0].attribute_id]
         ));
       } else if (action === "set_group") {
-        const raw = req.body?.group_name;
+        // Per-dimension group assignment across many values (group_map[dimension]).
+        const dim = String(req.body?.dimension || "").trim();
+        if (!dim) return res.status(400).json({ error: "dimension is required for set_group" });
+        const raw = req.body?.group_value;
         const group = raw == null || String(raw).trim() === "" ? null : String(raw).trim();
         ({ rows } = await pool.query(
-          `UPDATE app.attribute_values SET group_name = $3, updated_date = NOW()
-           WHERE id = ANY($1::uuid[]) AND company_id = $2 RETURNING attribute_id`,
-          [ids, req.companyId, group]
+          group === null
+            ? `UPDATE app.attribute_values SET group_map = group_map - $3, updated_date = NOW()
+               WHERE id = ANY($1::uuid[]) AND company_id = $2 RETURNING attribute_id`
+            : `UPDATE app.attribute_values SET group_map = group_map || jsonb_build_object($3::text, $4::text), updated_date = NOW()
+               WHERE id = ANY($1::uuid[]) AND company_id = $2 RETURNING attribute_id`,
+          group === null ? [ids, req.companyId, dim] : [ids, req.companyId, dim, group]
         ));
       } else {
         const set = action === "approve"
@@ -1378,22 +1460,93 @@ export function createAttributesRouter(pool) {
     } catch (err) { fail(res, err); }
   });
 
-  // Auto-group this attribute's approved values with AI under group_label.
+  // ── Grouping dimensions (multi-dimension: Country → Continent AND GDP) ──
+  // group_dimensions is an ordered JSONB array of dimension names on the attribute;
+  // each value's group_map holds one group per dimension, e.g. {"Continent":"Asia"}.
+  const loadDimensions = async (id, companyId) => {
+    const { rows } = await pool.query(
+      `SELECT group_dimensions FROM app.attributes WHERE id = $1 AND company_id = $2`,
+      [id, companyId]
+    );
+    return rows.length ? (rows[0].group_dimensions || []) : null;
+  };
+
+  // Add a grouping dimension (case-insensitive dedupe).
+  router.post("/:id/dimensions", async (req, res) => {
+    const name = String(req.body?.name || "").trim();
+    if (!name) return res.status(400).json({ error: "name is required" });
+    try {
+      const dims = await loadDimensions(req.params.id, req.companyId);
+      if (dims === null) return res.status(404).json({ error: "Attribute not found" });
+      if (dims.some((d) => d.toLowerCase() === name.toLowerCase())) {
+        return res.status(409).json({ error: `A dimension called "${name}" already exists.` });
+      }
+      const next = [...dims, name];
+      await pool.query(`UPDATE app.attributes SET group_dimensions = $1::jsonb WHERE id = $2 AND company_id = $3`,
+        [JSON.stringify(next), req.params.id, req.companyId]);
+      res.json({ ok: true, group_dimensions: next });
+    } catch (err) { fail(res, err); }
+  });
+
+  // Rename a dimension - rekeys every value's group_map atomically.
+  router.patch("/:id/dimensions", async (req, res) => {
+    const oldName = String(req.body?.old || "").trim();
+    const newName = String(req.body?.new || "").trim();
+    if (!oldName || !newName) return res.status(400).json({ error: "old and new are required" });
+    try {
+      const dims = await loadDimensions(req.params.id, req.companyId);
+      if (dims === null) return res.status(404).json({ error: "Attribute not found" });
+      if (!dims.some((d) => d === oldName)) return res.status(404).json({ error: "Dimension not found" });
+      if (newName.toLowerCase() !== oldName.toLowerCase() && dims.some((d) => d.toLowerCase() === newName.toLowerCase())) {
+        return res.status(409).json({ error: `A dimension called "${newName}" already exists.` });
+      }
+      const next = dims.map((d) => (d === oldName ? newName : d));
+      await pool.query(`UPDATE app.attributes SET group_dimensions = $1::jsonb WHERE id = $2 AND company_id = $3`,
+        [JSON.stringify(next), req.params.id, req.companyId]);
+      // rekey group_map on all values that carried the old dimension
+      await pool.query(
+        `UPDATE app.attribute_values
+         SET group_map = (group_map - $3) || jsonb_build_object($4::text, group_map->>$3), updated_date = NOW()
+         WHERE attribute_id = $1 AND company_id = $2 AND group_map ? $3`,
+        [req.params.id, req.companyId, oldName, newName]
+      );
+      res.json({ ok: true, group_dimensions: next });
+    } catch (err) { fail(res, err); }
+  });
+
+  // Remove a dimension - drops its key from every value's group_map.
+  router.delete("/:id/dimensions/:name", async (req, res) => {
+    const name = String(req.params.name || "").trim();
+    try {
+      const dims = await loadDimensions(req.params.id, req.companyId);
+      if (dims === null) return res.status(404).json({ error: "Attribute not found" });
+      const next = dims.filter((d) => d !== name);
+      await pool.query(`UPDATE app.attributes SET group_dimensions = $1::jsonb WHERE id = $2 AND company_id = $3`,
+        [JSON.stringify(next), req.params.id, req.companyId]);
+      await pool.query(
+        `UPDATE app.attribute_values SET group_map = group_map - $3, updated_date = NOW()
+         WHERE attribute_id = $1 AND company_id = $2 AND group_map ? $3`,
+        [req.params.id, req.companyId, name]
+      );
+      res.json({ ok: true, group_dimensions: next });
+    } catch (err) { fail(res, err); }
+  });
+
+  // Auto-group this attribute's approved values with AI under ONE dimension,
+  // writing results into group_map[dimension]. Registers the dimension if new.
   router.post("/:id/autogroup", async (req, res) => {
     if (!isAIConfigured()) return res.status(400).json({ error: "AI is not configured." });
     if (!(await enforceAiQuota(pool, req, res, { companyId: req.companyId }))) return;
     try {
-      const { rows: arows } = await pool.query(
-        `SELECT group_label FROM app.attributes WHERE id = $1 AND company_id = $2`,
-        [req.params.id, req.companyId]
-      );
-      if (!arows.length) return res.status(404).json({ error: "Attribute not found" });
-      const label = String(req.body?.group_label || arows[0].group_label || "").trim();
-      if (!label) return res.status(400).json({ error: "Set a grouping dimension (e.g. Continent) first." });
-      // persist the label if the caller supplied/changed it
-      if (req.body?.group_label) {
-        await pool.query(`UPDATE app.attributes SET group_label = $1 WHERE id = $2 AND company_id = $3`,
-          [label, req.params.id, req.companyId]);
+      const dims = await loadDimensions(req.params.id, req.companyId);
+      if (dims === null) return res.status(404).json({ error: "Attribute not found" });
+      // Accept `dimension` (new) or legacy `group_label` for back-compat.
+      const dimension = String(req.body?.dimension || req.body?.group_label || dims[0] || "").trim();
+      if (!dimension) return res.status(400).json({ error: "Set a grouping dimension (e.g. Continent) first." });
+      // Register the dimension if it isn't already on the attribute.
+      if (!dims.some((d) => d === dimension)) {
+        await pool.query(`UPDATE app.attributes SET group_dimensions = $1::jsonb WHERE id = $2 AND company_id = $3`,
+          [JSON.stringify([...dims, dimension]), req.params.id, req.companyId]);
       }
       const { rows: vals } = await pool.query(
         `SELECT id, value FROM app.attribute_values
@@ -1401,18 +1554,24 @@ export function createAttributesRouter(pool) {
         [req.params.id]
       );
       if (!vals.length) return res.json({ ok: true, grouped: 0 });
-      const mapping = await groupValues(label, vals.map((v) => v.value), (u) =>
+      const mapping = await groupValues(dimension, vals.map((v) => v.value), (u) =>
         recordAiUsage(pool, {
           companyId: req.companyId, userId: req.user?.id, feature: "attribute_group",
           model: u.model, inputTokens: u.input, cachedTokens: u.cached, outputTokens: u.output,
-          metadata: { attribute_id: req.params.id },
+          metadata: { attribute_id: req.params.id, dimension },
         }));
       let grouped = 0;
       for (const v of vals) {
         const g = mapping[v.value];
-        if (g) { await pool.query(`UPDATE app.attribute_values SET group_name = $1 WHERE id = $2 AND company_id = $3`, [g, v.id, req.companyId]); grouped++; }
+        if (g) {
+          await pool.query(
+            `UPDATE app.attribute_values SET group_map = group_map || jsonb_build_object($1::text, $2::text), updated_date = NOW()
+             WHERE id = $3 AND company_id = $4`,
+            [dimension, g, v.id, req.companyId]);
+          grouped++;
+        }
       }
-      res.json({ ok: true, group_label: label, grouped });
+      res.json({ ok: true, dimension, grouped });
     } catch (err) { fail(res, err); }
   });
 

@@ -1135,15 +1135,34 @@ function MembersTab({ company, currentUserId }) {
   const invite = async (e) => {
     e.preventDefault();
     setInviting(true);
+    const email = inviteEmail;
     try {
-      await appClient.companies.invite(company.id, inviteEmail, inviteRole);
+      const inv = await appClient.companies.invite(company.id, email, inviteRole);
       setInviteEmail("");
       await load();
-      toast.success(`${t("Invitation sent to")} ${inviteEmail}`);
+      if (inv?.email_delivery?.sent) {
+        toast.success(`${t("Invitation sent to")} ${email}`);
+      } else {
+        // Email couldn't be delivered (or is simulated in dev) - the invite still
+        // exists; point the admin at the copy-link fallback below.
+        toast.success(`${t("Invitation created for")} ${email}. ${t("Copy the invite link below to share it.")}`);
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {
       setInviting(false);
+    }
+  };
+
+  const copyInviteLink = async (inv) => {
+    const link = `${window.location.origin}/join/${inv.token}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success(t("Invite link copied"));
+    } catch {
+      // Clipboard API can be blocked (insecure context / permissions) - surface the
+      // link so the admin can copy it by hand rather than failing silently.
+      window.prompt(t("Copy this invite link:"), link);
     }
   };
 
@@ -1240,21 +1259,29 @@ function MembersTab({ company, currentUserId }) {
       {invitations.length > 0 && (
         <Section title={t("Pending invitations")}>
           <div className="border border-border rounded-lg overflow-hidden">
-            <div className="grid grid-cols-[1fr_120px_160px_80px_40px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
+            <div className="grid grid-cols-[1fr_120px_160px_80px_72px] gap-3 px-4 py-2.5 bg-secondary/50 text-xs font-medium text-muted-foreground border-b border-border">
               <span>{t("Email")}</span><span>{t("Role")}</span><span>{t("Expires")}</span><span>{t("Status")}</span><span />
             </div>
             <div className="divide-y divide-border">
               {invitations.map(inv => (
-                <div key={inv.id} className="grid grid-cols-[1fr_120px_160px_80px_40px] gap-3 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
+                <div key={inv.id} className="grid grid-cols-[1fr_120px_160px_80px_72px] gap-3 px-4 py-3 items-center hover:bg-secondary/20 transition-colors">
                   <p className="text-sm truncate">{inv.email}</p>
                   <RoleBadge role={inv.role} />
                   <p className="text-xs text-muted-foreground">{new Date(inv.expires_at).toLocaleDateString()}</p>
                   <span className="text-xs px-2 py-0.5 bg-secondary text-foreground border border-border rounded-full font-medium w-fit">
                     {t("Pending")}
                   </span>
-                  <div className="flex justify-center">
+                  <div className="flex justify-center gap-1">
+                    <button
+                      onClick={() => copyInviteLink(inv)}
+                      title={t("Copy invite link")}
+                      className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                    </button>
                     <button
                       onClick={() => cancelInvite(inv.id, inv.email)}
+                      title={t("Cancel invitation")}
                       className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
