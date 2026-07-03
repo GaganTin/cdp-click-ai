@@ -330,8 +330,6 @@ export const appClient = {
     countries(params)   { return request(`/utm/countries${this._qs(params)}`); },
     devices(params)     { return request(`/utm/devices${this._qs(params)}`); },
     utmIds(params)      { return request(`/utm/utm-ids${this._qs(params)}`); },
-    channelCommerce(params) { return request(`/utm/channel-commerce${this._qs(params)}`); },
-    channelTouch(params)    { return request(`/utm/channel-touch${this._qs(params)}`); },
     paramValues(params) { return request(`/utm/param-values${this._qs(params)}`); },
     links(days = "all", prev = false, range = null) {
       // `range` = { start, end } as YYYYMMDD for a fixed window (e.g. a calendar

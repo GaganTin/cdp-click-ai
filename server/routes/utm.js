@@ -24,10 +24,6 @@ const ACQ = "ga_landing.acquisition_session_daily";
 const GEO = "ga_landing.geo_daily";
 const TECH = "ga_landing.tech_daily";
 const UTM_ID = "ga_landing.utm_daily_utm_id_performance";
-// Base cubes for channel attribution (joined in-app instead of via ga_gold views).
-const CHANNEL = "ga_landing.channel_daily";
-const TRANSACTIONS = "ga_landing.transaction_metrics";
-const FIRSTUSER = "ga_landing.acquisition_firstuser_daily";
 
 // GA4 sessionSourceMedium arrives as "source / medium"; split on that separator.
 const SRC_EXPR = "split_part(session_source_medium, ' / ', 1)";
@@ -347,82 +343,6 @@ export function createUtmRouter(pool) {
          WHERE company_id = $1 AND date >= $2 AND session_campaign_name = ANY($3::text[])
          GROUP BY session_source_medium, session_campaign_name`,
         [cid, start, names]
-      );
-      res.json(rows);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // GET /api/utm/channel-commerce - traffic -> GA revenue by default channel group.
-  // Joins the base cubes directly (channel_daily = traffic, transaction_metrics =
-  // GA ecommerce) on channel_group, aggregated over the window. Equivalent to the
-  // ga_gold.channel_commerce_daily view but self-contained (no dependency on the
-  // ga_gold build step existing).
-  router.get("/channel-commerce", async (req, res) => {
-    const cid = await companyId(req, res); if (!cid) return;
-    const { start, end } = dateRange(req.query);
-    try {
-      const { rows } = await pool.query(
-        `SELECT COALESCE(c.name, t.name) AS name,
-                c.sessions, c.engaged_sessions, c.active_users, c.new_users, c.key_events,
-                t.transactions, t.purchase_revenue, t.ecommerce_purchases
-         FROM (
-           SELECT channel_group AS name,
-                  SUM(sessions) AS sessions, SUM(engaged_sessions) AS engaged_sessions,
-                  SUM(active_users) AS active_users, SUM(new_users) AS new_users,
-                  SUM(key_events) AS key_events
-           FROM ${CHANNEL}
-           WHERE company_id = $1 AND date >= $2 AND date <= $3
-             AND channel_group IS NOT NULL AND channel_group NOT IN ('(not set)', '')
-           GROUP BY channel_group
-         ) c
-         FULL OUTER JOIN (
-           SELECT channel_group AS name,
-                  SUM(transactions) AS transactions,
-                  ROUND(SUM(purchase_revenue)::numeric, 2) AS purchase_revenue,
-                  SUM(ecommerce_purchases) AS ecommerce_purchases
-           FROM ${TRANSACTIONS}
-           WHERE company_id = $1 AND date >= $2 AND date <= $3
-             AND channel_group IS NOT NULL AND channel_group NOT IN ('(not set)', '')
-           GROUP BY channel_group
-         ) t ON t.name = c.name
-         ORDER BY COALESCE(c.sessions, 0) DESC NULLS LAST`,
-        [cid, start, end]
-      );
-      res.json(rows);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-  });
-
-  // GET /api/utm/channel-touch - first-touch vs last-touch by channel, pivoted.
-  // UNIONs last-touch (channel_daily) + first-touch (acquisition_firstuser_daily,
-  // keyed on first_user_channel_group) then pivots. Equivalent to the
-  // ga_gold.channel_touch_daily view, self-contained (no ga_gold dependency).
-  router.get("/channel-touch", async (req, res) => {
-    const cid = await companyId(req, res); if (!cid) return;
-    const { start, end } = dateRange(req.query);
-    try {
-      const { rows } = await pool.query(
-        `SELECT name,
-                SUM(active_users) FILTER (WHERE touch_type = 'first') AS first_active_users,
-                SUM(active_users) FILTER (WHERE touch_type = 'last')  AS last_active_users,
-                SUM(new_users)    FILTER (WHERE touch_type = 'first') AS first_new_users,
-                SUM(new_users)    FILTER (WHERE touch_type = 'last')  AS last_new_users,
-                SUM(key_events)   FILTER (WHERE touch_type = 'first') AS first_key_events,
-                SUM(key_events)   FILTER (WHERE touch_type = 'last')  AS last_key_events
-         FROM (
-           SELECT channel_group AS name, 'last'::text AS touch_type,
-                  active_users, new_users, key_events
-           FROM ${CHANNEL}
-           WHERE company_id = $1 AND date >= $2 AND date <= $3
-           UNION ALL
-           SELECT first_user_channel_group AS name, 'first'::text AS touch_type,
-                  active_users, new_users, key_events
-           FROM ${FIRSTUSER}
-           WHERE company_id = $1 AND date >= $2 AND date <= $3
-         ) u
-         WHERE name IS NOT NULL AND name NOT IN ('(not set)', '')
-         GROUP BY name
-         ORDER BY last_active_users DESC NULLS LAST`,
-        [cid, start, end]
       );
       res.json(rows);
     } catch (e) { res.status(500).json({ error: e.message }); }
