@@ -228,7 +228,7 @@ export default function Sidebar() {
               <DropdownItem
                 key={c.id}
                 icon={c.is_demo ? Sparkles : Building2}
-                label={c.is_demo ? `${c.name} · Demo` : c.name}
+                label={c.is_demo ? `${c.name} - Mock Data` : c.name}
                 active={c.id === currentCompany?.id}
                 onClick={() => { switchCompany(c); queryClient.clear(); }}
               />
