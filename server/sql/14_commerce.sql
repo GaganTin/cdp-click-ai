@@ -196,6 +196,59 @@ CREATE TABLE IF NOT EXISTS commerce.refund_line (
   source_extra    JSONB
 );
 
+-- ── Derived: per-customer product replenishment predictions ──────────────────
+--  NOT landed from a platform - computed by the click_cdp_ai_build_product_
+--  predictions DAG from order_line cadence (median inter-purchase interval).
+--  One row per (customer, product) that is "replenishable" (population repeat
+--  rate over threshold). status: not_due | due_soon | due_now | overdue. The
+--  DAG owns this table (DELETE + INSERT per workspace); commerce_landing does
+--  NOT touch it, so it is intentionally absent from commerce_schema.ENTITIES.
+CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
+  company_id         UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id        TEXT  NOT NULL,             -- = app.customer_profiles.member_id
+  product_id         TEXT,
+  product_name       TEXT,
+  product_type       TEXT,
+  last_order_date    TIMESTAMPTZ,
+  cycle_days         NUMERIC,                    -- median interval (or cohort fallback)
+  cycle_spread       NUMERIC,                    -- robust spread of the cadence (IQR or cohort-derived)
+  predicted_next_date DATE,
+  days_until         INT,                        -- predicted_next_date - run date
+  status             TEXT,                       -- not_due | due_soon | due_now | overdue
+  confidence         TEXT,                       -- low | medium | high
+  purchase_count     INT,
+  is_cohort_estimate BOOLEAN DEFAULT false,      -- true = cycle from product_type cohort (1 purchase)
+  computed_at        TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_replen_status_idx       ON commerce.customer_replenishment (company_id, status);
+
+-- ── Derived: per-customer product recommendations (cross-sell / discovery) ────
+--  NOT landed from a platform - computed by the same build_product_predictions
+--  DAG. Item-item co-purchase ("bought by similar customers") + a category-
+--  popularity fallback, EXCLUDING products the customer already owns (re-buys are
+--  the replenishment table's job). One row per (customer, recommended product),
+--  ranked. product_type carries the category concept (as elsewhere in commerce).
+CREATE TABLE IF NOT EXISTS commerce.customer_product_reco (
+  company_id     UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id    TEXT  NOT NULL,             -- = app.customer_profiles.member_id
+  product_id     TEXT  NOT NULL,
+  product_name   TEXT,
+  product_type   TEXT,
+  score          NUMERIC,                    -- ranking score (method-relative)
+  method         TEXT,                       -- copurchase | category
+  reason         TEXT,                       -- human-readable "why"
+  rank           INT,                        -- 1 = strongest, per customer
+  computed_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_reco_company_cust_idx ON commerce.customer_product_reco (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_reco_product_idx      ON commerce.customer_product_reco (company_id, product_id);
+-- customer_id-only: the segment "recommended product X" predicate filters
+-- customer_id = member_id without company_id (member_id is globally unique).
+CREATE INDEX IF NOT EXISTS commerce_reco_customer_only_idx ON commerce.customer_product_reco (customer_id);
+
 -- ── Indexes (tenant scoping + the app's read paths) ──────────────────────────
 CREATE INDEX IF NOT EXISTS commerce_order_company_idx          ON commerce."order" (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."order" (company_id, customer_id);

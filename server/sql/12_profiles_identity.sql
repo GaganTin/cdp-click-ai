@@ -93,6 +93,19 @@ CREATE TABLE app.customer_profiles (
   total_spend           NUMERIC     DEFAULT 0,
   first_order_date      TIMESTAMPTZ,
   last_order_date       TIMESTAMPTZ,
+  -- replenishment prediction rollup (owned by build_product_predictions DAG;
+  -- detail per product in commerce.customer_replenishment). status is the most
+  -- urgent bucket across the customer's due products.
+  replenishment_due_count  INTEGER,     -- # products currently due_soon/due_now/overdue
+  next_replenishment_date  DATE,        -- soonest predicted reorder date
+  days_to_replenishment    INTEGER,     -- days until next_replenishment_date (may be <0)
+  replenishment_status     TEXT,        -- not_due | due_soon | due_now | overdue
+  -- recommendation rollup (owned by build_product_predictions DAG; detail per
+  -- product in commerce.customer_product_reco).
+  reco_count                 INTEGER,   -- # recommended (cross-sell) products
+  top_recommended_product_id TEXT,      -- highest-ranked recommendation
+  top_recommended_product    TEXT,      -- its display name (cache)
+  top_recommended_category   TEXT,      -- most common product_type among recommendations
   -- offline / CRM activity
   seminar_count         INTEGER     DEFAULT 0,
   seminars              JSONB       DEFAULT '[]',

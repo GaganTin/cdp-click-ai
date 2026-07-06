@@ -12,6 +12,7 @@ import {
   Upload, Trash2,
   ShoppingBag, Hash, BarChart2, ArrowUp, ArrowDown,
   ChevronsDownUp, ChevronsUpDown, GitMerge, ArrowRight, Lightbulb,
+  RefreshCw,
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import ProfilesAnalyticsPanel from "@/components/profiles/ProfilesAnalyticsPanel";
@@ -240,6 +241,94 @@ function TransactionsBlock({ memberId, fmtMoney }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// Status → pill styling for a replenishment prediction (most-urgent first).
+const REPLEN_STATUS = {
+  overdue:  { label: "Overdue",  cls: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/30" },
+  due_now:  { label: "Due now",  cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30" },
+  due_soon: { label: "Due soon", cls: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30" },
+  not_due:  { label: "On track", cls: "border-border text-muted-foreground" },
+};
+
+// Lazily-loaded product replenishment predictions (only mounts when expanded).
+// Rows come pre-sorted most-urgent-first from the API.
+function ReplenishmentBlock({ memberId }) {
+  const { t } = usePreferences();
+  const { data, isLoading } = useQuery({
+    queryKey: ["profile-replenishment", memberId],
+    queryFn: () => appClient.profiles.replenishment(memberId),
+    enabled: !!memberId,
+  });
+  const items = data?.items || [];
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">{t("Loading replenishment…")}</p>;
+  if (!items.length) return null;
+  const due = data?.summary?.due_count || 0;
+  return (
+    <div>
+      <SectionTitle>{t("Replenishment")}{due > 0 ? ` · ${due} ${t("due")}` : ""}</SectionTitle>
+      <div className="space-y-1.5">
+        {items.slice(0, 8).map((it) => {
+          const st = REPLEN_STATUS[it.status] || REPLEN_STATUS.not_due;
+          const when = it.days_until == null ? null
+            : it.days_until < 0 ? `${Math.abs(it.days_until)} ${t("days overdue")}`
+            : it.days_until === 0 ? t("due today")
+            : `${t("in")} ${it.days_until} ${t("days")}`;
+          return (
+            <div key={it.product_id} className="rounded-md border border-border bg-secondary/30 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium truncate flex items-center gap-1 min-w-0">
+                  <RefreshCw className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
+                  <span className="truncate">{it.product_name || it.product_id}</span>
+                </span>
+                <span className={`px-1.5 py-px rounded-full text-[9px] border flex-shrink-0 ${st.cls}`}>{t(st.label)}</span>
+              </div>
+              <div className="flex items-center flex-wrap gap-x-2 mt-0.5 text-[10px] text-muted-foreground">
+                {when && <span>{when}</span>}
+                {it.predicted_next_date && <span>· {t("expected")} {safeDate(it.predicted_next_date)}</span>}
+                {it.cycle_days != null && <span>· ~{Math.round(it.cycle_days)}d{it.cycle_spread ? ` ±${Math.round(it.cycle_spread)}d` : ""} {t("cycle")}</span>}
+                {it.is_cohort_estimate && <span title={t("Estimated from similar products (only one purchase so far)")}>· {t("est.")}</span>}
+              </div>
+            </div>
+          );
+        })}
+        {items.length > 8 && <p className="text-[10px] text-muted-foreground">+{items.length - 8} {t("more")}</p>}
+      </div>
+    </div>
+  );
+}
+
+// Lazily-loaded product recommendations (cross-sell). Rows are pre-ranked.
+function RecommendationsBlock({ memberId }) {
+  const { t } = usePreferences();
+  const { data, isLoading } = useQuery({
+    queryKey: ["profile-recommendations", memberId],
+    queryFn: () => appClient.profiles.recommendations(memberId),
+    enabled: !!memberId,
+  });
+  const items = data?.items || [];
+  if (isLoading) return <p className="text-[11px] text-muted-foreground">{t("Loading recommendations…")}</p>;
+  if (!items.length) return null;
+  return (
+    <div>
+      <SectionTitle>{t("Recommended Products")}</SectionTitle>
+      <div className="space-y-1.5">
+        {items.slice(0, 8).map((it) => (
+          <div key={it.product_id} className="rounded-md border border-border bg-secondary/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-medium truncate flex items-center gap-1 min-w-0">
+                <Lightbulb className="w-3 h-3 flex-shrink-0 text-muted-foreground" />
+                <span className="truncate">{it.product_name || it.product_id}</span>
+              </span>
+              {it.product_type && <span className="text-[9px] px-1.5 py-px rounded-full border border-border text-muted-foreground flex-shrink-0">{it.product_type}</span>}
+            </div>
+            {it.reason && <div className="mt-0.5 text-[10px] text-muted-foreground">{t(it.reason)}</div>}
+          </div>
+        ))}
+        {items.length > 8 && <p className="text-[10px] text-muted-foreground">+{items.length - 8} {t("more")}</p>}
       </div>
     </div>
   );
@@ -649,6 +738,12 @@ function CustomerCard({ profile, onDelete }) {
 
           {/* Order history (lazy-loaded) */}
           {hasOrders && <TransactionsBlock memberId={profile.member_id} fmtMoney={fmtMoney} />}
+
+          {/* Product replenishment predictions (lazy-loaded; self-hides if none) */}
+          <ReplenishmentBlock memberId={profile.member_id} />
+
+          {/* Product recommendations / cross-sell (lazy-loaded; self-hides if none) */}
+          <RecommendationsBlock memberId={profile.member_id} />
 
           {/* Behavioral / custom attributes */}
           <AffinitiesBlock entityType="customer" entityId={profile.member_id} />

@@ -413,6 +413,12 @@ export const appClient = {
     async transactions(memberId) {
       return request(`/profiles/customers/${encodeURIComponent(memberId)}/transactions`);
     },
+    async replenishment(memberId) {
+      return request(`/profiles/customers/${encodeURIComponent(memberId)}/replenishment`);
+    },
+    async recommendations(memberId) {
+      return request(`/profiles/customers/${encodeURIComponent(memberId)}/recommendations`);
+    },
     async insights(memberId) {
       return request(`/profiles/customers/${encodeURIComponent(memberId)}/insights`);
     },
@@ -428,6 +434,9 @@ export const appClient = {
     async dismissMergeCandidate(id) { return request(`/profiles/merge-candidates/${encodeURIComponent(id)}/dismiss`, { method: "POST" }); },
   },
   commerce: {
+    // Products that are recommended to at least one customer (for the Segments
+    // "push product X" picker), each with its reach (audience size).
+    async recommendedProducts() { return request("/commerce/recommended-products"); },
     // Manual order/transaction CSV import into the neutral commerce layer. Orders
     // flow into profiles, segments and the AI analyst just like synced store data.
     downloadOrderTemplate() {

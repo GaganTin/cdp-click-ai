@@ -160,6 +160,28 @@ export function customerWhere(fc) {
     params.push(Number(fc.ordered_within));
     parts.push(`EXISTS (SELECT 1 FROM commerce."order" s WHERE s.customer_id = p.member_id AND ${realOrder} AND s.order_date >= NOW() - make_interval(days => $${params.length}))`);
   }
+  // Replenishment prediction criteria - read the per-customer rollup cache on
+  // customer_profiles (owned by the build_product_predictions DAG). status is the
+  // most-urgent bucket; days_to_replenishment is the soonest reorder (may be <0).
+  if (fc.has_due_replenishment === "true") parts.push("COALESCE(p.replenishment_due_count, 0) > 0");
+  if (Array.isArray(fc.replenishment_status)) {
+    if (fc.replenishment_status.length) { params.push(fc.replenishment_status); parts.push(`p.replenishment_status = ANY($${params.length}::text[])`); }
+  } else if (fc.replenishment_status) { params.push(fc.replenishment_status); parts.push(`p.replenishment_status = $${params.length}`); }
+  if (fc.replenishment_within) {
+    params.push(Number(fc.replenishment_within));
+    parts.push(`p.days_to_replenishment IS NOT NULL AND p.days_to_replenishment <= $${params.length}`);
+  }
+  // Recommendation (cross-sell) criteria - read the rollup cache, except the
+  // "recommended a specific product" membership which hits the detail table
+  // (keyed by customer_id = member_id), so "push product X" audiences stay live.
+  if (fc.has_recommendations === "true") parts.push("COALESCE(p.reco_count, 0) > 0");
+  if (Array.isArray(fc.top_recommended_category)) {
+    if (fc.top_recommended_category.length) { params.push(fc.top_recommended_category); parts.push(`p.top_recommended_category = ANY($${params.length}::text[])`); }
+  } else if (fc.top_recommended_category) { params.push(fc.top_recommended_category); parts.push(`p.top_recommended_category = $${params.length}`); }
+  if (Array.isArray(fc.recommended_product_ids) && fc.recommended_product_ids.length) {
+    params.push(fc.recommended_product_ids);
+    parts.push(`EXISTS (SELECT 1 FROM commerce.customer_product_reco r WHERE r.customer_id = p.member_id AND r.product_id = ANY($${params.length}::text[]))`);
+  }
   if (Array.isArray(fc.attribute_value_ids) && fc.attribute_value_ids.length) {
     params.push(fc.attribute_value_ids);
     parts.push(`EXISTS (SELECT 1 FROM app.profile_attribute_values pav JOIN app.attributes aa ON aa.id = pav.attribute_id AND aa.status='active' WHERE pav.entity_type='customer' AND pav.entity_id = p.member_id AND pav.attribute_value_id = ANY($${params.length}::uuid[]))`);

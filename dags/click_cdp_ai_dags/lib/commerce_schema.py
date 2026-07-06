@@ -204,6 +204,56 @@ ENTITIES = [
     "order", "order_line", "inventory_level", "refund", "refund_line",
 ]
 
+# Derived per-customer product replenishment predictions. Owned by the
+# build_product_predictions DAG (not landed from a platform), so it is kept OUT
+# of ENTITIES - commerce_landing must never DELETE+INSERT it. Mirrors the DDL in
+# server/sql/14_commerce.sql (keep in sync).
+DERIVED_DDL = {
+    "customer_replenishment": """
+        CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
+            company_id          uuid NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+            customer_id         text NOT NULL,
+            product_id          text,
+            product_name        text,
+            product_type        text,
+            last_order_date     timestamptz,
+            cycle_days          numeric,
+            cycle_spread        numeric,
+            predicted_next_date date,
+            days_until          int,
+            status              text,
+            confidence          text,
+            purchase_count      int,
+            is_cohort_estimate  boolean DEFAULT false,
+            computed_at         timestamptz DEFAULT NOW(),
+            PRIMARY KEY (company_id, customer_id, product_id)
+        )
+    """,
+    "customer_product_reco": """
+        CREATE TABLE IF NOT EXISTS commerce.customer_product_reco (
+            company_id          uuid NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+            customer_id         text NOT NULL,
+            product_id          text NOT NULL,
+            product_name        text,
+            product_type        text,
+            score               numeric,
+            method              text,
+            reason              text,
+            rank                int,
+            computed_at         timestamptz DEFAULT NOW(),
+            PRIMARY KEY (company_id, customer_id, product_id)
+        )
+    """,
+}
+
+DERIVED_INDEX_DDL = [
+    'CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id)',
+    'CREATE INDEX IF NOT EXISTS commerce_replen_status_idx ON commerce.customer_replenishment (company_id, status)',
+    'CREATE INDEX IF NOT EXISTS commerce_reco_company_cust_idx ON commerce.customer_product_reco (company_id, customer_id)',
+    'CREATE INDEX IF NOT EXISTS commerce_reco_product_idx ON commerce.customer_product_reco (company_id, product_id)',
+    'CREATE INDEX IF NOT EXISTS commerce_reco_customer_only_idx ON commerce.customer_product_reco (customer_id)',
+]
+
 # Tenant + lookup indexes (idempotent). The Node app reads commerce.* by
 # company_id; the per-entity DELETE scopes by (capsuite_ref, source_platform).
 INDEX_DDL = [
@@ -229,4 +279,18 @@ def ensure_tables(conn):
         for entity in ENTITIES:
             cur.execute(DDL[entity])
         for ddl in INDEX_DDL:
+            cur.execute(ddl)
+
+
+def ensure_derived_tables(conn):
+    """Create the derived (DAG-owned) commerce tables + indexes (idempotent).
+
+    Separate from ensure_tables so commerce_landing never touches these; the
+    build_product_predictions DAG calls this before its write-back.
+    """
+    with conn.cursor() as cur:
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS {COMMERCE_SCHEMA}')
+        for ddl in DERIVED_DDL.values():
+            cur.execute(ddl)
+        for ddl in DERIVED_INDEX_DDL:
             cur.execute(ddl)

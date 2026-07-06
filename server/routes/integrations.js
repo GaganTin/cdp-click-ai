@@ -4,6 +4,7 @@ import { authenticate, resolveCompanyId } from "../middleware/auth.js";
 import { runConnectionTest } from "../lib/integrationConnectors.js";
 import { processNextJob } from "../lib/integrationQueue.js";
 import { notifyCompany } from "../lib/notifications.js";
+import { triggerProductPredictions } from "../lib/productPredictionsTrigger.js";
 import { encryptConfig, decryptConfig, redactConfig } from "../lib/configCrypto.js";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -991,6 +992,26 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
             dedupeKey: `daily-sync:${integration_type}:completed:${day}`,
           });
         }
+
+        // Commerce platforms: the scheduled run refreshed commerce.* for every
+        // connected workspace, but (unlike a per-workspace manual sync) Node has
+        // NOT rebuilt their unified profiles. Do that for each now, then recompute
+        // replenishment predictions. Runs in the background so the webhook returns
+        // promptly and a rebuild hiccup never makes Airflow retry the daily run.
+        const COMMERCE_PLATFORM_TYPES = new Set(["shopify", "shopline", "odoo"]);
+        if (COMMERCE_PLATFORM_TYPES.has(integration_type) && typeof refreshCommerceProfiles === "function") {
+          const companyIds = rows.map((r) => r.company_id);
+          (async () => {
+            for (const cid of companyIds) {
+              try {
+                await refreshCommerceProfiles(pool, cid);
+                await triggerProductPredictions(pool, cid);
+              } catch (e) {
+                console.error(`[Integrations] scheduled profile/predictions rebuild for ${cid} (${integration_type}) failed:`, e.message);
+              }
+            }
+          })();
+        }
         return ok(res, { scheduled: true, updated: rows.length, status: "completed" });
       } catch (e) { return err(res, e.message, 500); }
     }
@@ -1065,9 +1086,14 @@ export function createIntegrationsRouter(pool, { refreshCommerceProfiles } = {})
       // must not make Airflow retry the webhook.
       const COMMERCE_PLATFORM_TYPES = new Set(["shopify", "shopline", "odoo"]);
       if (is_synced && COMMERCE_PLATFORM_TYPES.has(integration_type) && typeof refreshCommerceProfiles === "function") {
-        refreshCommerceProfiles(pool, company_id).catch((e) =>
-          console.error(`[Integrations] profile refresh after ${integration_type} sync failed:`, e.message)
-        );
+        // Chain predictions AFTER the profile build resolves so customer_profiles
+        // exist for the roll-up. Both steps fire-and-forget: a hiccup here must
+        // not make Airflow retry the webhook.
+        refreshCommerceProfiles(pool, company_id)
+          .then(() => triggerProductPredictions(pool, company_id, { jobId: job_id }))
+          .catch((e) =>
+            console.error(`[Integrations] profile refresh / predictions after ${integration_type} sync failed:`, e.message)
+          );
       }
 
       ok(res, { success: true });

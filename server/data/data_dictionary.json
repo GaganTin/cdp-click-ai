@@ -1065,6 +1065,47 @@
     ]
   },
   {
+    "table": "customer_replenishment",
+    "schema": "commerce",
+    "use_case": "Per-customer product REPLENISHMENT predictions (when each customer is likely to reorder a product they already buy), computed by the build_product_predictions DAG from purchase cadence. USE THIS to answer 'who is due/overdue to reorder', 'when will customer X reorder product Y', and reorder-campaign audiences. These are model predictions derived from REAL orders - report them as predictions and NEVER invent a reorder date/status not present in these rows; if a customer/product has no row, say there is no prediction. ALWAYS filter by company_id.",
+    "granularity": "One row per (customer, replenishable product) per workspace (PK: company_id, customer_id, product_id)",
+    "fields": [
+      { "name": "company_id", "type": "uuid", "description": "Workspace (tenant) id - ALWAYS filter by this" },
+      { "name": "customer_id", "type": "string", "description": "Unified customer id (= app.customer_profiles.member_id)" },
+      { "name": "product_id", "type": "string", "description": "Product (joins commerce.product)" },
+      { "name": "product_name", "type": "string", "description": "Product name at prediction time" },
+      { "name": "product_type", "type": "string", "description": "Product type/category" },
+      { "name": "last_order_date", "type": "timestamptz", "description": "Most recent purchase of this product by this customer" },
+      { "name": "cycle_days", "type": "numeric", "description": "Predicted reorder cycle: the customer's median gap between purchases of this product (or a cohort estimate)", "is_derived": true },
+      { "name": "cycle_spread", "type": "numeric", "description": "Robust spread (variability) of that cadence, in days", "is_derived": true },
+      { "name": "predicted_next_date", "type": "date", "description": "Predicted next reorder date (last_order_date + cycle_days)", "is_derived": true },
+      { "name": "days_until", "type": "int", "description": "Days from today to predicted_next_date (negative = past due)", "is_derived": true },
+      { "name": "status", "type": "string", "description": "Reorder bucket relative to the customer's own cadence: not_due | due_soon | due_now | overdue", "is_derived": true },
+      { "name": "confidence", "type": "string", "description": "low | medium | high (high = tighter-than-typical cadence; low = single-purchase cohort estimate)", "is_derived": true },
+      { "name": "purchase_count", "type": "int", "description": "Distinct purchase days of this product by this customer" },
+      { "name": "is_cohort_estimate", "type": "boolean", "description": "True when the cycle came from the product-type cohort (customer has only one purchase), not the customer's own history", "is_derived": true },
+      { "name": "computed_at", "type": "timestamptz", "description": "When this prediction was last computed" }
+    ]
+  },
+  {
+    "table": "customer_product_reco",
+    "schema": "commerce",
+    "use_case": "Per-customer product RECOMMENDATIONS (cross-sell / discovery: products a customer does NOT yet own that they are likely to buy), computed by the build_product_predictions DAG via item-item co-purchase (bought by similar customers) + category popularity. USE THIS to answer 'what should we recommend to customer X', 'who should we push product Y to' (filter product_id), and ranked cross-sell lists. These are model recommendations from REAL co-purchase data - report them as recommendations and NEVER invent a recommended product not present in these rows. ALWAYS filter by company_id.",
+    "granularity": "One row per (customer, recommended product) per workspace, ranked (PK: company_id, customer_id, product_id)",
+    "fields": [
+      { "name": "company_id", "type": "uuid", "description": "Workspace (tenant) id - ALWAYS filter by this" },
+      { "name": "customer_id", "type": "string", "description": "Unified customer id (= app.customer_profiles.member_id)" },
+      { "name": "product_id", "type": "string", "description": "Recommended product (joins commerce.product); the customer does not already own it" },
+      { "name": "product_name", "type": "string", "description": "Recommended product name" },
+      { "name": "product_type", "type": "string", "description": "Product type/category" },
+      { "name": "score", "type": "numeric", "description": "Ranking score (method-relative; higher = stronger)", "is_derived": true },
+      { "name": "method", "type": "string", "description": "How it was derived: copurchase (bought by similar customers) | category (popular in a category they buy)", "is_derived": true },
+      { "name": "reason", "type": "string", "description": "Human-readable why-recommended" },
+      { "name": "rank", "type": "int", "description": "1 = strongest recommendation for the customer" },
+      { "name": "computed_at", "type": "timestamptz", "description": "When these recommendations were last computed" }
+    ]
+  },
+  {
     "table": "customer_profiles",
     "schema": "app",
     "use_case": "app.customer_profiles - the unified golden-record member list. One row per resolved person per workspace (company_id), stitched from every membership source (manual.membership + commerce.customer). USE THIS for all audience analytics: it pre-aggregates each member's GA web activity, commerce spend, and offline events so you rarely need to join. ALWAYS filter by company_id.",
@@ -1451,7 +1492,15 @@
         "type": "timestamp",
         "description": "When the aggregated caches on this row were last rebuilt.",
         "is_derived": true
-      }
+      },
+      { "name": "replenishment_status", "type": "string", "description": "Most-urgent reorder bucket across the member's due products: not_due | due_soon | due_now | overdue (rollup of commerce.customer_replenishment).", "is_derived": true },
+      { "name": "replenishment_due_count", "type": "int", "description": "Number of products currently due_soon/due_now/overdue to reorder.", "is_derived": true },
+      { "name": "next_replenishment_date", "type": "date", "description": "Soonest predicted reorder date across the member's products.", "is_derived": true },
+      { "name": "days_to_replenishment", "type": "int", "description": "Days until next_replenishment_date (negative = overdue).", "is_derived": true },
+      { "name": "reco_count", "type": "int", "description": "Number of recommended (cross-sell) products for the member (rollup of commerce.customer_product_reco).", "is_derived": true },
+      { "name": "top_recommended_product_id", "type": "string", "description": "Highest-ranked recommended product id.", "is_derived": true },
+      { "name": "top_recommended_product", "type": "string", "description": "Highest-ranked recommended product name (display cache).", "is_derived": true },
+      { "name": "top_recommended_category", "type": "string", "description": "Most common product_type among the member's recommendations.", "is_derived": true }
     ]
   },
   {

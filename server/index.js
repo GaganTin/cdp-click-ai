@@ -32,6 +32,7 @@ import { createPopupRouter } from "./routes/popup.js";
 import { createUtmRouter } from "./routes/utm.js";
 import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } from "./middleware/auth.js";
 import { resolveSegmentEntities, countSegmentEntities, customerWhere, anonWhere } from "./lib/attributeManual.js";
+import { triggerProductPredictions } from "./lib/productPredictionsTrigger.js";
 import { recordAiUsage, enforceAiQuota } from "./lib/aiUsage.js";
 
 dotenv.config();
@@ -664,6 +665,16 @@ commerce - Unified eCommerce data synced from the connected store platforms
   source_platform). Tables: commerce.customer, commerce."order" (quote it -
   "order" is a reserved word), commerce.order_line, commerce.product,
   commerce.refund, commerce.refund_line, commerce.inventory_level.
+  Product PREDICTIONS (model output, computed daily from real orders):
+    commerce.customer_replenishment - per (customer, product) reorder predictions
+      (status not_due|due_soon|due_now|overdue, predicted_next_date, days_until,
+      cycle_days). Answer "who is due/overdue to reorder", "when will X reorder Y".
+    commerce.customer_product_reco - per (customer, recommended product) cross-sell
+      list, ranked (method copurchase|category, reason, rank). Answer "what to
+      recommend to X", "who should we push product Y to" (filter product_id).
+    These are PREDICTIONS from real data - query them and report exactly what the
+    rows say; NEVER invent a reorder date, status, or recommended product. If there
+    is no row for a customer/product, say there is no prediction yet.
   All company-scoped: ALWAYS filter by company_id.
 manual - CSV-uploaded data (manual.membership, manual.sale, manual.sale_order_line, manual.product)
 app - Application data (customer_profiles, anonymous_profiles, profile_identities, campaigns, segments, saved_reports, pinned_charts)
@@ -696,6 +707,11 @@ APP SCHEMA (query just like other tables):
       ga_top_campaign         - most common campaign name
       seminar_count (int)     - number of seminar/event registrations (0 = never attended)
       seminars (jsonb)        - array of {event_name, event_date, action}; expand with jsonb_array_elements(seminars)
+      replenishment_status    - most-urgent reorder bucket: not_due|due_soon|due_now|overdue (rollup of commerce.customer_replenishment)
+      replenishment_due_count (int) - # products currently due to reorder (due_soon/due_now/overdue)
+      next_replenishment_date (date), days_to_replenishment (int, negative = overdue)
+      reco_count (int)        - # recommended cross-sell products (rollup of commerce.customer_product_reco)
+      top_recommended_product_id / top_recommended_product / top_recommended_category
     Also carries: ga_first_visits, ga_form_starts, ga_scroll_events; array columns
       ga_visitor_ids / ga_source_mediums / ga_campaigns / ga_events_list / ga_pages_visited;
       and attribute_count / attributes (jsonb). There is NO last_activity_date column -
@@ -705,6 +721,8 @@ APP SCHEMA (query just like other tables):
       "highly active" → ga_sessions >= 5
       "seminar attendee" → seminar_count > 0
       "email eligible" → is_opt_in_email = true AND primary_email IS NOT NULL
+      "due to reorder" → replenishment_status IN ('due_soon','due_now','overdue')  (per-product detail: commerce.customer_replenishment)
+      "has recommendations" → reco_count > 0  (per-product detail: commerce.customer_product_reco)
     For audience counts: SELECT COUNT(*) FROM app.customer_profiles WHERE [conditions]
     ★ The AVAILABLE TABLES section below (and describe_table) carry the AUTHORITATIVE,
       full column list for app.customer_profiles, app.segments, app.campaigns and
@@ -2281,7 +2299,7 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
   try {
     const scope = "company_id = $1";
     const webScope = `${scope} AND %COL% IS NOT NULL AND %COL% NOT IN ('', '(not set)')`;
-    const [channels, educations, ages, genders, nationalities, languages, employments, incomes, memberTypes, prefChannels, sourceMediums, sources, mediums, campaigns] = await Promise.all([
+    const [channels, educations, ages, genders, nationalities, languages, employments, incomes, memberTypes, prefChannels, sourceMediums, sources, mediums, campaigns, recoCategories] = await Promise.all([
       pool.query(`SELECT DISTINCT member_reg_channel FROM app.customer_profiles WHERE ${scope} AND member_reg_channel IS NOT NULL ORDER BY member_reg_channel`, [companyId]),
       pool.query(`SELECT DISTINCT education_level FROM app.customer_profiles WHERE ${scope} AND education_level IS NOT NULL ORDER BY education_level`, [companyId]),
       pool.query(`SELECT DISTINCT age_group FROM app.customer_profiles WHERE ${scope} AND age_group IS NOT NULL ORDER BY age_group`, [companyId]),
@@ -2296,6 +2314,7 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
       pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(ga_top_source_medium, ' / ', 1)) AS s FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_source_medium")} ORDER BY s`, [companyId]),
       pool.query(`SELECT DISTINCT TRIM(SPLIT_PART(ga_top_source_medium, ' / ', 2)) AS m FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_source_medium")} ORDER BY m`, [companyId]),
       pool.query(`SELECT DISTINCT ga_top_campaign FROM app.customer_profiles WHERE ${webScope.replace(/%COL%/g, "ga_top_campaign")} ORDER BY ga_top_campaign`, [companyId]),
+      pool.query(`SELECT DISTINCT top_recommended_category FROM app.customer_profiles WHERE ${scope} AND top_recommended_category IS NOT NULL AND top_recommended_category <> '' ORDER BY top_recommended_category`, [companyId]),
     ]);
     res.json({
       reg_channels: channels.rows.map(r => r.member_reg_channel),
@@ -2312,6 +2331,10 @@ app.get("/api/profiles/customer-filters", authenticate, async (req, res) => {
       sources: sources.rows.map(r => r.s).filter(s => s && s !== '(not set)'),
       mediums: mediums.rows.map(r => r.m).filter(m => m && m !== '(not set)'),
       campaigns: campaigns.rows.map(r => r.ga_top_campaign),
+      // Fixed buckets for the replenishment prediction rollup (most-urgent first).
+      replenishment_statuses: ["overdue", "due_now", "due_soon", "not_due"],
+      // Distinct recommended categories present on profiles (for reco targeting).
+      top_recommended_categories: recoCategories.rows.map(r => r.top_recommended_category),
     });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -3175,6 +3198,13 @@ app.post("/api/commerce/import", authenticate, upload.single("file"), async (req
     // 6. Rebuild profiles/identities/aggregates from the new commerce rows.
     await refreshCommerceProfiles(pool, companyId);
 
+    // 7. Now that commerce.* is fresh and customer_profiles exist, recompute
+    //    replenishment predictions for this workspace. Fire-and-forget + no-op
+    //    without Airflow: a trigger hiccup must not fail the import.
+    triggerProductPredictions(pool, companyId, { jobId: batchId }).catch((e) =>
+      console.error(`[commerce import] predictions trigger failed:`, e.message)
+    );
+
     res.json({
       ok: true,
       imported,
@@ -3270,6 +3300,89 @@ app.get("/api/profiles/customers/:memberId/transactions", authenticate, async (r
       [memberId, companyId]
     );
     res.json({ orders: rows, summary: sum[0] });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: a customer's product replenishment predictions ─────────────────
+// Reads the DAG-computed commerce.customer_replenishment detail (median inter-
+// purchase cadence). Ordered most-urgent first so the card leads with what's due.
+app.get("/api/profiles/customers/:memberId/replenishment", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const memberId = req.params.memberId;
+    const { rows } = await pool.query(
+      `SELECT product_id, product_name, product_type, last_order_date,
+              cycle_days, cycle_spread, predicted_next_date, days_until, status, confidence,
+              purchase_count, is_cohort_estimate
+         FROM commerce.customer_replenishment
+        WHERE company_id = $2 AND customer_id = $1
+        ORDER BY CASE status WHEN 'overdue' THEN 0 WHEN 'due_now' THEN 1
+                             WHEN 'due_soon' THEN 2 ELSE 3 END,
+                 days_until ASC NULLS LAST
+        LIMIT 50`,
+      [memberId, companyId]
+    );
+    const summary = {
+      due_count: rows.filter((r) => ["due_soon", "due_now", "overdue"].includes(r.status)).length,
+      total: rows.length,
+      next_date: rows.length ? rows.reduce((m, r) => (r.predicted_next_date && (!m || r.predicted_next_date < m) ? r.predicted_next_date : m), null) : null,
+    };
+    res.json({ items: rows, summary });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Profiles: a customer's product recommendations (cross-sell) ──────────────
+// Reads the DAG-computed commerce.customer_product_reco detail (item-item
+// co-purchase + category fallback), ranked strongest first.
+app.get("/api/profiles/customers/:memberId/recommendations", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const memberId = req.params.memberId;
+    const { rows } = await pool.query(
+      `SELECT product_id, product_name, product_type, score, method, reason, rank
+         FROM commerce.customer_product_reco
+        WHERE company_id = $2 AND customer_id = $1
+        ORDER BY rank ASC
+        LIMIT 25`,
+      [memberId, companyId]
+    );
+    res.json({ items: rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Commerce: products that are recommended to at least one customer ──────────
+// Powers the Segments "push product X" picker: each row is a product you can
+// build a cross-sell audience for, with `reach` = how many customers it's
+// recommended to (so an empty-audience pick is obvious up front).
+app.get("/api/commerce/recommended-products", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.product_id,
+              COALESCE(MAX(r.product_name), MAX(p.product_name)) AS product_name,
+              MAX(r.product_type) AS product_type,
+              COUNT(DISTINCT r.customer_id)::int AS reach
+         FROM commerce.customer_product_reco r
+         LEFT JOIN commerce.product p ON p.product_id = r.product_id AND p.company_id = r.company_id
+        WHERE r.company_id = $1
+        GROUP BY r.product_id
+        ORDER BY reach DESC, product_name ASC
+        LIMIT 2000`,
+      [companyId]
+    );
+    res.json({ products: rows });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
   }

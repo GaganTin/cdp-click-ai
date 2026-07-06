@@ -151,6 +151,8 @@ const CUST_CRITERIA_EMPTY = {
   is_opt_in_email: "", opt_in_sms: "", is_subscriber: "",
   has_ga_activity: "", min_ga_sessions: "", max_ga_sessions: "", has_seminars: "", has_attributes: "",
   has_transactions: "", min_orders: "", max_orders: "", min_spend: "", max_spend: "", ordered_within: "",
+  has_due_replenishment: "", replenishment_status: [], replenishment_within: "",
+  has_recommendations: "", top_recommended_category: [], recommended_product_ids: [],
   source: [], medium: [], campaign: [],
   min_page_views: "", max_page_views: "", min_sessions: "", max_sessions: "", min_engagement: "", max_engagement: "",
   visited_within: "", has_form_complete: "",
@@ -198,6 +200,12 @@ function criteriaToChips(criteria) {
     has_attributes:     () => `has study intentions`,
     has_transactions:   () => `has purchases`,
     ordered_within:     v => `ordered in last ${v} days`,
+    has_due_replenishment: () => `due to reorder`,
+    replenishment_status:  v => `replenishment: ${Array.isArray(v) ? v.join(", ") : v}`,
+    replenishment_within:  v => `reorder due within ${v} days`,
+    has_recommendations:      () => `has recommendations`,
+    top_recommended_category: v => `recommended category: ${Array.isArray(v) ? v.join(", ") : v}`,
+    recommended_product_ids:  v => `push ${v.length} product${v.length > 1 ? "s" : ""}`,
     source_medium:      v => `source/medium: ${v}`,
     source:             v => `source: ${v}`,
     medium:             v => `medium: ${v}`,
@@ -270,6 +278,19 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
     queryFn: () => appClient.profiles.anonymousFilters(),
     enabled: !isCustomer,
   });
+  // Products recommended to ≥1 customer, for the "push product X" audience picker.
+  const { data: recoProductsData } = useQuery({
+    queryKey: ["reco-products"],
+    queryFn: () => appClient.commerce.recommendedProducts(),
+    enabled: isCustomer,
+  });
+  const recoProductOpts = useMemo(
+    () => (recoProductsData?.products || []).map((p) => ({
+      value: p.product_id,
+      label: `${p.product_name || p.product_id}${p.reach ? ` (${p.reach})` : ""}`,
+    })),
+    [recoProductsData]
+  );
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setCrit = (k, v) => setCriteria(c => ({ ...c, [k]: v }));
@@ -398,6 +419,16 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
                   <RangeCriteriaRow label={t("Orders")} field="orders" criteria={criteria} setCrit={setCrit} placeholder="e.g. 2" />
                   <RangeCriteriaRow label={t("Spend")}  field="spend"  criteria={criteria} setCrit={setCrit} placeholder="e.g. 1000" />
                   <NumberCriteriaRow label={t("Ordered within (days)")} value={criteria.ordered_within} onChange={v => setCrit("ordered_within", v)} placeholder="e.g. 90" />
+                </CriteriaGroup>
+                <CriteriaGroup title={t("Replenishment")} activeCount={countActive(["has_due_replenishment","replenishment_status","replenishment_within"])}>
+                  <CriteriaRow label={t("Due to reorder")} value={criteria.has_due_replenishment} onChange={v => setCrit("has_due_replenishment", v)} opts={["true"]} />
+                  <MultiCriteriaRow label={t("Status")} value={criteria.replenishment_status} onChange={v => setCrit("replenishment_status", v)} opts={custFilters?.replenishment_statuses || []} />
+                  <NumberCriteriaRow label={t("Reorder due within (days)")} value={criteria.replenishment_within} onChange={v => setCrit("replenishment_within", v)} placeholder="e.g. 14" />
+                </CriteriaGroup>
+                <CriteriaGroup title={t("Recommendations")} activeCount={countActive(["has_recommendations","top_recommended_category","recommended_product_ids"])}>
+                  <CriteriaRow label={t("Has recommendations")} value={criteria.has_recommendations} onChange={v => setCrit("has_recommendations", v)} opts={["true"]} />
+                  <MultiCriteriaRow label={t("Top category")} value={criteria.top_recommended_category} onChange={v => setCrit("top_recommended_category", v)} opts={custFilters?.top_recommended_categories || []} />
+                  <MultiCriteriaRow label={t("Recommended product")} value={criteria.recommended_product_ids} onChange={v => setCrit("recommended_product_ids", v)} opts={recoProductOpts} />
                 </CriteriaGroup>
               </>
             ) : (

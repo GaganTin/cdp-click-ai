@@ -53,6 +53,12 @@ const RULE_FIELDS = {
     order_count:        { expr: ORDER_COUNT, type: "int",     label: "Order count",  group: "Purchases" },
     total_spend:        { expr: ORDER_SPEND, type: "int",     label: "Total spend",  group: "Purchases" },
     last_order:         { expr: ORDER_LAST,  type: "recency", label: "Last order",   group: "Purchases" },
+    // Predictions (replenishment + recommendation rollups; build_product_predictions DAG)
+    replenishment_status:     { col: "replenishment_status",     type: "enum", label: "Replenishment status",     group: "Predictions", options: "replenishment_statuses" },
+    replenishment_due_count:  { col: "replenishment_due_count",  type: "int",  label: "Products due to reorder",  group: "Predictions" },
+    days_to_replenishment:    { col: "days_to_replenishment",    type: "int",  label: "Days to next reorder",     group: "Predictions" },
+    top_recommended_category: { col: "top_recommended_category", type: "enum", label: "Top recommended category", group: "Predictions", options: "top_recommended_categories" },
+    reco_count:               { col: "reco_count",               type: "int",  label: "Recommended products",     group: "Predictions" },
     // Email engagement (EDM)
     edm:                { kind: "edm",     type: "ref",     label: "Email campaign", group: "Email", optionsSource: "edm",
                           ops: [["received", "received"], ["not_received", "did not receive"], ["opened", "opened"], ["clicked", "clicked"]] },
