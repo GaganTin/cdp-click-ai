@@ -3360,6 +3360,34 @@ app.get("/api/profiles/customers/:memberId/recommendations", authenticate, async
   }
 });
 
+// ── Commerce: products currently DUE to reorder for at least one customer ─────
+// Powers the Segments "due to reorder product X" picker: each row is a product
+// you can build a reorder-reminder audience for, with `reach` = how many
+// customers it is currently due/overdue for.
+app.get("/api/commerce/replenishment-products", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  try {
+    const { rows } = await pool.query(
+      `SELECT r.product_id,
+              COALESCE(MAX(r.product_name), MAX(p.product_name)) AS product_name,
+              MAX(r.product_type) AS product_type,
+              COUNT(DISTINCT r.customer_id)::int AS reach
+         FROM commerce.customer_replenishment r
+         LEFT JOIN commerce.product p ON p.product_id = r.product_id AND p.company_id = r.company_id
+        WHERE r.company_id = $1 AND r.status IN ('due_soon','due_now','overdue')
+        GROUP BY r.product_id
+        ORDER BY reach DESC, product_name ASC
+        LIMIT 2000`,
+      [companyId]
+    );
+    res.json({ products: rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 // ── Commerce: products that are recommended to at least one customer ──────────
 // Powers the Segments "push product X" picker: each row is a product you can
 // build a cross-sell audience for, with `reach` = how many customers it's

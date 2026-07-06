@@ -171,6 +171,13 @@ export function customerWhere(fc) {
     params.push(Number(fc.replenishment_within));
     parts.push(`p.days_to_replenishment IS NOT NULL AND p.days_to_replenishment <= $${params.length}`);
   }
+  // "Due to reorder product X" audience: customers for whom a specific product is
+  // currently due/overdue (the reorder-reminder list). Hits the detail table
+  // (keyed by customer_id = member_id) so it stays live across refreshes.
+  if (Array.isArray(fc.replenishment_product_ids) && fc.replenishment_product_ids.length) {
+    params.push(fc.replenishment_product_ids);
+    parts.push(`EXISTS (SELECT 1 FROM commerce.customer_replenishment r WHERE r.customer_id = p.member_id AND r.product_id = ANY($${params.length}::text[]) AND r.status IN ('due_soon','due_now','overdue'))`);
+  }
   // Recommendation (cross-sell) criteria - read the rollup cache, except the
   // "recommended a specific product" membership which hits the detail table
   // (keyed by customer_id = member_id), so "push product X" audiences stay live.

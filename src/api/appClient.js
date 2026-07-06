@@ -434,6 +434,9 @@ export const appClient = {
     async dismissMergeCandidate(id) { return request(`/profiles/merge-candidates/${encodeURIComponent(id)}/dismiss`, { method: "POST" }); },
   },
   commerce: {
+    // Products currently due to reorder for ≥1 customer (Segments "due to reorder
+    // product X" picker), each with its reach (audience size).
+    async replenishmentProducts() { return request("/commerce/replenishment-products"); },
     // Products that are recommended to at least one customer (for the Segments
     // "push product X" picker), each with its reach (audience size).
     async recommendedProducts() { return request("/commerce/recommended-products"); },

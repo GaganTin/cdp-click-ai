@@ -249,6 +249,7 @@ DERIVED_DDL = {
 DERIVED_INDEX_DDL = [
     'CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id)',
     'CREATE INDEX IF NOT EXISTS commerce_replen_status_idx ON commerce.customer_replenishment (company_id, status)',
+    'CREATE INDEX IF NOT EXISTS commerce_replen_customer_only_idx ON commerce.customer_replenishment (customer_id)',
     'CREATE INDEX IF NOT EXISTS commerce_reco_company_cust_idx ON commerce.customer_product_reco (company_id, customer_id)',
     'CREATE INDEX IF NOT EXISTS commerce_reco_product_idx ON commerce.customer_product_reco (company_id, product_id)',
     'CREATE INDEX IF NOT EXISTS commerce_reco_customer_only_idx ON commerce.customer_product_reco (customer_id)',

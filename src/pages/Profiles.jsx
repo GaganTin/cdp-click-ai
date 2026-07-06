@@ -1063,6 +1063,42 @@ function criteriaToChips(crit) {
     .map(([k, v]) => labels[k]?.(v) || `${k}: ${v}`);
 }
 
+// Tab-aware "how it works" guide props. Mirrors the per-tab guides on Attributes:
+// the Customers tab keeps the general overview, the Anonymous tab gets a
+// walkthrough tailored to unidentified GA visitors.
+function profilesGuide(t, source) {
+  if (source === "anonymous") {
+    return {
+      storageKey: "guide.profiles.anonymous",
+      title: t("How anonymous profiles work"),
+      intro: t("An anonymous profile is a visitor Meritma has seen on your site but can't yet name - built from Google Analytics activity like page views, sessions, and the content they engage with. The moment someone identifies themselves (a form, login, or purchase), their anonymous history is stitched onto their customer profile automatically."),
+      stepsTitle: t("Working with anonymous visitors, step by step"),
+      steps: [
+        { title: t("Connect Google Analytics"), desc: t("Anonymous profiles are built from GA activity. In Integrations, connect GA and complete the CapSuite APID/SID custom dimensions so Meritma can see each visitor - profiles start appearing within a few days.") },
+        { title: t("Browse & filter visitors"), desc: t("Use search and filters to narrow by activity - sessions, page views, last seen - or by any Applied Attributes the AI inferred from the pages they viewed.") },
+        { title: t("Open a profile"), desc: t("Click a card to see a visitor's full on-site journey: the pages and content they engaged with, their interests, and whether they've been identified yet.") },
+        { title: t("Turn them into an audience"), desc: t("Save the current filters as an anonymous segment to target these visitors with pop ups - the fastest way to convert unknown traffic.") },
+      ],
+      uses: [
+        { icon: Eye, title: t("See on-site behaviour"), desc: t("Understand what an unknown visitor viewed and cares about.") },
+        { icon: Users, title: t("Build anonymous segments"), desc: t("Group visitors by behaviour to target with pop ups.") },
+        { icon: GitMerge, title: t("Watch them identify"), desc: t("Follow anonymous visitors as they turn into known customers.") },
+      ],
+      footer: t("Anonymous profiles are matched by on-site behaviour, not personal details - the moment a visitor identifies, their history merges into a single customer profile."),
+    };
+  }
+  return {
+    storageKey: "guide.profiles",
+    title: t("How profiles work"),
+    intro: t("A profile is a single, unified view of one person - every visit, order, email, and attribute stitched together from all your sources. Meritma builds these automatically as your data flows in, even linking anonymous visitors to customers once they identify themselves."),
+    uses: [
+      { icon: Eye, title: t("Understand a person"), desc: t("See a customer's full history and interests in one place.") },
+      { icon: Users, title: t("Build segments"), desc: t("Group profiles into audiences to target with pop ups and email.") },
+      { icon: GitMerge, title: t("Follow the journey"), desc: t("Watch anonymous visitors turn into known customers over time.") },
+    ],
+  };
+}
+
 export default function Profiles() {
   const { t } = usePreferences();
   const { canWrite } = useRole();
@@ -1625,16 +1661,7 @@ export default function Profiles() {
 
         {/* Always-available guide so teammates who join later can still learn the page. */}
         {profiles.length > 0 && (
-          <PageGuide
-            storageKey="guide.profiles"
-            title={t("How profiles work")}
-            intro={t("A profile is a single, unified view of one person - every visit, order, email, and attribute stitched together from all your sources. Meritma builds these automatically as your data flows in, even linking anonymous visitors to customers once they identify themselves.")}
-            uses={[
-              { icon: Eye, title: t("Understand a person"), desc: t("See a customer's full history and interests in one place.") },
-              { icon: Users, title: t("Build segments"), desc: t("Group profiles into audiences to target with pop ups and email.") },
-              { icon: GitMerge, title: t("Follow the journey"), desc: t("Watch anonymous visitors turn into known customers over time.") },
-            ]}
-          />
+          <PageGuide {...profilesGuide(t, activeTab)} />
         )}
 
         {/* Grid */}

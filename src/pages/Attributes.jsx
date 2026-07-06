@@ -24,6 +24,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MultiSelect } from "@/components/ui/multi-select";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
+import { cn } from "@/lib/utils";
+import { replenishmentStatusOptions } from "@/lib/predictionLabels";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -2330,26 +2334,79 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
 }
 
 // ── Rule attribute builder ────────────────────────────────────
-function EnumMulti({ options, value, onChange }) {
+// Searchable single-select (a combobox). `options` are strings or {value,label}.
+function SearchSelect({ options, value, onChange, placeholder = "Select…", searchPlaceholder = "Search…", className }) {
   const { t } = usePreferences();
-  const sel = Array.isArray(value) ? value : [];
-  const toggle = (o) => onChange(sel.includes(o) ? sel.filter((x) => x !== o) : [...sel, o]);
+  const [open, setOpen] = useState(false);
+  const norm = (options || []).map((o) => (typeof o === "string" ? { value: o, label: o } : o));
+  const label = value != null ? (norm.find((o) => o.value === value)?.label ?? String(value)) : null;
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button className="h-8 px-2 text-xs border border-input rounded-md bg-background min-w-[8rem] max-w-[16rem] text-left truncate">
-          {sel.length ? sel.join(", ") : <span className="text-muted-foreground">{t("Select…")}</span>}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn("flex items-center justify-between gap-1 h-8 px-2 text-xs bg-background border border-input rounded-md text-foreground", className)}
+        >
+          <span className={cn("truncate", value == null && "text-muted-foreground")}>{label || t(placeholder)}</span>
+          <ChevronDown className="w-3.5 h-3.5 opacity-50 flex-shrink-0" />
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-64 overflow-auto">
-        {options.length === 0 && <p className="text-[11px] text-muted-foreground px-2 py-1">{t("No values found")}</p>}
-        {options.map((o) => (
-          <DropdownMenuItem key={o} onSelect={(e) => e.preventDefault()} onClick={() => toggle(o)}>
-            <span className="mr-2">{sel.includes(o) ? "☑" : "☐"}</span>{o}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverTrigger>
+      <PopoverContent data-multiselect-popover="" align="start" className="min-w-[220px] p-0">
+        <Command>
+          <CommandInput placeholder={t(searchPlaceholder)} className="h-9 text-xs" />
+          <CommandList>
+            <CommandEmpty className="py-4 text-center text-xs">{t("No matches.")}</CommandEmpty>
+            <CommandGroup>
+              {norm.map((o) => (
+                <CommandItem key={o.value} value={o.label} onSelect={() => { onChange(o.value); setOpen(false); }} className="gap-2 cursor-pointer text-xs">
+                  <span className="truncate">{o.label}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Attribute-value condition: pick an ATTRIBUTE first (searchable), then multi-select
+// its VALUES (searchable). Stores the selected value ids in `value` (one attribute
+// per condition - add another condition for a second attribute). `attributes` is the
+// grouped [{ id, name, values: [{ id, value, profile_count }] }] list.
+function AttributeValuePicker({ attributes, value, onChange }) {
+  const { t } = usePreferences();
+  const list = attributes || [];
+  const sel = Array.isArray(value) ? value : [];
+  // The attribute currently in play = the one owning the selected value ids, or a
+  // locally-picked one (so the value list appears before any value is chosen).
+  const derivedAttrId = list.find((a) => (a.values || []).some((v) => sel.includes(v.id)))?.id || null;
+  const [pickedAttrId, setPickedAttrId] = useState(derivedAttrId);
+  // Sync to the owning attribute once it's known (options load async; the row may
+  // be reused for another condition). Only when non-null, so a freshly-picked
+  // attribute with no values chosen yet doesn't collapse.
+  useEffect(() => { if (derivedAttrId) setPickedAttrId(derivedAttrId); }, [derivedAttrId]);
+  const attrId = pickedAttrId || derivedAttrId;
+  const attr = list.find((a) => a.id === attrId) || null;
+  const attrOpts = list.map((a) => ({ value: a.id, label: a.name }));
+  const valueOpts = (attr?.values || []).map((v) => ({ value: v.id, label: `${v.value}${v.profile_count ? ` (${v.profile_count})` : ""}` }));
+  const selectAttr = (id) => {
+    setPickedAttrId(id);
+    const a = list.find((x) => x.id === id);
+    // Keep only value ids that belong to the newly chosen attribute (switching
+    // attributes clears the old selection - one attribute per condition).
+    onChange(sel.filter((vid) => (a?.values || []).some((v) => v.id === vid)));
+  };
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <SearchSelect options={attrOpts} value={attrId} onChange={selectAttr}
+        placeholder="Attribute…" searchPlaceholder="Search attributes…" className="min-w-[9rem] max-w-[13rem]" />
+      {attr && (
+        <MultiSelect options={valueOpts} value={sel} onChange={onChange}
+          placeholder={t("Values…")} searchPlaceholder={t("Search values…")}
+          emptyText={t("No values.")} className="w-auto min-w-[10rem] max-w-[16rem] flex-shrink-0" />
+      )}
+    </div>
   );
 }
 
@@ -2379,7 +2436,7 @@ function RefMulti({ options, value, onChange }) {
   );
 }
 
-function ConditionRow({ cond, fieldDefs, optsFor, refOptionsFor, onChange, onRemove, canRemove }) {
+function ConditionRow({ cond, fieldDefs, optsFor, refOptionsFor, attributeOptions, onChange, onRemove, canRemove }) {
   const { t } = usePreferences();
   const def = fieldDefs.find((f) => f.field === cond.field);
   const ops = def?.operators || [];
@@ -2430,7 +2487,14 @@ function ConditionRow({ cond, fieldDefs, optsFor, refOptionsFor, onChange, onRem
           <span className="text-[11px] text-muted-foreground">{t("days")}</span>
         </div>
       )}
-      {def?.type === "enum" && <EnumMulti options={optsFor(def.options)} value={cond.value} onChange={(v) => onChange({ value: v })} />}
+      {def?.type === "enum" && (
+        <MultiSelect
+          options={def.options === "replenishment_statuses" ? replenishmentStatusOptions(optsFor(def.options)) : optsFor(def.options)}
+          value={Array.isArray(cond.value) ? cond.value : []}
+          onChange={(v) => onChange({ value: v })}
+          placeholder={t("Select…")} searchPlaceholder={t("Search…")} emptyText={t("No values found")}
+          className="w-auto min-w-[9rem] max-w-[16rem] flex-shrink-0" />
+      )}
       {def?.type === "ref" && (
         <Select value={cond.value || ""} onValueChange={(v) => onChange({ value: v })}>
           <SelectTrigger className="h-8 min-w-[12rem] max-w-[18rem] text-xs"><SelectValue placeholder={t("Select…")} /></SelectTrigger>
@@ -2441,7 +2505,11 @@ function ConditionRow({ cond, fieldDefs, optsFor, refOptionsFor, onChange, onRem
           </SelectContent>
         </Select>
       )}
-      {def?.type === "refmulti" && <RefMulti options={refOptionsFor(def.optionsSource)} value={cond.value} onChange={(v) => onChange({ value: v })} />}
+      {def?.type === "refmulti" && (
+        def.optionsSource === "attribute"
+          ? <AttributeValuePicker attributes={attributeOptions} value={cond.value} onChange={(v) => onChange({ value: v })} />
+          : <RefMulti options={refOptionsFor(def.optionsSource)} value={cond.value} onChange={(v) => onChange({ value: v })} />
+      )}
       {canRemove && <button onClick={onRemove} className="text-muted-foreground hover:text-destructive"><X className="w-3.5 h-3.5" /></button>}
     </div>
   );
@@ -2465,7 +2533,7 @@ const normalizeRule = (r) => {
 };
 
 // One condition group: an AND/OR of conditions, removable when there's > 1 group.
-function GroupBlock({ group, fieldDefs, optsFor, refOptionsFor, onChange, onRemove, canRemove }) {
+function GroupBlock({ group, fieldDefs, optsFor, refOptionsFor, attributeOptions, onChange, onRemove, canRemove }) {
   const { t } = usePreferences();
   const setCond = (i, patch) => onChange({ ...group, conditions: group.conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   return (
@@ -2480,7 +2548,7 @@ function GroupBlock({ group, fieldDefs, optsFor, refOptionsFor, onChange, onRemo
       </div>
       <div className="space-y-1.5">
         {group.conditions.map((c, i) => (
-          <ConditionRow key={i} cond={c} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor}
+          <ConditionRow key={i} cond={c} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor} attributeOptions={attributeOptions}
             onChange={(patch) => setCond(i, patch)}
             onRemove={() => onChange({ ...group, conditions: group.conditions.filter((_, j) => j !== i) })}
             canRemove={group.conditions.length > 1} />
@@ -2493,7 +2561,7 @@ function GroupBlock({ group, fieldDefs, optsFor, refOptionsFor, onChange, onRemo
   );
 }
 
-function RuleRow({ rule, idx, scope, timePeriod, fieldDefs, optsFor, refOptionsFor, onChange, onRemove, canRemove }) {
+function RuleRow({ rule, idx, scope, timePeriod, fieldDefs, optsFor, refOptionsFor, attributeOptions, onChange, onRemove, canRemove }) {
   const { t } = usePreferences();
   const setGroup = (i, ng) => onChange({ ...rule, groups: rule.groups.map((g, j) => (j === i ? ng : g)) });
   const ready = (rule.groups || []).some((g) => (g.conditions || []).some((c) => c.field && c.operator));
@@ -2526,7 +2594,7 @@ function RuleRow({ rule, idx, scope, timePeriod, fieldDefs, optsFor, refOptionsF
                 <div className="h-px flex-1 bg-border" />
               </div>
             )}
-            <GroupBlock group={g} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor}
+            <GroupBlock group={g} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor} attributeOptions={attributeOptions}
               onChange={(ng) => setGroup(i, ng)}
               onRemove={() => onChange({ ...rule, groups: rule.groups.filter((_, j) => j !== i) })}
               canRemove={rule.groups.length > 1} />
@@ -2695,7 +2763,7 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
 
           <div className="space-y-2">
             {rules.map((r, i) => (
-              <RuleRow key={i} rule={r} idx={i} scope={scope} timePeriod={timePeriod} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor}
+              <RuleRow key={i} rule={r} idx={i} scope={scope} timePeriod={timePeriod} fieldDefs={fieldDefs} optsFor={optsFor} refOptionsFor={refOptionsFor} attributeOptions={attrOptions}
                 onChange={(nr) => { setRules((rs) => rs.map((x, j) => (j === i ? nr : x))); markDirty(); }}
                 onRemove={() => { setRules((rs) => rs.filter((_, j) => j !== i)); markDirty(); }}
                 canRemove={rules.length > 1} />

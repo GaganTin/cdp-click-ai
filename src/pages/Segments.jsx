@@ -3,6 +3,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Users, MoreHorizontal, Trash2, Pencil, Copy, Archive, Lock, UserCheck, Ghost, Search, SlidersHorizontal, Filter, X, RefreshCw, Download, BarChart2, ArrowUp, ArrowDown, Loader2, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Lightbulb, Mail, MousePointer2, Clock, Tag } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
+import { replenishmentStatusLabel, replenishmentStatusOptions } from "@/lib/predictionLabels";
 import SegmentsAnalyticsPanel from "@/components/segments/SegmentsAnalyticsPanel";
 import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
@@ -151,7 +152,7 @@ const CUST_CRITERIA_EMPTY = {
   is_opt_in_email: "", opt_in_sms: "", is_subscriber: "",
   has_ga_activity: "", min_ga_sessions: "", max_ga_sessions: "", has_seminars: "", has_attributes: "",
   has_transactions: "", min_orders: "", max_orders: "", min_spend: "", max_spend: "", ordered_within: "",
-  has_due_replenishment: "", replenishment_status: [], replenishment_within: "",
+  has_due_replenishment: "", replenishment_status: [], replenishment_within: "", replenishment_product_ids: [],
   has_recommendations: "", top_recommended_category: [], recommended_product_ids: [],
   source: [], medium: [], campaign: [],
   min_page_views: "", max_page_views: "", min_sessions: "", max_sessions: "", min_engagement: "", max_engagement: "",
@@ -201,8 +202,9 @@ function criteriaToChips(criteria) {
     has_transactions:   () => `has purchases`,
     ordered_within:     v => `ordered in last ${v} days`,
     has_due_replenishment: () => `due to reorder`,
-    replenishment_status:  v => `replenishment: ${Array.isArray(v) ? v.join(", ") : v}`,
+    replenishment_status:  v => `replenishment: ${(Array.isArray(v) ? v : [v]).map(replenishmentStatusLabel).join(", ")}`,
     replenishment_within:  v => `reorder due within ${v} days`,
+    replenishment_product_ids: v => `due to reorder ${v.length} product${v.length > 1 ? "s" : ""}`,
     has_recommendations:      () => `has recommendations`,
     top_recommended_category: v => `recommended category: ${Array.isArray(v) ? v.join(", ") : v}`,
     recommended_product_ids:  v => `push ${v.length} product${v.length > 1 ? "s" : ""}`,
@@ -284,13 +286,18 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
     queryFn: () => appClient.commerce.recommendedProducts(),
     enabled: isCustomer,
   });
-  const recoProductOpts = useMemo(
-    () => (recoProductsData?.products || []).map((p) => ({
-      value: p.product_id,
-      label: `${p.product_name || p.product_id}${p.reach ? ` (${p.reach})` : ""}`,
-    })),
-    [recoProductsData]
-  );
+  // Products currently due to reorder for ≥1 customer (reorder-reminder picker).
+  const { data: replenProductsData } = useQuery({
+    queryKey: ["replen-products"],
+    queryFn: () => appClient.commerce.replenishmentProducts(),
+    enabled: isCustomer,
+  });
+  const toProductOpts = (products) => (products || []).map((p) => ({
+    value: p.product_id,
+    label: `${p.product_name || p.product_id}${p.reach ? ` (${p.reach})` : ""}`,
+  }));
+  const recoProductOpts = useMemo(() => toProductOpts(recoProductsData?.products), [recoProductsData]);
+  const replenProductOpts = useMemo(() => toProductOpts(replenProductsData?.products), [replenProductsData]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const setCrit = (k, v) => setCriteria(c => ({ ...c, [k]: v }));
@@ -420,10 +427,11 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
                   <RangeCriteriaRow label={t("Spend")}  field="spend"  criteria={criteria} setCrit={setCrit} placeholder="e.g. 1000" />
                   <NumberCriteriaRow label={t("Ordered within (days)")} value={criteria.ordered_within} onChange={v => setCrit("ordered_within", v)} placeholder="e.g. 90" />
                 </CriteriaGroup>
-                <CriteriaGroup title={t("Replenishment")} activeCount={countActive(["has_due_replenishment","replenishment_status","replenishment_within"])}>
+                <CriteriaGroup title={t("Replenishment")} activeCount={countActive(["has_due_replenishment","replenishment_status","replenishment_within","replenishment_product_ids"])}>
                   <CriteriaRow label={t("Due to reorder")} value={criteria.has_due_replenishment} onChange={v => setCrit("has_due_replenishment", v)} opts={["true"]} />
-                  <MultiCriteriaRow label={t("Status")} value={criteria.replenishment_status} onChange={v => setCrit("replenishment_status", v)} opts={custFilters?.replenishment_statuses || []} />
+                  <MultiCriteriaRow label={t("Status")} value={criteria.replenishment_status} onChange={v => setCrit("replenishment_status", v)} opts={replenishmentStatusOptions(custFilters?.replenishment_statuses)} />
                   <NumberCriteriaRow label={t("Reorder due within (days)")} value={criteria.replenishment_within} onChange={v => setCrit("replenishment_within", v)} placeholder="e.g. 14" />
+                  <MultiCriteriaRow label={t("Due to reorder product")} value={criteria.replenishment_product_ids} onChange={v => setCrit("replenishment_product_ids", v)} opts={replenProductOpts} />
                 </CriteriaGroup>
                 <CriteriaGroup title={t("Recommendations")} activeCount={countActive(["has_recommendations","top_recommended_category","recommended_product_ids"])}>
                   <CriteriaRow label={t("Has recommendations")} value={criteria.has_recommendations} onChange={v => setCrit("has_recommendations", v)} opts={["true"]} />
@@ -584,6 +592,79 @@ function SegmentSize({ segmentId }) {
   return (
     <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {data.count.toLocaleString()} {t("users")}</span>
   );
+}
+
+// Tab-aware "how it works" guide props. The Customers tab keeps the general
+// overview; the Anonymous tab gets a walkthrough tailored to unidentified,
+// behaviour-matched visitors (pop-up targeting, no email).
+function segmentsGuide(t, source) {
+  if (source === "anonymous_profile") {
+    return {
+      storageKey: "guide.segments.anonymous",
+      title: t("How anonymous segments work"),
+      intro: t("An anonymous segment is a saved audience of visitors you haven't identified yet - grouped by their on-site behaviour and the attributes the AI infers from the pages they view. Because you don't have contact details, anonymous segments are built for on-site targeting: pop ups."),
+      stepsTitle: t("Building an anonymous segment, step by step"),
+      steps: [
+        { title: t("Stay on the Anonymous tab"), desc: t("You're in the right place - segments created here target unidentified visitors matched by behaviour, not known contacts.") },
+        { title: t("Name it & click New"), desc: t("Give the segment a clear name and description so your team knows which visitors it targets and why.") },
+        { title: t("Add behaviour & attribute criteria"), desc: t("Open Profile criteria and combine web-activity filters - sessions, page views, recency - with any Applied Attributes inferred from content. Each filter narrows the audience.") },
+        { title: t("Watch the live count"), desc: t("As you build, the live preview shows how many anonymous visitors currently match, so you can tune the criteria before saving.") },
+        { title: t("Set window, refresh & activate"), desc: t("Choose a Time Period, turn on Daily Refresh to keep membership current as visitors return, set the status to Active, then Save.") },
+      ],
+      uses: [
+        { icon: MousePointer2, title: t("Show pop ups"), desc: t("Trigger on-site messages only for visitors in the segment.") },
+        { icon: BarChart2, title: t("Track & refine"), desc: t("Watch the segment size change and tune the criteria over time.") },
+        { icon: UserCheck, title: t("Convert to known"), desc: t("Use pop ups to capture details and turn anonymous visitors into customers.") },
+      ],
+      sections: [{
+        title: t("What the builder controls do"),
+        items: [
+          { icon: SlidersHorizontal, label: t("Profile criteria"), desc: t("- filter by web activity like sessions, page views, and recency; combining filters narrows the audience.") },
+          { icon: Tag, label: t("Applied Attributes"), desc: t("- target on values the AI inferred from the content each visitor viewed, for detailed, reusable criteria.") },
+          { icon: Clock, label: t("Time Period"), desc: t("- aggregate activity over a window (e.g. last 30 days) instead of all-time.") },
+          { icon: RefreshCw, label: t("Daily Refresh"), desc: t("- re-evaluate nightly so visitors join and leave as their behaviour changes; off freezes membership between saves.") },
+        ],
+      }],
+      footer: t("Anonymous visitors have no contact details, so email isn't available for these segments - use them with Pop Up to reach visitors while they're on your site."),
+    };
+  }
+  return {
+    storageKey: "guide.segments",
+    title: t("How segments work"),
+    intro: t("Segments are saved audiences - groups of people who share the same behaviour, attributes, or source. You define a segment once and it becomes a live audience you can target again and again."),
+    stepsTitle: t("Creating a segment, step by step"),
+    steps: [
+      { title: t("Pick the audience type"), desc: t("Choose the Customers or Anonymous tab first - customer segments are known contacts (great for email), anonymous ones are unidentified visitors (great for pop ups).") },
+      { title: t("Name it & click New"), desc: t("Give the segment a clear name and description so your team knows who it targets and why.") },
+      { title: t("Add profile criteria"), desc: t("Open Profile criteria and combine filters - demographics, web activity, purchases, communication - plus any Applied Attributes for richer targeting. Each filter you add narrows the audience.") },
+      { title: t("Watch the live count"), desc: t("As you build, the live preview shows how many profiles currently match, so you can tune the criteria before saving.") },
+      { title: t("Set window, refresh & status"), desc: t("Choose a Time Period, turn on Daily Refresh to keep membership current, set the status to Active, then Save.") },
+    ],
+    uses: [
+      { icon: MousePointer2, title: t("Show pop ups"), desc: t("Trigger on-site messages only for visitors in the segment.") },
+      { icon: Mail, title: t("Send email"), desc: t("Aim an email campaign at exactly this audience.") },
+      { icon: BarChart2, title: t("Track & refine"), desc: t("Watch the segment size change and tune the criteria over time.") },
+    ],
+    sections: [
+      {
+        title: t("Two kinds of segment"),
+        items: [
+          { icon: UserCheck, label: t("Customer"), desc: t("- known people you already have contact details for - ideal for email.") },
+          { icon: Ghost, label: t("Anonymous"), desc: t("- visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.") },
+        ],
+      },
+      {
+        title: t("What the builder controls do"),
+        items: [
+          { icon: SlidersHorizontal, label: t("Profile criteria"), desc: t("- filter by demographics, web activity, purchases, and communication; combining filters narrows the audience.") },
+          { icon: Tag, label: t("Applied Attributes"), desc: t("- target on values from your content and rule attributes for detailed, reusable criteria.") },
+          { icon: Clock, label: t("Time Period"), desc: t("- aggregate activity over a window (e.g. last 30 days) instead of all-time.") },
+          { icon: RefreshCw, label: t("Daily Refresh"), desc: t("- re-evaluate nightly so people join and leave as their behaviour changes; off freezes membership between saves.") },
+        ],
+      },
+    ],
+    footer: t("Build one by hand with filters and criteria, or describe the audience you want and let the AI create it for you. Once saved, a segment can be reused across Pop Up, Email, and Profiles."),
+  };
 }
 
 export default function Segments() {
@@ -857,43 +938,7 @@ export default function Segments() {
         </div>
       {/* Always-available guide so teammates who join later can still learn the page. */}
       {activeTab !== "analytics" && segments.length > 0 && (
-        <PageGuide
-          storageKey="guide.segments"
-          title={t("How segments work")}
-          intro={t("Segments are saved audiences - groups of people who share the same behaviour, attributes, or source. You define a segment once and it becomes a live audience you can target again and again.")}
-          stepsTitle={t("Creating a segment, step by step")}
-          steps={[
-            { title: t("Pick the audience type"), desc: t("Choose the Customers or Anonymous tab first - customer segments are known contacts (great for email), anonymous ones are unidentified visitors (great for pop ups).") },
-            { title: t("Name it & click New"), desc: t("Give the segment a clear name and description so your team knows who it targets and why.") },
-            { title: t("Add profile criteria"), desc: t("Open Profile criteria and combine filters - demographics, web activity, purchases, communication - plus any Applied Attributes for richer targeting. Each filter you add narrows the audience.") },
-            { title: t("Watch the live count"), desc: t("As you build, the live preview shows how many profiles currently match, so you can tune the criteria before saving.") },
-            { title: t("Set window, refresh & status"), desc: t("Choose a Time Period, turn on Daily Refresh to keep membership current, set the status to Active, then Save.") },
-          ]}
-          uses={[
-            { icon: MousePointer2, title: t("Show pop ups"), desc: t("Trigger on-site messages only for visitors in the segment.") },
-            { icon: Mail, title: t("Send email"), desc: t("Aim an email campaign at exactly this audience.") },
-            { icon: BarChart2, title: t("Track & refine"), desc: t("Watch the segment size change and tune the criteria over time.") },
-          ]}
-          sections={[
-            {
-              title: t("Two kinds of segment"),
-              items: [
-                { icon: UserCheck, label: t("Customer"), desc: t("- known people you already have contact details for - ideal for email.") },
-                { icon: Ghost, label: t("Anonymous"), desc: t("- visitors you haven't identified yet, matched by on-site behaviour - ideal for pop ups.") },
-              ],
-            },
-            {
-              title: t("What the builder controls do"),
-              items: [
-                { icon: SlidersHorizontal, label: t("Profile criteria"), desc: t("- filter by demographics, web activity, purchases, and communication; combining filters narrows the audience.") },
-                { icon: Tag, label: t("Applied Attributes"), desc: t("- target on values from your content and rule attributes for detailed, reusable criteria.") },
-                { icon: Clock, label: t("Time Period"), desc: t("- aggregate activity over a window (e.g. last 30 days) instead of all-time.") },
-                { icon: RefreshCw, label: t("Daily Refresh"), desc: t("- re-evaluate nightly so people join and leave as their behaviour changes; off freezes membership between saves.") },
-              ],
-            },
-          ]}
-          footer={t("Build one by hand with filters and criteria, or describe the audience you want and let the AI create it for you. Once saved, a segment can be reused across Pop Up, Email, and Profiles.")}
-        />
+        <PageGuide {...segmentsGuide(t, activeTab)} />
       )}
       {isLoading ? (
         <div className="space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 bg-secondary animate-pulse rounded-lg" />)}</div>

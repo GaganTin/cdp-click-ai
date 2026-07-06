@@ -223,6 +223,9 @@ CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
 );
 CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id);
 CREATE INDEX IF NOT EXISTS commerce_replen_status_idx       ON commerce.customer_replenishment (company_id, status);
+-- customer_id-only: the segment "due to reorder product X" predicate filters
+-- customer_id = member_id without company_id (member_id is globally unique).
+CREATE INDEX IF NOT EXISTS commerce_replen_customer_only_idx ON commerce.customer_replenishment (customer_id);
 
 -- ── Derived: per-customer product recommendations (cross-sell / discovery) ────
 --  NOT landed from a platform - computed by the same build_product_predictions

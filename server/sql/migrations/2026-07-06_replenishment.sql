@@ -31,8 +31,9 @@ CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
   computed_at         TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (company_id, customer_id, product_id)
 );
-CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id);
-CREATE INDEX IF NOT EXISTS commerce_replen_status_idx       ON commerce.customer_replenishment (company_id, status);
+CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx  ON commerce.customer_replenishment (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_replen_status_idx        ON commerce.customer_replenishment (company_id, status);
+CREATE INDEX IF NOT EXISTS commerce_replen_customer_only_idx ON commerce.customer_replenishment (customer_id);
 
 -- (idempotent add in case an earlier build of this table pre-dates cycle_spread)
 ALTER TABLE commerce.customer_replenishment ADD COLUMN IF NOT EXISTS cycle_spread NUMERIC;
