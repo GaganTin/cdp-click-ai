@@ -75,7 +75,7 @@ export default function Analyst() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   // Read-only viewers can chat but must not manage saved skills/templates.
-  const { canWrite } = useRole();
+  const { canWrite, isDemo } = useRole();
 
   // Load cross-page context data
   const { data: segments = [] } = useQuery({
@@ -799,6 +799,16 @@ ${JSON.stringify(chartBlock)}
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* In the demo workspace, chatting still spends the user's own monthly AI
+            allowance - make that explicit right above the input. */}
+        {canUseFeatures && isDemo && (
+          <div className="max-w-3xl mx-auto w-full px-6 pt-1">
+            <p className="text-xs text-muted-foreground text-center">
+              Heads up: messages here use the real AI analyst and count against your monthly AI credit limit.
+            </p>
           </div>
         )}
 
