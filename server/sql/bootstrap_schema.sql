@@ -202,6 +202,10 @@ CREATE TABLE app.accounts (
   plan_expires_at TIMESTAMPTZ,                    -- trial end; null once paid (the sole "in trial" marker)
   plan_upgraded_at TIMESTAMPTZ,                   -- when the trial converted to paid (stamped by trigger below)
   is_active       BOOLEAN     NOT NULL DEFAULT true,
+  -- whether this account's users see the shared read-only demo workspace in their
+  -- switcher. Toggled per-account by a platform admin from Studio. Defaults true
+  -- (the demo is available to everyone unless a platform admin removes it).
+  demo_enabled    BOOLEAN     NOT NULL DEFAULT true,
   -- the account creator / billing owner; FK added after app.users exists below.
   owner_user_id   UUID,
   settings        JSONB       NOT NULL DEFAULT '{}',
@@ -4755,6 +4759,12 @@ ALTER TABLE app.companies
 -- At most one demo workspace platform-wide.
 CREATE UNIQUE INDEX IF NOT EXISTS companies_single_demo_idx
   ON app.companies((is_demo)) WHERE is_demo;
+
+-- Per-account opt-in for the demo workspace. Defaults true so the demo stays
+-- available to everyone unless a platform admin removes it from an account
+-- (Studio account panel). Gates both /auth/me injection and access.
+ALTER TABLE app.accounts
+  ADD COLUMN IF NOT EXISTS demo_enabled BOOLEAN NOT NULL DEFAULT true;
 
 
 -- ===================== migrations/2026-07-06_recommendations.sql =====================

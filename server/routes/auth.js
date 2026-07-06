@@ -235,23 +235,28 @@ async function fetchUserWithCompanies(pool, userId) {
      GROUP BY u.id`,
     [userId]
   );
-  if (rows[0]) rows[0].companies = await appendDemoCompany(pool, rows[0].companies);
+  if (rows[0]) rows[0].companies = await appendDemoCompany(pool, rows[0].companies, rows[0].account_id);
   return rows[0] || null;
 }
 
 // Append the shared read-only demo workspace to a user's companies array so it
-// appears in every user's workspace switcher. It has NO company_members row; the
-// synthetic 'viewer' role + is_demo flag drive the read-only UI, and the auth
-// middleware grants access without a membership (see server/lib/demoWorkspace.js
-// and withCompany/resolveCompanyId). Never blocks auth if the demo is absent.
-async function appendDemoCompany(pool, companies) {
+// appears in their workspace switcher - but ONLY when the user's account is
+// opted in (app.accounts.demo_enabled, toggled per-account from Studio). It has
+// NO company_members row; the synthetic 'viewer' role + is_demo flag drive the
+// read-only UI, and the auth middleware grants access without a membership (see
+// server/lib/demoWorkspace.js and withCompany/resolveCompanyId). Never blocks
+// auth if the demo is absent or the account is opted out.
+async function appendDemoCompany(pool, companies, accountId) {
   const list = Array.isArray(companies) ? [...companies] : [];
+  if (!accountId) return list;
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, slug, logo_url, plan, created_date
-         FROM app.companies
-        WHERE is_demo = true AND is_active = true
-        LIMIT 1`
+      `SELECT c.id, c.name, c.slug, c.logo_url, c.plan, c.created_date
+         FROM app.companies c
+        WHERE c.is_demo = true AND c.is_active = true
+          AND EXISTS (SELECT 1 FROM app.accounts a WHERE a.id = $1 AND a.demo_enabled = true)
+        LIMIT 1`,
+      [accountId]
     );
     if (!rows.length) return list;
     const d = rows[0];
@@ -634,7 +639,7 @@ export function createAuthRouter(pool) {
       setAuthCookie(res, token);
 
       const { password_hash, email_verify_token, ...safeUser } = user;
-      safeUser.companies = await appendDemoCompany(pool, safeUser.companies);
+      safeUser.companies = await appendDemoCompany(pool, safeUser.companies, safeUser.account_id);
       res.json({ user: safeUser, token });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -788,7 +793,7 @@ export function createAuthRouter(pool) {
       if (!rows.length) return res.status(401).json({ error: "User not found" });
       // Everyone also sees the shared read-only demo workspace in their switcher.
       const me = rows[0];
-      me.companies = await appendDemoCompany(pool, me.companies);
+      me.companies = await appendDemoCompany(pool, me.companies, me.account_id);
       // Surface impersonation context (set when a platform owner is acting as this
       // user) so the UI can show an "exit impersonation" banner.
       res.json({ ...me, impersonated_by: req.user.impersonated_by || null });

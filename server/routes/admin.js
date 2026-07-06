@@ -245,7 +245,7 @@ export function createAdminRouter(pool) {
   // The app.stamp_plan_upgraded_at trigger stamps plan_upgraded_at when the trial
   // expiry is cleared (i.e. the account converts to paid).
   router.patch("/accounts/:id", async (req, res) => {
-    const { plan, plan_expires_at, is_active, limit_overrides, billing_notes, payment_reference } = req.body;
+    const { plan, plan_expires_at, is_active, demo_enabled, limit_overrides, billing_notes, payment_reference } = req.body;
     const sets = [];
     const vals = [];
 
@@ -260,6 +260,9 @@ export function createAdminRouter(pool) {
     }
     if (is_active !== undefined) {
       sets.push(`is_active = $${sets.length + 1}`); vals.push(!!is_active);
+    }
+    if (demo_enabled !== undefined) {
+      sets.push(`demo_enabled = $${sets.length + 1}`); vals.push(!!demo_enabled);
     }
 
     // Settings-backed fields are merged into the existing settings JSONB so we
@@ -290,7 +293,7 @@ export function createAdminRouter(pool) {
       );
       if (!rows.length) return res.status(404).json({ error: "Account not found" });
       await audit(req.params.id, req.user.id, "update", "account", req.params.id,
-        { plan, plan_expires_at, is_active, ...settingsPatch });
+        { plan, plan_expires_at, is_active, demo_enabled, ...settingsPatch });
       res.json(rows[0]);
     } catch (err) {
       res.status(500).json({ error: err.message });

@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { isDemoCompany } from "../lib/demoWorkspace.js";
+import { isDemoCompany, isDemoEnabledForUser } from "../lib/demoWorkspace.js";
 
 // Shared message for any write attempt against the read-only demo workspace.
 const DEMO_READONLY_MSG =
@@ -77,12 +77,15 @@ export function withCompany(pool) {
       return res.status(400).json({ error: "x-company-id header required" });
     }
 
-    // Shared demo workspace: any authenticated user may READ it without a
-    // company_members row. It is fully read-only on these routers (none host the
-    // AI analyst chat, which runs under companyGuard/resolveCompanyId), so block
-    // every mutating request. A synthetic viewer member is stashed so downstream
-    // role checks behave.
+    // Shared demo workspace: any authenticated user whose ACCOUNT is opted in
+    // (app.accounts.demo_enabled) may READ it without a company_members row. It is
+    // fully read-only on these routers (none host the AI analyst chat, which runs
+    // under companyGuard/resolveCompanyId), so block every mutating request. A
+    // synthetic viewer member is stashed so downstream role checks behave.
     if (await isDemoCompany(pool, companyId)) {
+      if (!(await isDemoEnabledForUser(pool, req.user.id))) {
+        return res.status(403).json({ error: "Access denied to this company" });
+      }
       if (!["GET", "HEAD"].includes(req.method)) {
         return res.status(403).json({ error: DEMO_READONLY_MSG });
       }
@@ -194,6 +197,9 @@ export async function resolveCompanyId(pool, req, res, { blockViewerOnPost = tru
   // chat (companyGuard passes blockViewerOnPost:false) - keep working, while
   // real writes are refused.
   if (await isDemoCompany(pool, id)) {
+    if (!(await isDemoEnabledForUser(pool, req.user.id))) {
+      res.status(403).json({ error: "Access denied to this company" }); return null;
+    }
     req.companyRole = "viewer";
     req.isDemo = true;
     const isWrite = !["GET", "HEAD"].includes(req.method);

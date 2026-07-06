@@ -37,3 +37,21 @@ export async function isDemoCompany(pool, companyId) {
   const demoId = await getDemoCompanyId(pool);
   return demoId != null && String(companyId) === String(demoId);
 }
+
+// Whether a user's account is opted in to the demo workspace. Platform admins
+// toggle app.accounts.demo_enabled per account from Studio. Fails open to false
+// (no demo) on error. Not cached: it's only read on the demo access path.
+export async function isDemoEnabledForUser(pool, userId) {
+  if (!userId) return false;
+  try {
+    const { rows } = await pool.query(
+      `SELECT a.demo_enabled
+         FROM app.users u JOIN app.accounts a ON a.id = u.account_id
+        WHERE u.id = $1`,
+      [userId]
+    );
+    return !!rows[0]?.demo_enabled;
+  } catch {
+    return false;
+  }
+}

@@ -47,6 +47,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
   const [plan, setPlan] = useState("lite");
   const [expiry, setExpiry] = useState("");
   const [active, setActive] = useState(true);
+  const [demoEnabled, setDemoEnabled] = useState(true);
   const [overrides, setOverrides] = useState({});
   const [billingNotes, setBillingNotes] = useState("");
   const [paymentRef, setPaymentRef] = useState("");
@@ -57,6 +58,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
       setPlan(account.plan || "lite");
       setExpiry(toDateInput(account.plan_expires_at));
       setActive(account.is_active !== false);
+      setDemoEnabled(account.demo_enabled !== false);
       const s = account.settings || {};
       setOverrides(overridesToDisplay(s.limit_overrides || {}));
       setBillingNotes(s.billing_notes || "");
@@ -111,6 +113,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
     plan !== (account.plan || "lite") ||
     expiry !== toDateInput(account.plan_expires_at) ||
     active !== (account.is_active !== false) ||
+    demoEnabled !== (account.demo_enabled !== false) ||
     JSON.stringify(overrides) !== JSON.stringify(origOverrides) ||
     billingNotes !== (account.settings?.billing_notes || "") ||
     paymentRef !== (account.settings?.payment_reference || "")
@@ -120,6 +123,7 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
     save.mutate({
       plan,
       is_active: active,
+      demo_enabled: demoEnabled,
       // Trial state is tier-agnostic: a set expiry means "on trial", clearing it
       // converts to paid (the DB trigger stamps plan_upgraded_at).
       plan_expires_at: expiry ? new Date(expiry).toISOString() : null,
@@ -177,6 +181,16 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
                 <div className="flex items-center justify-between">
                   <span className="text-sm">Account active</span>
                   <Switch checked={active} onCheckedChange={setActive} />
+                </div>
+
+                {/* Whether this account's users see the shared read-only demo
+                    workspace in their switcher. */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-sm">Demo workspace</span>
+                    <p className="text-xs text-muted-foreground">Show the shared read-only demo workspace to this account's users</p>
+                  </div>
+                  <Switch checked={demoEnabled} onCheckedChange={setDemoEnabled} />
                 </div>
 
                 <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">

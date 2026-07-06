@@ -17,3 +17,9 @@ ALTER TABLE app.companies
 -- At most one demo workspace platform-wide.
 CREATE UNIQUE INDEX IF NOT EXISTS companies_single_demo_idx
   ON app.companies((is_demo)) WHERE is_demo;
+
+-- Per-account opt-in for the demo workspace. Defaults true so the demo stays
+-- available to everyone unless a platform admin removes it from an account
+-- (Studio account panel). Gates both /auth/me injection and access.
+ALTER TABLE app.accounts
+  ADD COLUMN IF NOT EXISTS demo_enabled BOOLEAN NOT NULL DEFAULT true;

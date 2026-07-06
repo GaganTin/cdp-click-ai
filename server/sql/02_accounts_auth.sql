@@ -89,6 +89,10 @@ CREATE TABLE app.accounts (
   plan_expires_at TIMESTAMPTZ,                    -- trial end; null once paid (the sole "in trial" marker)
   plan_upgraded_at TIMESTAMPTZ,                   -- when the trial converted to paid (stamped by trigger below)
   is_active       BOOLEAN     NOT NULL DEFAULT true,
+  -- whether this account's users see the shared read-only demo workspace in their
+  -- switcher. Toggled per-account by a platform admin from Studio. Defaults true
+  -- (the demo is available to everyone unless a platform admin removes it).
+  demo_enabled    BOOLEAN     NOT NULL DEFAULT true,
   -- the account creator / billing owner; FK added after app.users exists below.
   owner_user_id   UUID,
   settings        JSONB       NOT NULL DEFAULT '{}',
