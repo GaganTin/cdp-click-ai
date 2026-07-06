@@ -31,8 +31,8 @@ const {
   DEMO_COMPANY_ID, DEMO_COMPANY_SLUG, DEMO_CAPSUITE_REF, DEMO_ACCOUNT_SLUG,
 } = require("./_demo_constants.cjs");
 
-const DEMO_ACCOUNT_NAME = "CapSuite Demo";
-const DEMO_COMPANY_NAME = "CapSuite Demo Store";
+const DEMO_ACCOUNT_NAME = "Mock Data";
+const DEMO_COMPANY_NAME = "Demo Store";
 const DEMO_WEBSITE      = "https://demo.capsuite.co";
 const SYSTEM_USER_EMAIL = "demo-system@capsuite.co"; // owns created_by rows; not a usable login
 

@@ -13,7 +13,7 @@ export default function DemoBanner() {
       <Sparkles className="w-4 h-4 flex-shrink-0" />
       <span>
         <span className="font-medium">Demo workspace.</span>{" "}
-        Everything here is sample data so you can explore the platform. It's read-only —
+        Everything here is sample data so you can explore the platform. It's read-only -
         you can browse every page and chat with the AI analyst, but changes aren't saved.
       </span>
     </div>

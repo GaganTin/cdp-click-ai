@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/AuthContext";
  * (`user.companies[].role`); the account owner is an `admin` with
  * `is_account_owner` set. Roles: viewer | contributor | admin (+ owner flag).
  *
- * Only "viewer" is read-only — a viewer may search, filter and view everything
+ * Only "viewer" is read-only - a viewer may search, filter and view everything
  * but must not create, update or delete anything, and can't see billing.
  * Every other role (contributor, admin, owner) can write.
  *
@@ -30,7 +30,7 @@ export function useRole() {
   // its is_demo flag comes down on the company object from /auth/me.
   const isDemo = !!(membership?.is_demo || currentCompany?.is_demo);
   // Optimistic while the role is still unknown (first paint / loading) so editors
-  // don't see a flash of disabled UI — only an explicit "viewer" (incl. the demo)
+  // don't see a flash of disabled UI - only an explicit "viewer" (incl. the demo)
   // is locked out.
   const canWrite = isDemo ? false : (role ? role !== "viewer" : true);
 

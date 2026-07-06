@@ -62,7 +62,7 @@ export default function DemoWorkspaceTab() {
         </h3>
         <p className="text-sm text-muted-foreground max-w-2xl">
           A single shared, fully-mocked workspace that appears in every user's workspace
-          switcher. It's read-only everywhere except the AI analyst chat — users can explore
+          switcher. It's read-only everywhere except the AI analyst chat - users can explore
           every page and chat with the analyst, but can't connect data, import, or create
           anything. It exists only here: users can never delete it.
         </p>
@@ -94,7 +94,7 @@ export default function DemoWorkspaceTab() {
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {ws?.name || "Demo workspace"}
               </div>
               <span className="text-xs text-muted-foreground">
-                Created {ws?.created_date ? fmtDate(ws.created_date) : "—"} · updated {ws?.updated_date ? fmtRelative(ws.updated_date) : "—"}
+                Created {ws?.created_date ? fmtDate(ws.created_date) : "-"} · updated {ws?.updated_date ? fmtRelative(ws.updated_date) : "-"}
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

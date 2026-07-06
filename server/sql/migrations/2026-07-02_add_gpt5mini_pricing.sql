@@ -9,7 +9,7 @@
 --  spend would be ledgered at $0 (getPricing falls back to zero rates).
 --
 --  Idempotent AND non-clobbering: apply_migrations.cjs re-runs every file on every
---  deploy, so this uses ON CONFLICT DO NOTHING — a later Studio rate edit survives.
+--  deploy, so this uses ON CONFLICT DO NOTHING - a later Studio rate edit survives.
 --  Run with: psql "$DATABASE_URL" -f <file>
 -- ============================================================================
 

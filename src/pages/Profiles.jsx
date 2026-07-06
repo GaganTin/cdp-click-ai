@@ -1206,7 +1206,7 @@ export default function Profiles() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  // Data sources — used to hide the "Connect a source" CTA once GA (or another source) is already connected.
+  // Data sources - used to hide the "Connect a source" CTA once GA (or another source) is already connected.
   const { data: integrationsList = [] } = useQuery({ queryKey: ["data-integrations"], queryFn: () => appClient.dataIntegrations.list() });
   const gaConnected = integrationsList.some((r) => r.integration_type === "googleAnalytics" && r.is_connected && !r.is_connection_error);
 

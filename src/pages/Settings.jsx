@@ -1942,7 +1942,7 @@ export default function Settings() {
 
   const role = user?.companies?.find(c => c.id === currentCompany?.id)?.role;
   // Only admins (incl. the account owner, whose role is "admin") get the
-  // admin-only tabs — Company, Members, Audit Log and Billing.
+  // admin-only tabs - Company, Members, Audit Log and Billing.
   const isAdmin = role === "admin";
 
   const visibleTabs = TABS.filter(tab => !tab.adminOnly || isAdmin);
