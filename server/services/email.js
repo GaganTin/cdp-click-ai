@@ -88,37 +88,15 @@ const authFromEmail = () => process.env.AUTH_FROM_EMAIL || defaultFromEmail();
 const authFromName  = () => process.env.AUTH_FROM_NAME  || defaultFromName() || "Meritma";
 const authSender = () => ({ fromEmail: authFromEmail(), fromName: authFromName() });
 
-// Logo shown at the top of every branded (transactional) email. Uses a HOSTED
-// URL, not a data: URI — Gmail and many clients strip inline base64 images.
-// public/logo-light.png ships to dist/ at build time, so it's served at the app
-// root; EMAIL_LOGO_URL overrides that if the app URL isn't publicly reachable.
-const logoUrl = () => process.env.EMAIL_LOGO_URL || `${appUrl()}/logo-light.png`;
-
-// Wrap a transactional email body in a consistent, branded layout: a centered
-// content column with the Meritma logo in the header. All inline styles + a
-// table for the logo row so it renders reliably across email clients (Outlook,
-// Gmail, Apple Mail). width/height on the <img> keep the logo from reflowing
-// while the image loads and cap it at a tasteful ~120px.
-function emailLayout(bodyHtml) {
-  return `<div style="background:#f6f7f9;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-  <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;padding:32px;color:#1a1a1a;font-size:15px;line-height:1.55">
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px"><tr><td>
-      <img src="${logoUrl()}" alt="Meritma" width="120" height="93" style="display:block;width:120px;height:auto;border:0;outline:none;text-decoration:none" />
-    </td></tr></table>
-    ${bodyHtml}
-  </div>
-</div>`;
-}
-
 // A reusable 6-digit-code email body so every code email (sign-up, login MFA)
 // looks identical.
 function codeEmailHtml({ heading, intro, code, ttl }) {
-  return emailLayout(`<p style="margin:0 0 12px"><strong>${heading}</strong></p>
-          ${intro ? `<p style="margin:0 0 12px">${intro}</p>` : ""}
-          <p style="margin:0 0 4px">Your code is:</p>
+  return `<p>${heading}</p>
+          ${intro ? `<p>${intro}</p>` : ""}
+          <p>Your code is:</p>
           <p style="font-size:28px;font-weight:700;letter-spacing:8px;margin:12px 0">${code}</p>
-          <p style="margin:0 0 12px">This code expires in ${ttl}.</p>
-          <p style="margin:0;color:#6b7280;font-size:13px">If you didn't request this, you can safely ignore this email.</p>`);
+          <p>This code expires in ${ttl}.</p>
+          <p>If you didn't request this, you can safely ignore this email.</p>`;
 }
 
 export async function sendPasswordResetEmail(to, token) {
@@ -127,9 +105,9 @@ export async function sendPasswordResetEmail(to, token) {
     to,
     ...authSender(),
     subject: "Reset your Meritma password",
-    html: emailLayout(`<p style="margin:0 0 12px">We received a request to reset your password.</p>
-           <p style="margin:0 0 12px"><a href="${link}" style="color:#1a1a1a;font-weight:600">Reset your password</a> - this link is valid for 1 hour.</p>
-           <p style="margin:0;color:#6b7280;font-size:13px">If you didn't request this, you can safely ignore this email.</p>`),
+    html: `<p>We received a request to reset your password.</p>
+           <p><a href="${link}">Reset your password</a> - this link is valid for 1 hour.</p>
+           <p>If you didn't request this, you can safely ignore this email.</p>`,
   });
 }
 
@@ -144,10 +122,10 @@ export async function sendInvitationEmail(to, token, { companyName, inviterName 
     to,
     ...authSender(),
     subject: companyName ? `You're invited to join ${companyName} on Meritma` : "You're invited to join a workspace on Meritma",
-    html: emailLayout(`<p style="margin:0 0 12px">${inviter} to join ${workspace} on Meritma.</p>
-           <p style="margin:0 0 12px"><a href="${link}" style="color:#1a1a1a;font-weight:600">Accept your invitation</a> - this link is valid for 7 days.</p>
-           <p style="margin:0 0 12px">If you don't have a Meritma account yet, you'll be able to create one first, then the invitation is applied automatically.</p>
-           <p style="margin:0;color:#6b7280;font-size:13px">If you weren't expecting this, you can safely ignore this email.</p>`),
+    html: `<p>${inviter} to join ${workspace} on Meritma.</p>
+           <p><a href="${link}">Accept your invitation</a> - this link is valid for 7 days.</p>
+           <p>If you don't have a Meritma account yet, you'll be able to create one first, then the invitation is applied automatically.</p>
+           <p>If you weren't expecting this, you can safely ignore this email.</p>`,
   });
 }
 
@@ -157,8 +135,8 @@ export async function sendVerificationEmail(to, token) {
     to,
     ...authSender(),
     subject: "Verify your Meritma email",
-    html: emailLayout(`<p style="margin:0 0 12px"><strong>Welcome to Meritma!</strong></p>
-           <p style="margin:0"><a href="${link}" style="color:#1a1a1a;font-weight:600">Verify your email address</a> - this link is valid for 24 hours.</p>`),
+    html: `<p>Welcome to Meritma!</p>
+           <p><a href="${link}">Verify your email address</a> - this link is valid for 24 hours.</p>`,
   });
 }
 
