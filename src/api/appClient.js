@@ -188,6 +188,11 @@ export const appClient = {
     updatePlan:    (id, data) => request(`/admin/plans/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     listAiPricing: () => request("/admin/ai-pricing"),
     updateAiPricing: (model, data) => request(`/admin/ai-pricing/${encodeURIComponent(model)}`, { method: "PATCH", body: JSON.stringify(data) }),
+    // Shared read-only demo workspace (provisioned/reseeded/deleted only here).
+    getDemoWorkspace:       () => request("/admin/demo-workspace"),
+    provisionDemoWorkspace: () => request("/admin/demo-workspace", { method: "POST" }),
+    reseedDemoWorkspace:    () => request("/admin/demo-workspace/reseed", { method: "POST" }),
+    deleteDemoWorkspace:    () => request("/admin/demo-workspace", { method: "DELETE" }),
   },
   support: {
     listTickets:  () => request("/support/tickets"),

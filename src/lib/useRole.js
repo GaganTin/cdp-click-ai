@@ -26,9 +26,13 @@ export function useRole() {
   const isOwner = !!membership?.is_account_owner;
   const isAdmin = role === "admin" || isOwner;
   const isViewer = role === "viewer";
+  // The shared demo workspace is read-only for everyone (a synthetic viewer);
+  // its is_demo flag comes down on the company object from /auth/me.
+  const isDemo = !!(membership?.is_demo || currentCompany?.is_demo);
   // Optimistic while the role is still unknown (first paint / loading) so editors
-  // don't see a flash of disabled UI — only an explicit "viewer" is locked out.
-  const canWrite = role ? role !== "viewer" : true;
+  // don't see a flash of disabled UI — only an explicit "viewer" (incl. the demo)
+  // is locked out.
+  const canWrite = isDemo ? false : (role ? role !== "viewer" : true);
 
-  return { role, isViewer, isAdmin, isOwner, canWrite, canBill: isAdmin };
+  return { role, isViewer, isAdmin, isOwner, isDemo, canWrite, canBill: isAdmin && !isDemo };
 }

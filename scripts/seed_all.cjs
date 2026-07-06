@@ -726,6 +726,15 @@ async function seedCompany(co, users) {
   await audit("export", "profile", null);
 }
 
-main()
-  .then(() => pool.end())
-  .catch((e) => { console.error(e); pool.end(); process.exit(1); });
+// Reusable pieces for other seeders (e.g. scripts/seed_demo.cjs) that want the
+// exact same per-workspace fixtures without duplicating them. seedCompany closes
+// over the module-level `q`/`pool`, so importers share this pool.
+module.exports = { seedCompany, q, pool, daysAgo, ymd, pick, rint };
+
+// Only run the full "acme" dev seed when invoked directly (node seed_all.cjs),
+// NOT when required as a module.
+if (require.main === module) {
+  main()
+    .then(() => pool.end())
+    .catch((e) => { console.error(e); pool.end(); process.exit(1); });
+}

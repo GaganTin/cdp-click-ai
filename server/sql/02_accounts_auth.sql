@@ -224,6 +224,12 @@ CREATE TABLE app.companies (
   company_size                    TEXT,
   -- workspace-level active flag (a workspace can be deactivated independently)
   is_active                       BOOLEAN     NOT NULL DEFAULT true,
+  -- the shared, read-only "demo" workspace. There is at most ONE across the whole
+  -- platform (see companies_single_demo_idx). It is injected into every user's
+  -- workspace list by /auth/me (no company_members row required), is read-only
+  -- except for the AI analyst chat, and can only be created/reseeded/deleted by a
+  -- platform admin via Studio - never through the normal workspace routes.
+  is_demo                         BOOLEAN     NOT NULL DEFAULT false,
   -- denormalised copy of the owning account's plan, for display in the workspace
   -- switcher / settings; account.plan remains the source of truth for billing.
   plan                            TEXT,
@@ -238,6 +244,8 @@ CREATE UNIQUE INDEX companies_account_slug_idx ON app.companies(account_id, LOWE
 CREATE UNIQUE INDEX companies_is_company_id_idx
   ON app.companies(interaction_service_company_id) WHERE interaction_service_company_id IS NOT NULL;
 CREATE INDEX companies_account_idx ON app.companies(account_id);
+-- At most one demo workspace platform-wide (partial unique on the constant `true`).
+CREATE UNIQUE INDEX companies_single_demo_idx ON app.companies((is_demo)) WHERE is_demo;
 CREATE TRIGGER companies_updated_date BEFORE UPDATE ON app.companies
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 

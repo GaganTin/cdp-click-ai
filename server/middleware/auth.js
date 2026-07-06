@@ -1,4 +1,9 @@
 import jwt from "jsonwebtoken";
+import { isDemoCompany } from "../lib/demoWorkspace.js";
+
+// Shared message for any write attempt against the read-only demo workspace.
+const DEMO_READONLY_MSG =
+  "This is the shared demo workspace - it's read-only. Explore the data and chat with the AI analyst, but changes here aren't saved.";
 
 const JWT_SECRET = process.env.JWT_SECRET || "cdp-dev-secret-change-in-production";
 const COOKIE_NAME = "cdp_token";
@@ -70,6 +75,22 @@ export function withCompany(pool) {
     const companyId = req.headers["x-company-id"];
     if (!companyId) {
       return res.status(400).json({ error: "x-company-id header required" });
+    }
+
+    // Shared demo workspace: any authenticated user may READ it without a
+    // company_members row. It is fully read-only on these routers (none host the
+    // AI analyst chat, which runs under companyGuard/resolveCompanyId), so block
+    // every mutating request. A synthetic viewer member is stashed so downstream
+    // role checks behave.
+    if (await isDemoCompany(pool, companyId)) {
+      if (!["GET", "HEAD"].includes(req.method)) {
+        return res.status(403).json({ error: DEMO_READONLY_MSG });
+      }
+      req.companyId = companyId;
+      req.isDemo = true;
+      req.companyMember = { member_id: null, role: "viewer", status: "active",
+        company_name: "Demo", slug: "demo", plan: null, settings: {}, logo_url: null };
+      return next();
     }
 
     try {
@@ -165,6 +186,22 @@ export function requireRole(...roles) {
 export async function resolveCompanyId(pool, req, res, { blockViewerOnPost = true } = {}) {
   const id = req.headers["x-company-id"];
   if (!id) { res.status(400).json({ error: "x-company-id header required" }); return null; }
+
+  // Shared demo workspace: accessible to any authenticated user WITHOUT a
+  // company_members row, as a synthetic read-only viewer. Mutations are blocked
+  // using the SAME per-router policy as viewers (blockViewerOnPost), so the
+  // read-style POSTs that viewers are allowed to make - notably the AI analyst
+  // chat (companyGuard passes blockViewerOnPost:false) - keep working, while
+  // real writes are refused.
+  if (await isDemoCompany(pool, id)) {
+    req.companyRole = "viewer";
+    req.isDemo = true;
+    const isWrite = !["GET", "HEAD"].includes(req.method);
+    const mutating = blockViewerOnPost ? isWrite : ["PATCH", "PUT", "DELETE"].includes(req.method);
+    if (mutating) { res.status(403).json({ error: DEMO_READONLY_MSG }); return null; }
+    return id;
+  }
+
   let rows;
   try {
     ({ rows } = await pool.query(

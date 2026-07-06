@@ -337,6 +337,12 @@ CREATE TABLE app.companies (
   company_size                    TEXT,
   -- workspace-level active flag (a workspace can be deactivated independently)
   is_active                       BOOLEAN     NOT NULL DEFAULT true,
+  -- the shared, read-only "demo" workspace. There is at most ONE across the whole
+  -- platform (see companies_single_demo_idx). It is injected into every user's
+  -- workspace list by /auth/me (no company_members row required), is read-only
+  -- except for the AI analyst chat, and can only be created/reseeded/deleted by a
+  -- platform admin via Studio - never through the normal workspace routes.
+  is_demo                         BOOLEAN     NOT NULL DEFAULT false,
   -- denormalised copy of the owning account's plan, for display in the workspace
   -- switcher / settings; account.plan remains the source of truth for billing.
   plan                            TEXT,
@@ -351,6 +357,8 @@ CREATE UNIQUE INDEX companies_account_slug_idx ON app.companies(account_id, LOWE
 CREATE UNIQUE INDEX companies_is_company_id_idx
   ON app.companies(interaction_service_company_id) WHERE interaction_service_company_id IS NOT NULL;
 CREATE INDEX companies_account_idx ON app.companies(account_id);
+-- At most one demo workspace platform-wide (partial unique on the constant `true`).
+CREATE UNIQUE INDEX companies_single_demo_idx ON app.companies((is_demo)) WHERE is_demo;
 CREATE TRIGGER companies_updated_date BEFORE UPDATE ON app.companies
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
 
@@ -2825,6 +2833,19 @@ CREATE TABLE app.customer_profiles (
   total_spend           NUMERIC     DEFAULT 0,
   first_order_date      TIMESTAMPTZ,
   last_order_date       TIMESTAMPTZ,
+  -- replenishment prediction rollup (owned by build_product_predictions DAG;
+  -- detail per product in commerce.customer_replenishment). status is the most
+  -- urgent bucket across the customer's due products.
+  replenishment_due_count  INTEGER,     -- # products currently due_soon/due_now/overdue
+  next_replenishment_date  DATE,        -- soonest predicted reorder date
+  days_to_replenishment    INTEGER,     -- days until next_replenishment_date (may be <0)
+  replenishment_status     TEXT,        -- not_due | due_soon | due_now | overdue
+  -- recommendation rollup (owned by build_product_predictions DAG; detail per
+  -- product in commerce.customer_product_reco).
+  reco_count                 INTEGER,   -- # recommended (cross-sell) products
+  top_recommended_product_id TEXT,      -- highest-ranked recommendation
+  top_recommended_product    TEXT,      -- its display name (cache)
+  top_recommended_category   TEXT,      -- most common product_type among recommendations
   -- offline / CRM activity
   seminar_count         INTEGER     DEFAULT 0,
   seminars              JSONB       DEFAULT '[]',
@@ -3023,7 +3044,11 @@ CREATE TABLE IF NOT EXISTS commerce.customer (
   is_opt_in_email BOOLEAN,
   is_opt_in_sms   BOOLEAN,
   tags            TEXT,
-  source_extra    JSONB
+  source_extra    JSONB,
+  -- Manual CSV import provenance (source_platform='manual'). NULL/false for
+  -- DAG-loaded platform rows; the commerce_landing DAG ignores these columns.
+  is_manual       BOOLEAN DEFAULT false,
+  upload_batch_id UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.product (
@@ -3091,7 +3116,10 @@ CREATE TABLE IF NOT EXISTS commerce."order" (
   total_refunded_amt NUMERIC,
   net_payment_amt    NUMERIC,
   remark             TEXT,
-  source_extra       JSONB
+  source_extra       JSONB,
+  -- Manual CSV import provenance (see commerce.customer note above).
+  is_manual          BOOLEAN DEFAULT false,
+  upload_batch_id    UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.order_line (
@@ -3119,7 +3147,10 @@ CREATE TABLE IF NOT EXISTS commerce.order_line (
   bundle_id        TEXT,
   bundle_name      TEXT,
   remark           TEXT,
-  source_extra     JSONB
+  source_extra     JSONB,
+  -- Manual CSV import provenance (see commerce.customer note above).
+  is_manual        BOOLEAN DEFAULT false,
+  upload_batch_id  UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.inventory_level (
@@ -3168,6 +3199,62 @@ CREATE TABLE IF NOT EXISTS commerce.refund_line (
   source_extra    JSONB
 );
 
+-- ── Derived: per-customer product replenishment predictions ──────────────────
+--  NOT landed from a platform - computed by the click_cdp_ai_build_product_
+--  predictions DAG from order_line cadence (median inter-purchase interval).
+--  One row per (customer, product) that is "replenishable" (population repeat
+--  rate over threshold). status: not_due | due_soon | due_now | overdue. The
+--  DAG owns this table (DELETE + INSERT per workspace); commerce_landing does
+--  NOT touch it, so it is intentionally absent from commerce_schema.ENTITIES.
+CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
+  company_id         UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id        TEXT  NOT NULL,             -- = app.customer_profiles.member_id
+  product_id         TEXT,
+  product_name       TEXT,
+  product_type       TEXT,
+  last_order_date    TIMESTAMPTZ,
+  cycle_days         NUMERIC,                    -- median interval (or cohort fallback)
+  cycle_spread       NUMERIC,                    -- robust spread of the cadence (IQR or cohort-derived)
+  predicted_next_date DATE,
+  days_until         INT,                        -- predicted_next_date - run date
+  status             TEXT,                       -- not_due | due_soon | due_now | overdue
+  confidence         TEXT,                       -- low | medium | high
+  purchase_count     INT,
+  is_cohort_estimate BOOLEAN DEFAULT false,      -- true = cycle from product_type cohort (1 purchase)
+  computed_at        TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx ON commerce.customer_replenishment (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_replen_status_idx       ON commerce.customer_replenishment (company_id, status);
+-- customer_id-only: the segment "due to reorder product X" predicate filters
+-- customer_id = member_id without company_id (member_id is globally unique).
+CREATE INDEX IF NOT EXISTS commerce_replen_customer_only_idx ON commerce.customer_replenishment (customer_id);
+
+-- ── Derived: per-customer product recommendations (cross-sell / discovery) ────
+--  NOT landed from a platform - computed by the same build_product_predictions
+--  DAG. Item-item co-purchase ("bought by similar customers") + a category-
+--  popularity fallback, EXCLUDING products the customer already owns (re-buys are
+--  the replenishment table's job). One row per (customer, recommended product),
+--  ranked. product_type carries the category concept (as elsewhere in commerce).
+CREATE TABLE IF NOT EXISTS commerce.customer_product_reco (
+  company_id     UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id    TEXT  NOT NULL,             -- = app.customer_profiles.member_id
+  product_id     TEXT  NOT NULL,
+  product_name   TEXT,
+  product_type   TEXT,
+  score          NUMERIC,                    -- ranking score (method-relative)
+  method         TEXT,                       -- copurchase | category
+  reason         TEXT,                       -- human-readable "why"
+  rank           INT,                        -- 1 = strongest, per customer
+  computed_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_reco_company_cust_idx ON commerce.customer_product_reco (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_reco_product_idx      ON commerce.customer_product_reco (company_id, product_id);
+-- customer_id-only: the segment "recommended product X" predicate filters
+-- customer_id = member_id without company_id (member_id is globally unique).
+CREATE INDEX IF NOT EXISTS commerce_reco_customer_only_idx ON commerce.customer_product_reco (customer_id);
+
 -- ── Indexes (tenant scoping + the app's read paths) ──────────────────────────
 CREATE INDEX IF NOT EXISTS commerce_order_company_idx          ON commerce."order" (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."order" (company_id, customer_id);
@@ -3177,6 +3264,10 @@ CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."orde
 CREATE INDEX IF NOT EXISTS commerce_order_customer_only_idx    ON commerce."order" (customer_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_company_idx     ON commerce.order_line (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_order_idx       ON commerce.order_line (order_id);
+-- Manual-import batch undo: delete all commerce rows from one upload batch.
+CREATE INDEX IF NOT EXISTS commerce_order_batch_idx            ON commerce."order" (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_order_line_batch_idx       ON commerce.order_line (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_customer_batch_idx         ON commerce.customer (upload_batch_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_company_idx       ON commerce.customer (company_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_email_idx         ON commerce.customer (company_id, lower(primary_email));
 CREATE INDEX IF NOT EXISTS commerce_product_company_idx        ON commerce.product (company_id);
@@ -4615,3 +4706,140 @@ UPDATE app.companies SET plan = 'enterprise' WHERE plan = 'pro';
 DELETE FROM app.plans WHERE id = 'pro';
 
 COMMIT;
+
+
+-- ===================== migrations/2026-07-06_commerce_manual_import.sql =====================
+
+-- ============================================================================
+--  2026-07-06_commerce_manual_import.sql  -  Manual transaction/order CSV import
+--  into the neutral commerce layer, for EXISTING databases (idempotent).
+--
+--  Fresh installs get these from 14_commerce.sql. Manually-imported orders land
+--  in commerce.customer / "order" / order_line tagged source_platform='manual';
+--  these columns mark that provenance (is_manual) and link rows to their upload
+--  batch (upload_batch_id -> manual.upload_batches) so an import can be undone.
+--  The DAG-loaded platform rows leave both NULL/false; the commerce_landing DAG
+--  ignores these columns.
+-- ============================================================================
+
+ALTER TABLE commerce.customer   ADD COLUMN IF NOT EXISTS is_manual       BOOLEAN DEFAULT false;
+ALTER TABLE commerce.customer   ADD COLUMN IF NOT EXISTS upload_batch_id UUID;
+ALTER TABLE commerce."order"    ADD COLUMN IF NOT EXISTS is_manual       BOOLEAN DEFAULT false;
+ALTER TABLE commerce."order"    ADD COLUMN IF NOT EXISTS upload_batch_id UUID;
+ALTER TABLE commerce.order_line ADD COLUMN IF NOT EXISTS is_manual       BOOLEAN DEFAULT false;
+ALTER TABLE commerce.order_line ADD COLUMN IF NOT EXISTS upload_batch_id UUID;
+
+CREATE INDEX IF NOT EXISTS commerce_order_batch_idx      ON commerce."order" (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_order_line_batch_idx ON commerce.order_line (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_customer_batch_idx   ON commerce.customer (upload_batch_id);
+
+
+-- ===================== migrations/2026-07-06_demo_workspace.sql =====================
+
+-- ============================================================================
+--  2026-07-06_demo_workspace.sql
+--  Adds the shared, read-only "demo" workspace flag to app.companies.
+--
+--  There is at most ONE demo workspace across the whole platform. It is injected
+--  into every user's workspace list by /auth/me (no company_members row needed),
+--  is read-only except for the AI analyst chat, and is created / reseeded /
+--  deleted only by a platform admin via Studio. The actual demo company + its
+--  mock data are provisioned by scripts/seed_demo.cjs (also invoked from the
+--  Studio admin endpoints), NOT by this migration.
+--  Idempotent: safe to run on a fresh or existing database.
+-- ============================================================================
+
+ALTER TABLE app.companies
+  ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT false;
+
+-- At most one demo workspace platform-wide.
+CREATE UNIQUE INDEX IF NOT EXISTS companies_single_demo_idx
+  ON app.companies((is_demo)) WHERE is_demo;
+
+
+-- ===================== migrations/2026-07-06_recommendations.sql =====================
+
+-- ============================================================================
+--  2026-07-06_recommendations.sql  -  Product recommendations (cross-sell), for
+--  EXISTING databases (idempotent). Fresh installs get these from
+--  14_commerce.sql + 12_profiles_identity.sql. Companion to
+--  2026-07-06_replenishment.sql - both are produced by the
+--  click_cdp_ai_build_product_predictions DAG.
+--
+--  Adds:
+--    * commerce.customer_product_reco        - per-(customer, recommended
+--      product) detail (item-item co-purchase + category fallback). DAG-owned;
+--      commerce_landing never touches it.
+--    * app.customer_profiles.reco_* / top_recommended_*  - per-customer rollup
+--      cache the Segments predicate builder + rule engine read.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS commerce.customer_product_reco (
+  company_id     UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id    TEXT  NOT NULL,
+  product_id     TEXT  NOT NULL,
+  product_name   TEXT,
+  product_type   TEXT,
+  score          NUMERIC,
+  method         TEXT,
+  reason         TEXT,
+  rank           INT,
+  computed_at    TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_reco_company_cust_idx  ON commerce.customer_product_reco (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_reco_product_idx       ON commerce.customer_product_reco (company_id, product_id);
+CREATE INDEX IF NOT EXISTS commerce_reco_customer_only_idx ON commerce.customer_product_reco (customer_id);
+
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS reco_count                 INTEGER;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS top_recommended_product_id TEXT;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS top_recommended_product    TEXT;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS top_recommended_category   TEXT;
+
+
+-- ===================== migrations/2026-07-06_replenishment.sql =====================
+
+-- ============================================================================
+--  2026-07-06_replenishment.sql  -  Product replenishment predictions, for
+--  EXISTING databases (idempotent). Fresh installs get these from
+--  14_commerce.sql + 12_profiles_identity.sql.
+--
+--  Adds:
+--    * commerce.customer_replenishment  - per-(customer, product) reorder
+--      prediction detail (median inter-purchase cadence). Owned by the
+--      click_cdp_ai_build_product_predictions DAG; commerce_landing never
+--      touches it.
+--    * app.customer_profiles.replenishment_*  - per-customer rollup cache the
+--      Segments predicate builder and rule engine read (like the ga_*/order_*
+--      caches). Source of truth is the detail table above.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS commerce.customer_replenishment (
+  company_id          UUID  NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  customer_id         TEXT  NOT NULL,
+  product_id          TEXT,
+  product_name        TEXT,
+  product_type        TEXT,
+  last_order_date     TIMESTAMPTZ,
+  cycle_days          NUMERIC,
+  cycle_spread        NUMERIC,
+  predicted_next_date DATE,
+  days_until          INT,
+  status              TEXT,
+  confidence          TEXT,
+  purchase_count      INT,
+  is_cohort_estimate  BOOLEAN DEFAULT false,
+  computed_at         TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (company_id, customer_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS commerce_replen_company_cust_idx  ON commerce.customer_replenishment (company_id, customer_id);
+CREATE INDEX IF NOT EXISTS commerce_replen_status_idx        ON commerce.customer_replenishment (company_id, status);
+CREATE INDEX IF NOT EXISTS commerce_replen_customer_only_idx ON commerce.customer_replenishment (customer_id);
+
+-- (idempotent add in case an earlier build of this table pre-dates cycle_spread)
+ALTER TABLE commerce.customer_replenishment ADD COLUMN IF NOT EXISTS cycle_spread NUMERIC;
+
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS replenishment_due_count INTEGER;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS next_replenishment_date DATE;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS days_to_replenishment   INTEGER;
+ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS replenishment_status    TEXT;

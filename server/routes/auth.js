@@ -235,7 +235,35 @@ async function fetchUserWithCompanies(pool, userId) {
      GROUP BY u.id`,
     [userId]
   );
+  if (rows[0]) rows[0].companies = await appendDemoCompany(pool, rows[0].companies);
   return rows[0] || null;
+}
+
+// Append the shared read-only demo workspace to a user's companies array so it
+// appears in every user's workspace switcher. It has NO company_members row; the
+// synthetic 'viewer' role + is_demo flag drive the read-only UI, and the auth
+// middleware grants access without a membership (see server/lib/demoWorkspace.js
+// and withCompany/resolveCompanyId). Never blocks auth if the demo is absent.
+async function appendDemoCompany(pool, companies) {
+  const list = Array.isArray(companies) ? [...companies] : [];
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, slug, logo_url, plan, created_date
+         FROM app.companies
+        WHERE is_demo = true AND is_active = true
+        LIMIT 1`
+    );
+    if (!rows.length) return list;
+    const d = rows[0];
+    if (list.some((c) => c.id === d.id)) return list;
+    list.push({
+      id: d.id, name: d.name, slug: d.slug, plan: d.plan,
+      plan_expires_at: null, plan_upgraded_at: null,
+      is_account_owner: false, logo_url: d.logo_url,
+      role: "viewer", is_demo: true, created_date: d.created_date,
+    });
+  } catch { /* demo is optional - never block sign-in */ }
+  return list;
 }
 
 export function createAuthRouter(pool) {
@@ -606,6 +634,7 @@ export function createAuthRouter(pool) {
       setAuthCookie(res, token);
 
       const { password_hash, email_verify_token, ...safeUser } = user;
+      safeUser.companies = await appendDemoCompany(pool, safeUser.companies);
       res.json({ user: safeUser, token });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -757,9 +786,12 @@ export function createAuthRouter(pool) {
         [req.user.id]
       );
       if (!rows.length) return res.status(401).json({ error: "User not found" });
+      // Everyone also sees the shared read-only demo workspace in their switcher.
+      const me = rows[0];
+      me.companies = await appendDemoCompany(pool, me.companies);
       // Surface impersonation context (set when a platform owner is acting as this
       // user) so the UI can show an "exit impersonation" banner.
-      res.json({ ...rows[0], impersonated_by: req.user.impersonated_by || null });
+      res.json({ ...me, impersonated_by: req.user.impersonated_by || null });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

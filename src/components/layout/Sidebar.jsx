@@ -3,7 +3,7 @@ import {
   LayoutDashboard, MessageSquare, Target, Users,
   ChevronLeft, ChevronRight, ContactRound, Mail, Plug,
   ChevronDown, Building2, LogOut,
-  Check, Plus, Settings, MousePointer2, Tag, Rocket, Upload, ShieldCheck,
+  Check, Plus, Settings, MousePointer2, Tag, Rocket, Upload, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
@@ -227,8 +227,8 @@ export default function Sidebar() {
             {companies.map(c => (
               <DropdownItem
                 key={c.id}
-                icon={Building2}
-                label={c.name}
+                icon={c.is_demo ? Sparkles : Building2}
+                label={c.is_demo ? `${c.name} · Demo` : c.name}
                 active={c.id === currentCompany?.id}
                 onClick={() => { switchCompany(c); queryClient.clear(); }}
               />

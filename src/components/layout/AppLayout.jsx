@@ -5,6 +5,7 @@ import EmailVerifyBanner from "./EmailVerifyBanner";
 import ImpersonationBanner from "./ImpersonationBanner";
 import AnnouncementBanner from "./AnnouncementBanner";
 import AiCreditBanner from "./AiCreditBanner";
+import DemoBanner from "./DemoBanner";
 
 export default function AppLayout() {
   return (
@@ -14,6 +15,7 @@ export default function AppLayout() {
       <EmailVerifyBanner />
       <TrialBanner />
       <AiCreditBanner />
+      <DemoBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 min-h-0 overflow-auto">

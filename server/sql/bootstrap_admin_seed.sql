@@ -16,7 +16,7 @@ WITH acct AS (
 usr AS (
   INSERT INTO app.users (account_id, email, password_hash, full_name,
                          is_email_verified, is_active, is_platform_admin)
-  SELECT id, 'admin@example.com', '$2b$10$2afSIFpEn6xs74jsCrYgy.X2YABBR9EMX51AGfAUqV.5ei0FtxPN.', 'Admin', true, true, true
+  SELECT id, 'admin@example.com', '$2b$10$LVkpTYduo2wLGPI2PzjNmeFGfH2Ur3VfXmUg7CG9PkUKHFaZAsl1m', 'Admin', true, true, true
   FROM acct
   RETURNING id, account_id
 ),

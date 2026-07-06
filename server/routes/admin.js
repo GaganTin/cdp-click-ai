@@ -1,9 +1,33 @@
 import { Router } from "express";
 import crypto from "crypto";
+import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 import { authenticate, requirePlatformAdmin, createToken, setAuthCookie } from "../middleware/auth.js";
 import { sendVerificationEmail, sendPasswordResetEmail } from "../services/email.js";
 import { clearPricingCache } from "../lib/aiUsage.js";
 import { blockEmails } from "../lib/blockedEmails.js";
+import { clearDemoCache } from "../lib/demoWorkspace.js";
+
+// Run scripts/seed_demo.cjs with the given flag ([], ["--reseed"] or ["--delete"]).
+// Inherits the server's env (POSTGRESQL_CONN), resolves with captured stdout on
+// success, rejects with stderr on a non-zero exit.
+const DEMO_SEED_SCRIPT = fileURLToPath(new URL("../../scripts/seed_demo.cjs", import.meta.url));
+const DEMO_SEED_CWD = fileURLToPath(new URL("../../", import.meta.url));
+function runDemoSeed(args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [DEMO_SEED_SCRIPT, ...args], {
+      env: process.env, cwd: DEMO_SEED_CWD,
+    });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d.toString(); });
+    child.stderr.on("data", (d) => { err += d.toString(); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve(out.trim());
+      else reject(new Error(err.trim() || out.trim() || `seed_demo exited ${code}`));
+    });
+  });
+}
 
 // ============================================================================
 //  Platform-owner ("Studio") API. Everything here is PLATFORM-scoped, not
@@ -704,6 +728,73 @@ export function createAdminRouter(pool) {
          LIMIT $3
       `, [action, accountId, limit]);
       res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Demo workspace (shared, read-only) ──────────────────────────────────────
+  // The single platform-wide demo workspace every user can explore. Provisioned,
+  // reseeded and deleted ONLY here (spawns scripts/seed_demo.cjs). GET reports
+  // status + a few row counts so the Studio panel can show what's populated.
+
+  // GET /api/admin/demo-workspace
+  router.get("/demo-workspace", async (_req, res) => {
+    try {
+      const { rows } = await pool.query(
+        "SELECT id, name, slug, created_date, updated_date FROM app.companies WHERE is_demo = true LIMIT 1"
+      );
+      if (!rows.length) return res.json({ exists: false });
+      const demo = rows[0];
+      const { rows: [counts] } = await pool.query(
+        `SELECT
+           (SELECT COUNT(*) FROM app.customer_profiles  WHERE company_id = $1) AS customers,
+           (SELECT COUNT(*) FROM app.anonymous_profiles WHERE company_id = $1) AS anonymous,
+           (SELECT COUNT(*) FROM app.segments           WHERE company_id = $1) AS segments,
+           (SELECT COUNT(*) FROM app.campaigns          WHERE company_id = $1) AS campaigns,
+           (SELECT COUNT(*) FROM app.edm_campaigns      WHERE company_id = $1) AS edm_campaigns,
+           (SELECT COUNT(*) FROM app.popups             WHERE company_id = $1) AS popups,
+           (SELECT COUNT(*) FROM app.attributes         WHERE company_id = $1) AS attributes,
+           (SELECT COUNT(*) FROM app.pinned_charts      WHERE company_id = $1) AS pinned_charts`,
+        [demo.id]
+      );
+      res.json({ exists: true, workspace: demo, counts });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/demo-workspace - provision if absent (no-op if it exists).
+  router.post("/demo-workspace", async (req, res) => {
+    try {
+      const output = await runDemoSeed([]);
+      clearDemoCache();
+      await audit(null, req.user.id, "create", "demo_workspace", null, { output });
+      res.json({ ok: true, output });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/demo-workspace/reseed - wipe demo data + re-seed (fixed id).
+  router.post("/demo-workspace/reseed", async (req, res) => {
+    try {
+      const output = await runDemoSeed(["--reseed"]);
+      clearDemoCache();
+      await audit(null, req.user.id, "update", "demo_workspace", null, { output, reseed: true });
+      res.json({ ok: true, output });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/admin/demo-workspace - remove the demo workspace + system account.
+  router.delete("/demo-workspace", async (req, res) => {
+    try {
+      const output = await runDemoSeed(["--delete"]);
+      clearDemoCache();
+      await audit(null, req.user.id, "delete", "demo_workspace", null, { output });
+      res.json({ ok: true, output });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

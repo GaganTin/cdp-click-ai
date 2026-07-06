@@ -4,6 +4,14 @@ import { authenticate } from "../middleware/auth.js";
 import { registerCompanyWithInteractionService } from "../lib/interactionService.js";
 import { slugify, uniqueSlug } from "../lib/slug.js";
 import { sendInvitationEmail } from "../services/email.js";
+import { isDemoCompany } from "../lib/demoWorkspace.js";
+
+// The shared demo workspace is platform-managed: it can only be created,
+// reseeded, or deleted by a platform admin via Studio - never through the normal
+// workspace routes. Refuse any such attempt (belt-and-suspenders on top of the
+// fact that no user is a member of it).
+const DEMO_MANAGED_MSG =
+  "The demo workspace is managed by the platform team and can't be changed or deleted here.";
 
 // capsuite_ref is globally unique (external ETL maps it → company_id). Readable
 // underscore-cased root from the name + a short random suffix, retry on collision.
@@ -182,6 +190,7 @@ export function createCompanyRouter(pool) {
   // PATCH /api/companies/:id - update company profile
   router.patch("/:id", authenticate, async (req, res) => {
     const { id } = req.params;
+    if (await isDemoCompany(pool, id)) return res.status(403).json({ error: DEMO_MANAGED_MSG });
     const member = await getMembership(pool, id, req.user.id);
     if (!isAdmin(member)) return res.status(403).json({ error: "Admin access required" });
 
@@ -224,6 +233,7 @@ export function createCompanyRouter(pool) {
   // (confirm_name), and an account may never be left with zero workspaces.
   router.delete("/:id", authenticate, async (req, res) => {
     const { id } = req.params;
+    if (await isDemoCompany(pool, id)) return res.status(403).json({ error: DEMO_MANAGED_MSG });
     const member = await getMembership(pool, id, req.user.id);
     if (!isAdmin(member)) return res.status(403).json({ error: "Admin access required" });
 
