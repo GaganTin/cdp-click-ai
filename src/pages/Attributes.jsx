@@ -617,7 +617,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
   const [testResults, setTestResults] = useState(null);
   const [valueSearch, setValueSearch] = useState("");
   const [pageSearch, setPageSearch] = useState("");       // Tagged-pages tab search
-  const [pageValueFilter, setPageValueFilter] = useState(""); // Tagged-pages tab value filter
+  const [pageValueSel, setPageValueSel] = useState([]);   // Tagged-pages tab value filter (multi)
   const [newDimension, setNewDimension] = useState("");   // add-dimension input
   const [extraGroups, setExtraGroups] = useState({});     // manually-created empty groups, keyed by dimension
   const [addGroupDim, setAddGroupDim] = useState(null);   // which dimension the Add-group dialog targets
@@ -1103,9 +1103,19 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                   )}
                 </div>
               ) : (() => {
-                // Client-side search + value filter over the tagged-pages list.
+                // Value filter options = every tag actually present on these pages
+                // (verified or not), so users can filter by any tag. Derived from the
+                // loaded pages, not just the approved value set.
+                const pageValueOpts = (() => {
+                  const m = new Map();
+                  for (const pg of pages) for (const v of (pg.values || [])) {
+                    if (!m.has(v.id)) m.set(v.id, { value: v.id, label: v.value });
+                  }
+                  return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
+                })();
+                // Client-side search + multi-value filter over the tagged-pages list.
                 const shownPages = pages.filter((pg) => {
-                  if (pageValueFilter && !(pg.values || []).some((v) => v.id === pageValueFilter)) return false;
+                  if (pageValueSel.length && !(pg.values || []).some((v) => pageValueSel.includes(v.id))) return false;
                   if (!pageSearch) return true;
                   const q = pageSearch.toLowerCase();
                   return (pg.title || "").toLowerCase().includes(q)
@@ -1122,14 +1132,14 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                         <input value={pageSearch} onChange={(e) => setPageSearch(e.target.value)} placeholder={t("Search pages or values…")}
                           className="w-full h-8 pl-7 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
                       </div>
-                      {approved.length > 0 && (
-                        <Select value={pageValueFilter || "__all"} onValueChange={(v) => setPageValueFilter(v === "__all" ? "" : v)}>
-                          <SelectTrigger className="h-8 w-44 text-xs"><SelectValue placeholder={t("All values")} /></SelectTrigger>
-                          <SelectContent className="max-h-64">
-                            <SelectItem value="__all">{t("All values")}</SelectItem>
-                            {approved.map((v) => <SelectItem key={v.id} value={v.id}>{v.display_label || v.value}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                      {pageValueOpts.length > 0 && (
+                        <MultiSelect className="w-52 flex-shrink-0" value={pageValueSel} onChange={setPageValueSel} options={pageValueOpts}
+                          placeholder={t("All values")} searchPlaceholder={t("Search values…")} />
+                      )}
+                      {pageValueSel.length > 0 && (
+                        <button onClick={() => setPageValueSel([])} className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 flex-shrink-0">
+                          <X className="w-3 h-3" /> {t("Clear")}
+                        </button>
                       )}
                       <span className="text-[11px] text-muted-foreground ml-auto">{shownPages.length} {t("of")} {pages.length}</span>
                     </div>

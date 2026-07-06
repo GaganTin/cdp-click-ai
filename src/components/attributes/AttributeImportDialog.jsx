@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FileText, FileDown, Download, Upload, X, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useRole } from "@/lib/useRole";
 
 // Import / export of attribute definitions in a single modal, modeled on the
 // "Import UTM Links" modal on the Campaigns page: download a template, fill it,
@@ -147,14 +148,16 @@ export async function exportAttributes(source, attrs) {
 
 export default function AttributeImportDialog({ open, source, attrs = [], onClose, onImported }) {
   const meta = SOURCE_META[source] || SOURCE_META.web_content;
-  const [mode, setMode] = useState("import");
+  // Viewers are read-only: they may export attributes but not import them.
+  const { canWrite } = useRole();
+  const [mode, setMode] = useState(canWrite ? "import" : "export");
   const [file, setFile] = useState(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [results, setResults] = useState(null);
   const fileRef = useRef(null);
 
-  const reset = () => { setMode("import"); setFile(null); setImporting(false); setExporting(false); setResults(null); };
+  const reset = () => { setMode(canWrite ? "import" : "export"); setFile(null); setImporting(false); setExporting(false); setResults(null); };
   const close = () => { reset(); onClose(); };
 
   const handleTemplate = () => {
@@ -175,6 +178,7 @@ export default function AttributeImportDialog({ open, source, attrs = [], onClos
 
   const handleImport = async () => {
     if (!file) return;
+    if (!canWrite) { toast.error("Viewers have read-only access and can't import data."); return; }
     setImporting(true);
     try {
       const matrix = parseCsv(await file.text());
@@ -220,7 +224,7 @@ export default function AttributeImportDialog({ open, source, attrs = [], onClos
 
         {!results && (
           <div className="flex gap-0.5 p-0.5 bg-secondary/40 rounded-lg">
-            {[["import", "Import"], ["export", "Export"]].map(([k, label]) => (
+            {(canWrite ? [["import", "Import"], ["export", "Export"]] : [["export", "Export"]]).map(([k, label]) => (
               <button key={k} onClick={() => setMode(k)}
                 className={`flex-1 h-8 text-xs font-medium rounded-md transition-colors ${mode === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
                 {label}

@@ -15,6 +15,7 @@ import UTMImportDialog from "@/components/import/UTMImportDialog";
 import SuppressionImportDialog from "@/components/import/SuppressionImportDialog";
 import AttributeImportDialog, { exportAttributes } from "@/components/attributes/AttributeImportDialog";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 
 // Central hub for every CSV/data import AND export in the app. Each source keeps
 // its own import/export entry point on its native page; this page just gathers
@@ -212,6 +213,8 @@ export default function ImportData() {
   const [segExportingId, setSegExportingId] = useState(null);
   const queryClient = useQueryClient();
   const { t } = usePreferences();
+  // Viewers are read-only: they can export data but not import it.
+  const { canWrite } = useRole();
 
   const { data: attributes = [] } = useQuery({
     queryKey: ["attributes"],
@@ -382,6 +385,11 @@ export default function ImportData() {
         />
         {tab === "import" ? (
           <div className="space-y-8">
+            {!canWrite && (
+              <div className="rounded-lg border border-border bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
+                {t("You have read-only (viewer) access. Importing data is disabled - you can still export from the Export tab.")}
+              </div>
+            )}
             {IMPORT_SECTIONS.map((section) => (
               <Section key={section.label} section={section}>
                 {section.cards.map((card) => (
@@ -389,6 +397,8 @@ export default function ImportData() {
                     <Button
                       variant="ghost" size="sm"
                       className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground"
+                      disabled={!canWrite}
+                      title={!canWrite ? t("Viewers have read-only access and can't import data") : undefined}
                       onClick={() => setActive(card)}
                     >
                       <Upload className="w-3 h-3" /> {t("Import")}

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Upload, FileDown, FileText, AlertCircle, CheckCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import { buildUTMUrl } from "../campaigns/UTMForm";
+import { useRole } from "@/lib/useRole";
 
 // Import UTM links from a CSV template. Extracted from the Campaigns page so the
 // same flow can be reused on the central Import Data page. Parsing happens
@@ -26,12 +27,15 @@ export default function UTMImportDialog({ open, onClose, existingCampaigns = [],
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
   const queryClient = useQueryClient();
+  // Viewers are read-only and can't import.
+  const { canWrite } = useRole();
 
   const reset = () => { setFile(null); setResults(null); setImporting(false); };
   const close = () => { reset(); onClose?.(); };
 
   const handleImport = async () => {
     if (!file) return;
+    if (!canWrite) { toast.error("Viewers have read-only access and can't import data."); return; }
     setImporting(true);
     try {
       const text = await file.text();

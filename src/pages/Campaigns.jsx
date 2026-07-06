@@ -241,7 +241,7 @@ export default function Campaigns() {
 
   const handleExportSelected = () => {
     if (!selectedCampaigns.length) return;
-    const COLS = ["name", "status", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "base_url", "full_utm_url", "created_date"];
+    const COLS = ["name", "status", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "base_url", "full_utm_url", "created_date", "created_by_name"];
     const header = COLS.join(",");
     const body = selectedCampaigns.map(c =>
       COLS.map(k => { const v = String(c[k] || ""); return v.includes(",") ? `"${v}"` : v; }).join(",")
@@ -331,36 +331,6 @@ export default function Campaigns() {
         {/* ── UTM Links Tab ────────────────────────────────────────────── */}
         {tab === "utm" && (
           <div className="px-8 py-6 space-y-6">
-
-            {/* Always-available guide so teammates who join later can still learn the page. */}
-            <PageGuide
-              storageKey="guide.utm"
-              title={t("How UTM links work")}
-              intro={t("UTM links are regular URLs with tracking tags added to them. When someone clicks a tagged link, your analytics can tell exactly which campaign, source, and medium brought them in - so you know what's actually driving traffic and conversions.")}
-              stepsTitle={t("Building a UTM link, step by step")}
-              steps={[
-                { title: t("Click New UTM"), desc: t("Give your link a name and paste in the destination URL you want visitors to land on.") },
-                { title: t("Set the parameters"), desc: t("Fill in source (e.g. google, newsletter), medium (e.g. cpc, email), and campaign - these tags are what your analytics reads.") },
-                { title: t("Add optional detail"), desc: t("Use term and content to distinguish keywords or A/B variants of the same campaign.") },
-                { title: t("Copy the generated link"), desc: t("A ready-to-use tracking URL is built automatically - copy it into your ad, email, or post.") },
-                { title: t("Track performance"), desc: t("Open the Analytics tab to see clicks, sessions, and conversions grouped by your UTM tags.") },
-              ]}
-              uses={[
-                { icon: LinkIcon, title: t("Tag every campaign"), desc: t("Create consistent tracking links for ads, emails, and social posts.") },
-                { icon: BarChart2, title: t("Measure what works"), desc: t("See which sources and mediums actually drive traffic and conversions.") },
-                { icon: Upload, title: t("Import in bulk"), desc: t("Bring in links you already use so all your tracking lives in one place.") },
-              ]}
-              sections={[{
-                title: t("What the parameters mean"),
-                items: [
-                  { icon: LinkIcon, label: t("Source"), desc: t("- where the traffic comes from (e.g. google, facebook, newsletter).") },
-                  { icon: Filter, label: t("Medium"), desc: t("- the type of link (e.g. cpc, email, social, referral).") },
-                  { icon: Info, label: t("Campaign"), desc: t("- the specific promotion or initiative the link belongs to.") },
-                  { icon: Search, label: t("Term & Content"), desc: t("- optional tags for paid keywords and distinguishing link variants.") },
-                ],
-              }]}
-              footer={t("Consistent naming matters - google and Google count as two different sources in your reports. Pick a convention and stick to it.")}
-            />
 
             {/* Search + Filter */}
             <div>
@@ -486,6 +456,36 @@ export default function Campaigns() {
                 </div>
               )}
             </div>
+
+            {/* Always-available guide so teammates who join later can still learn the page. */}
+            <PageGuide
+              storageKey="guide.utm"
+              title={t("How UTM links work")}
+              intro={t("UTM links are regular URLs with tracking tags added to them. When someone clicks a tagged link, your analytics can tell exactly which campaign, source, and medium brought them in - so you know what's actually driving traffic and conversions.")}
+              stepsTitle={t("Building a UTM link, step by step")}
+              steps={[
+                { title: t("Click New UTM"), desc: t("Give your link a name and paste in the destination URL you want visitors to land on.") },
+                { title: t("Set the parameters"), desc: t("Fill in source (e.g. google, newsletter), medium (e.g. cpc, email), and campaign - these tags are what your analytics reads.") },
+                { title: t("Add optional detail"), desc: t("Use term and content to distinguish keywords or A/B variants of the same campaign.") },
+                { title: t("Copy the generated link"), desc: t("A ready-to-use tracking URL is built automatically - copy it into your ad, email, or post.") },
+                { title: t("Track performance"), desc: t("Open the Analytics tab to see clicks, sessions, and conversions grouped by your UTM tags.") },
+              ]}
+              uses={[
+                { icon: LinkIcon, title: t("Tag every campaign"), desc: t("Create consistent tracking links for ads, emails, and social posts.") },
+                { icon: BarChart2, title: t("Measure what works"), desc: t("See which sources and mediums actually drive traffic and conversions.") },
+                { icon: Upload, title: t("Import in bulk"), desc: t("Bring in links you already use so all your tracking lives in one place.") },
+              ]}
+              sections={[{
+                title: t("What the parameters mean"),
+                items: [
+                  { icon: LinkIcon, label: t("Source"), desc: t("- where the traffic comes from (e.g. google, facebook, newsletter).") },
+                  { icon: Filter, label: t("Medium"), desc: t("- the type of link (e.g. cpc, email, social, referral).") },
+                  { icon: Info, label: t("Campaign"), desc: t("- the specific promotion or initiative the link belongs to.") },
+                  { icon: Search, label: t("Term & Content"), desc: t("- optional tags for paid keywords and distinguishing link variants.") },
+                ],
+              }]}
+              footer={t("Consistent naming matters - google and Google count as two different sources in your reports. Pick a convention and stick to it.")}
+            />
 
             {gaLoading && (
               <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
@@ -620,6 +620,7 @@ export default function Campaigns() {
                               { key: "_ga_bounce",     label: t("Bounce"),      align: "right", info: t("Avg. bounce rate - percentage of sessions where users left without any meaningful interaction.") },
                               { key: "_ga_engagement", label: t("Engagement"),  align: "right", info: t("Avg. engagement rate - sessions that lasted 10+ seconds, had a conversion event, or included 2+ page views.") },
                               { key: "created_date", label: t("Created"),      align: "left" },
+                              { key: "created_by_name", label: t("Created By"), align: "left" },
                             ].map(col => (
                               <th
                                 key={col.key}
@@ -670,6 +671,10 @@ export default function Campaigns() {
                                 <GaCell value={ga ? fmtPct(ga.avg_engagement_rate) : null} />
                                 <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
                                   {format(new Date(c.created_date), "MMM d, yyyy")}
+                                </td>
+                                <td className="px-3 py-2.5 text-muted-foreground max-w-[160px] truncate whitespace-nowrap"
+                                  title={c.created_by_name || c.created_by_email || undefined}>
+                                  {c.created_by_name || c.created_by_email || "-"}
                                 </td>
                               </tr>
                             );

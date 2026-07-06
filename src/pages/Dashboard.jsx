@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { usePreferences } from "@/lib/PreferencesContext";
 import { useDashboardLayout } from "@/lib/useDashboardLayout";
+import { useRole } from "@/lib/useRole";
 import PinnedChartCard from "../components/dashboard/PinnedChartCard";
 import { normalizeSize, sizeMeta, nextSize } from "@/lib/chartSizes";
 
@@ -33,6 +34,9 @@ export default function Dashboard() {
   // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
   // (company-scoped app.settings) via this hook - nothing is stored locally.
   const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, userId } = useDashboardLayout();
+  // Viewers are read-only: they can see tabs but can't add/rename/remove/reorder
+  // or change tab visibility (the backend also rejects the layout write).
+  const { canWrite } = useRole();
 
   const [activeTab, setActiveTab] = useState("main");
   const [editingTab, setEditingTab] = useState(null);
@@ -240,10 +244,10 @@ export default function Dashboard() {
               <div
                 key={tab.id}
                 className={`flex items-center group relative flex-shrink-0 ${dragTabId === tab.id ? "opacity-40" : ""}`}
-                draggable={editingTab !== tab.id}
-                onDragStart={() => setDragTabId(tab.id)}
+                draggable={canWrite && editingTab !== tab.id}
+                onDragStart={() => canWrite && setDragTabId(tab.id)}
                 onDragOver={e => e.preventDefault()}
-                onDrop={() => handleTabDrop(tab.id)}
+                onDrop={() => canWrite && handleTabDrop(tab.id)}
                 onDragEnd={() => setDragTabId(null)}
               >
                 {editingTab === tab.id ? (
@@ -257,14 +261,16 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <button
-                    className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 transition-colors cursor-grab active:cursor-grabbing whitespace-nowrap ${
+                    className={`flex items-center gap-1.5 pb-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                      canWrite ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
+                    } ${
                       activeTab === tab.id
                         ? "border-foreground text-foreground"
                         : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                     onClick={() => setActiveTab(tab.id)}
-                    onDoubleClick={() => startEdit(tab)}
-                    title={t("Drag to reorder · double-click to rename")}
+                    onDoubleClick={() => { if (canWrite) startEdit(tab); }}
+                    title={canWrite ? t("Drag to reorder · double-click to rename") : undefined}
                   >
                     {tab.visibility === "private" && (
                       <span title={t("Private tab - only you can see it")} className="flex-shrink-0">
@@ -272,7 +278,7 @@ export default function Dashboard() {
                       </span>
                     )}
                     {tab.name}
-                    {tab.created_by === userId && (
+                    {canWrite && tab.created_by === userId && (
                       <span
                         className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
                         title={tab.visibility === "private"
@@ -285,7 +291,7 @@ export default function Dashboard() {
                           : <Lock className="w-2.5 h-2.5" />}
                       </span>
                     )}
-                    {activeTab === tab.id && (
+                    {canWrite && activeTab === tab.id && (
                       <span
                         className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
                         title={t("Rename tab")}
@@ -294,7 +300,7 @@ export default function Dashboard() {
                         <Pencil className="w-2.5 h-2.5" />
                       </span>
                     )}
-                    {tabs.length > 1 && (
+                    {canWrite && tabs.length > 1 && (
                       <span
                         className="opacity-0 group-hover:opacity-50 hover:!opacity-100"
                         onClick={e => { e.stopPropagation(); removeTab(tab.id); }}
@@ -307,12 +313,14 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-          <button
-            onClick={addTab}
-            className="flex items-center gap-1.5 pb-3 mb-2.5 pl-4 flex-shrink-0 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" /> {t("New tab")}
-          </button>
+          {canWrite && (
+            <button
+              onClick={addTab}
+              className="flex items-center gap-1.5 pb-3 mb-2.5 pl-4 flex-shrink-0 text-sm font-medium border-b-2 border-transparent text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" /> {t("New tab")}
+            </button>
+          )}
         </div>
       </div>
 

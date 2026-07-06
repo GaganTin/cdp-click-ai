@@ -1022,6 +1022,10 @@ export function createAttributesRouter(pool) {
   });
 
   router.post("/", async (req, res) => {
+    // Creating an attribute (incl. via CSV import) is a write - viewers are read-only.
+    if (req.companyMember?.role === "viewer") {
+      return res.status(403).json({ error: "Viewers have read-only access and can't create items." });
+    }
     const { name, description = "", source = "web_content", value_type = "multi",
             scope = "both", extract_from = "both", status = "draft", rule = {}, values = [] } = req.body || {};
     if (!name?.trim()) return res.status(400).json({ error: "name is required" });
@@ -1698,6 +1702,11 @@ export function createAttributesRouter(pool) {
   // Assign a value to a pasted/imported list of identifiers (email/member_id/visitor_id).
   router.post("/:id/assign-import", async (req, res) => {
     try {
+      // Importing (bulk-assigning a pasted/uploaded list) is a write - viewers
+      // have read-only access.
+      if (req.companyMember?.role === "viewer") {
+        return res.status(403).json({ error: "Viewers have read-only access and can't import data." });
+      }
       const a = await loadAttr(req.params.id, req.companyId);
       if (!a) return res.status(404).json({ error: "Attribute not found" });
       if (!req.body?.value_id) return res.status(400).json({ error: "value_id required" });

@@ -8,6 +8,7 @@ import { appClient } from "@/api/appClient";
 import { parseChartConfig } from "@/lib/utils";
 import { CHART_SIZES, normalizeSize, sizeMeta } from "@/lib/chartSizes";
 import { useDashboardLayout } from "@/lib/useDashboardLayout";
+import { useRole } from "@/lib/useRole";
 import MiniChart from "./MiniChart";
 
 // Pixel heights for this (narrow) preview panel; the column span comes from the
@@ -18,6 +19,9 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
   // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
   // are shared with the Dashboard page - nothing is persisted in localStorage.
   const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, isLoading, userId } = useDashboardLayout();
+  // Viewers are read-only: no adding/renaming/removing/reordering tabs or
+  // changing tab visibility (the backend also rejects the layout write).
+  const { canWrite } = useRole();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("main");
@@ -187,7 +191,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                     : "text-muted-foreground hover:text-foreground hover:bg-secondary"
                 }`}
                 onClick={() => setActiveTab(tab.id)}
-                onDoubleClick={() => startEditTab(tab)}
+                onDoubleClick={() => { if (canWrite) startEditTab(tab); }}
               >
                 {tab.visibility === "private" && (
                   <span title="Private tab - only you can see it" className="flex-shrink-0">
@@ -195,7 +199,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                   </span>
                 )}
                 {tab.name}
-                {tab.created_by === userId && (
+                {canWrite && tab.created_by === userId && (
                   <span
                     className="opacity-0 group-hover:opacity-60 hover:!opacity-100 ml-0.5"
                     onClick={e => { e.stopPropagation(); toggleTabVisibility(tab.id); }}
@@ -208,7 +212,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                       : <Lock className="w-2.5 h-2.5" />}
                   </span>
                 )}
-                {activeTab === tab.id && (
+                {canWrite && activeTab === tab.id && (
                   <span
                     className="opacity-0 group-hover:opacity-60 hover:!opacity-100 ml-0.5"
                     onClick={e => { e.stopPropagation(); startEditTab(tab); }}
@@ -217,7 +221,7 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                     <Pencil className="w-2.5 h-2.5" />
                   </span>
                 )}
-                {tabs.length > 1 && (
+                {canWrite && tabs.length > 1 && (
                   <span
                     className="opacity-0 group-hover:opacity-60 hover:!opacity-100 ml-0.5"
                     onClick={e => { e.stopPropagation(); removeTab(tab.id); }}
@@ -230,9 +234,11 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
             )}
           </div>
         ))}
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addTab} title="New tab">
-          <Plus className="w-3 h-3" />
-        </Button>
+        {canWrite && (
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addTab} title="New tab">
+            <Plus className="w-3 h-3" />
+          </Button>
+        )}
       </div>
 
       {/* Hint */}

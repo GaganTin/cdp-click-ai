@@ -64,6 +64,19 @@ async function companyGuard(req, res) {
   return resolveCompanyId(pool, req, res, { blockViewerOnPost: false });
 }
 
+// Some write endpoints are POSTs, which companyGuard deliberately lets viewers
+// reach (read-style POSTs like the analyst must keep working for viewers). For
+// the POSTs that ARE real writes (imports, entity creation) block viewers
+// explicitly. companyGuard has already stashed req.companyRole. Returns true
+// (after sending 403) when blocked. `action` completes "...can't <action>.".
+function denyViewer(req, res, action = "make changes") {
+  if (req.companyRole === "viewer") {
+    res.status(403).json({ error: `Viewers have read-only access and can't ${action}.` });
+    return true;
+  }
+  return false;
+}
+
 // ── Azure OpenAI ──────────────────────────────────────────────────────────────
 const azureEndpoint = (process.env.AZURE_OPENAI_ENDPOINT || "").replace(/\/$/, "");
 const azureKey = process.env.AZURE_OPENAI_KEY || "";
@@ -1494,6 +1507,10 @@ app.post("/api/entities/:entity", authenticate, async (req, res) => {
     if (config.multiTenant) {
       const companyId = await companyGuard(req, res);
       if (!companyId) return;
+      // Creating an entity (campaign, segment, pinned chart, saved report) is a
+      // write - viewers are read-only. companyGuard allows read-style POSTs, so
+      // block viewers here explicitly.
+      if (denyViewer(req, res, "create items")) return;
       const allCols = [...cols, "company_id", "created_by"];
       const placeholders = allCols.map((_, i) => `$${i + 1}`).join(", ");
       const values = [...cols.map((c) => req.body[c]), companyId, req.user.id];
@@ -2665,6 +2682,7 @@ app.post("/api/profiles/import", authenticate, upload.single("file"), async (req
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   const companyId = await companyGuard(req, res);
   if (!companyId) return;
+  if (denyViewer(req, res, "import data")) return;
 
   let text;
   try {
@@ -2974,6 +2992,7 @@ app.post("/api/commerce/import", authenticate, upload.single("file"), async (req
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   const companyId = await companyGuard(req, res);
   if (!companyId) return;
+  if (denyViewer(req, res, "import data")) return;
 
   let text;
   try {
