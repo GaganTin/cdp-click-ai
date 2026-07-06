@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil, ArrowUp, ArrowDown, Sparkles } from "lucide-react";
+import { X, Plus, Trash2, GripVertical, Edit2, Check, Pencil, ArrowUp, ArrowDown, Sparkles, Lock, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { appClient } from "@/api/appClient";
@@ -17,7 +17,7 @@ const PREVIEW_HEIGHTS = { small: "h-48", large: "h-72" };
 export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedCharts = [], onEditRequest }) {
   // Tabs / assignments / sizes live in the DB (company-scoped app.settings) and
   // are shared with the Dashboard page - nothing is persisted in localStorage.
-  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, isLoading } = useDashboardLayout();
+  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, isLoading, userId } = useDashboardLayout();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("main");
@@ -69,9 +69,17 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
     const id = `tab-${Date.now()}`;
     let n = tabs.length + 1;
     while (isDuplicateName(`Tab ${n}`)) n++;
-    setTabs(prev => [...prev, { id, name: `Tab ${n}` }]);
+    // Owned by the creator, public by default; the owner can flip to private.
+    setTabs(prev => [...prev, { id, name: `Tab ${n}`, created_by: userId, visibility: "public" }]);
     setTabAssignments(prev => ({ ...prev, [id]: [] }));
     setActiveTab(id);
+  };
+
+  // Owner-only: flip a tab between public (all members) and private (only me).
+  const toggleTabVisibility = (tabId) => {
+    setTabs(prev => prev.map(t =>
+      t.id === tabId ? { ...t, visibility: t.visibility === "private" ? "public" : "private" } : t
+    ));
   };
 
   const removeTab = (tabId) => {
@@ -181,7 +189,25 @@ export default function DashboardPreviewPanel({ onClose, pinnedChart, pinnedChar
                 onClick={() => setActiveTab(tab.id)}
                 onDoubleClick={() => startEditTab(tab)}
               >
+                {tab.visibility === "private" && (
+                  <span title="Private tab - only you can see it" className="flex-shrink-0">
+                    <Lock className="w-2.5 h-2.5 opacity-70" />
+                  </span>
+                )}
                 {tab.name}
+                {tab.created_by === userId && (
+                  <span
+                    className="opacity-0 group-hover:opacity-60 hover:!opacity-100 ml-0.5"
+                    onClick={e => { e.stopPropagation(); toggleTabVisibility(tab.id); }}
+                    title={tab.visibility === "private"
+                      ? "Make public (visible to all members)"
+                      : "Make private (only you can see it)"}
+                  >
+                    {tab.visibility === "private"
+                      ? <Globe className="w-2.5 h-2.5" />
+                      : <Lock className="w-2.5 h-2.5" />}
+                  </span>
+                )}
                 {activeTab === tab.id && (
                   <span
                     className="opacity-0 group-hover:opacity-60 hover:!opacity-100 ml-0.5"

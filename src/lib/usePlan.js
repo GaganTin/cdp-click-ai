@@ -11,8 +11,15 @@ export function usePlan() {
     staleTime: 10 * 60 * 1000,
   });
 
-  // account_plan is authoritative (billing); currentCompany.plan is a denormalised copy.
-  const planId = user?.account_plan ?? currentCompany?.plan ?? "lite";
+  // Plan + trial state follow the CURRENT WORKSPACE's account, not the viewing
+  // user's own account. An invited member sees the plan/trial of the workspace
+  // they're in - matching the backend, which enforces every limit per
+  // workspace -> account. Each company in /me (and login/register) carries its
+  // account's plan/plan_expires_at/plan_upgraded_at. Fall back to the user's own
+  // account only when the workspace object predates this enrichment (a stale
+  // cached session) or no workspace is selected yet.
+  const companyHasPlan = !!currentCompany && currentCompany.plan_expires_at !== undefined;
+  const planId = currentCompany?.plan ?? user?.account_plan ?? "lite";
   const planConfig = plans.find(p => p.id === planId) ?? null;
 
   // The next tier up (used by upgrade prompts so they always reference the right plan name/price)
@@ -29,7 +36,7 @@ export function usePlan() {
   // field is entirely ABSENT (legacy /me responses) - never when it is explicitly
   // null, or a paid account on a trial-capable tier (e.g. a paying Lite customer,
   // whose tier still has trial_days=90) would be mis-read as an expired trial.
-  const rawExpiry = user?.account_plan_expires_at;
+  const rawExpiry = companyHasPlan ? currentCompany.plan_expires_at : user?.account_plan_expires_at;
   const planExpiresAt = rawExpiry ? new Date(rawExpiry) : null;
   const createdDate = currentCompany?.created_date ? new Date(currentCompany.created_date) : null;
   const trialExpiresAt = planExpiresAt
@@ -44,7 +51,8 @@ export function usePlan() {
   const isFreePlan = inTrial;
   const isPaidPlan = !inTrial;
   // When the trial converted to paid (null while still on a trial).
-  const upgradedAt = user?.account_plan_upgraded_at ? new Date(user.account_plan_upgraded_at) : null;
+  const rawUpgraded = companyHasPlan ? currentCompany.plan_upgraded_at : user?.account_plan_upgraded_at;
+  const upgradedAt = rawUpgraded ? new Date(rawUpgraded) : null;
   const isTrialExpired = trialExpiresAt ? new Date() > trialExpiresAt : false;
   const daysLeft = trialExpiresAt
     ? Math.max(0, Math.ceil((trialExpiresAt - new Date()) / (24 * 60 * 60 * 1000)))

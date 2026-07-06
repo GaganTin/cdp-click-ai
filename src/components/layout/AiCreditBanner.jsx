@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Zap, X } from "lucide-react";
 import { appClient } from "@/api/appClient";
 import { usePlan } from "@/lib/usePlan";
+import { useRole } from "@/lib/useRole";
 import { toCredits } from "@/lib/credits";
 
 // Proactive heads-up when the account nears (>=90%) or hits (100%) its billing-
@@ -21,6 +22,8 @@ const dismiss = (bucket) => { try { localStorage.setItem(KEY(bucket), "true"); }
 
 export default function AiCreditBanner() {
   const { isTrialExpired, inTrial } = usePlan();
+  // Billing actions are owner-only, so non-owners don't get the upgrade link.
+  const { isOwner } = useRole();
   const { data } = useQuery({
     queryKey: ["ai-quota"],
     queryFn: () => appClient.billing.getAiQuota(),
@@ -58,12 +61,14 @@ export default function AiCreditBanner() {
         </span>
       </div>
       <div className="flex items-center gap-3 flex-shrink-0">
-        <Link
-          to="/settings?tab=billing"
-          className="inline-flex items-center gap-1.5 px-3 py-1 bg-foreground text-background text-xs font-semibold rounded-md hover:bg-foreground/80 transition-colors whitespace-nowrap"
-        >
-          <Zap className="w-3 h-3" /> Upgrade
-        </Link>
+        {isOwner && (
+          <Link
+            to="/settings?tab=billing"
+            className="inline-flex items-center gap-1.5 px-3 py-1 bg-foreground text-background text-xs font-semibold rounded-md hover:bg-foreground/80 transition-colors whitespace-nowrap"
+          >
+            <Zap className="w-3 h-3" /> Upgrade
+          </Link>
+        )}
         <button
           onClick={() => { dismiss(bucket); force((n) => n + 1); }}
           className="opacity-70 hover:opacity-100 transition-opacity"

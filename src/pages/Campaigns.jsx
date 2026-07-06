@@ -21,6 +21,7 @@ import { format } from "date-fns";
 import UTMForm, { buildUTMUrl } from "../components/campaigns/UTMForm";
 import UTMAnalyticsPanel, { GAUtmLinksSection, GA_PERIODS } from "../components/campaigns/UTMAnalyticsPanel";
 import UTMImportDialog from "../components/import/UTMImportDialog";
+import PageGuide from "@/components/PageGuide";
 
 // Portal-rendered tooltip so it escapes the table's overflow-auto clipping (the
 // in-flow absolute version got cut off / overlapped by adjacent header cells).
@@ -330,6 +331,36 @@ export default function Campaigns() {
         {/* ── UTM Links Tab ────────────────────────────────────────────── */}
         {tab === "utm" && (
           <div className="px-8 py-6 space-y-6">
+
+            {/* Always-available guide so teammates who join later can still learn the page. */}
+            <PageGuide
+              storageKey="guide.utm"
+              title={t("How UTM links work")}
+              intro={t("UTM links are regular URLs with tracking tags added to them. When someone clicks a tagged link, your analytics can tell exactly which campaign, source, and medium brought them in - so you know what's actually driving traffic and conversions.")}
+              stepsTitle={t("Building a UTM link, step by step")}
+              steps={[
+                { title: t("Click New UTM"), desc: t("Give your link a name and paste in the destination URL you want visitors to land on.") },
+                { title: t("Set the parameters"), desc: t("Fill in source (e.g. google, newsletter), medium (e.g. cpc, email), and campaign - these tags are what your analytics reads.") },
+                { title: t("Add optional detail"), desc: t("Use term and content to distinguish keywords or A/B variants of the same campaign.") },
+                { title: t("Copy the generated link"), desc: t("A ready-to-use tracking URL is built automatically - copy it into your ad, email, or post.") },
+                { title: t("Track performance"), desc: t("Open the Analytics tab to see clicks, sessions, and conversions grouped by your UTM tags.") },
+              ]}
+              uses={[
+                { icon: LinkIcon, title: t("Tag every campaign"), desc: t("Create consistent tracking links for ads, emails, and social posts.") },
+                { icon: BarChart2, title: t("Measure what works"), desc: t("See which sources and mediums actually drive traffic and conversions.") },
+                { icon: Upload, title: t("Import in bulk"), desc: t("Bring in links you already use so all your tracking lives in one place.") },
+              ]}
+              sections={[{
+                title: t("What the parameters mean"),
+                items: [
+                  { icon: LinkIcon, label: t("Source"), desc: t("- where the traffic comes from (e.g. google, facebook, newsletter).") },
+                  { icon: Filter, label: t("Medium"), desc: t("- the type of link (e.g. cpc, email, social, referral).") },
+                  { icon: Info, label: t("Campaign"), desc: t("- the specific promotion or initiative the link belongs to.") },
+                  { icon: Search, label: t("Term & Content"), desc: t("- optional tags for paid keywords and distinguishing link variants.") },
+                ],
+              }]}
+              footer={t("Consistent naming matters - google and Google count as two different sources in your reports. Pick a convention and stick to it.")}
+            />
 
             {/* Search + Filter */}
             <div>

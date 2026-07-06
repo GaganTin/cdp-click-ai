@@ -6,6 +6,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { usePlan } from "@/lib/usePlan";
+import { useRole } from "@/lib/useRole";
 import { passwordError, PASSWORD_HINT } from "@/lib/password";
 import { toCredits } from "@/lib/credits";
 import { Button } from "@/components/ui/button";
@@ -1031,6 +1032,9 @@ function CompanyTab({ company, onRefresh }) {
 function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRole, setInviteRole, inviting, activeMemberCount = 0 }) {
   const { t } = usePreferences();
   const { upgradePlan, planConfig, limits } = usePlan();
+  // The upgrade action is owner-only; non-owner admins see the limit notice
+  // without the upgrade button.
+  const { isOwner } = useRole();
 
   const teamLimit = limits?.team_members ?? null;        // null = unlimited
   const atLimit = teamLimit != null && activeMemberCount >= teamLimit;
@@ -1059,7 +1063,7 @@ function InviteSection({ company, invite, inviteEmail, setInviteEmail, inviteRol
                 ? `${t("Upgrade to")} ${upgradePlan.name} ${t("to invite more, or contact support to raise the limit on your")} ${planConfig?.name ?? t("current")} ${t("plan.")}`
                 : t("Remove a member to free up a seat, or contact support to raise your team-member limit.")}
             </p>
-            {upgradeGivesMore && (
+            {upgradeGivesMore && isOwner && (
               <Link
                 to="/settings?tab=billing"
                 className="inline-flex items-center gap-1.5 mt-3 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"
@@ -1507,6 +1511,9 @@ function qualitativeFeatures(features) {
 function BillingTab({ company }) {
   const { t } = usePreferences();
   const { planConfig, upgradePlan, isFreePlan, isPaidPlan, isTrialExpired, daysLeft, upgradedAt, plans } = usePlan();
+  // Upgrading is the account owner's action; non-owner admins see plan status
+  // (read-only) but not the upgrade button.
+  const { isOwner } = useRole();
 
   const badgeClass = "text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground font-medium border border-border";
   const statusBadge = isTrialExpired
@@ -1534,7 +1541,7 @@ function BillingTab({ company }) {
               )}
               {statusBadge}
             </div>
-            {upgradePlan && (
+            {isOwner && upgradePlan && (
               <a
                 href={isContactSales ? upgradePlan.cta_href : "/settings?tab=billing"}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-xs font-semibold rounded-md hover:bg-primary/90 transition-colors"

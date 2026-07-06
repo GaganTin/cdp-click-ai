@@ -3,13 +3,14 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Upload, Download, Loader2, UserCheck, Ghost, Link as LinkIcon, Globe, UserCog,
-  SlidersHorizontal, ShieldOff, Mail, BarChart2,
+  SlidersHorizontal, ShieldOff, Mail, BarChart2, ShoppingCart,
 } from "lucide-react";
 import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import ProfileImportDialog from "@/components/import/ProfileImportDialog";
+import OrderImportDialog from "@/components/import/OrderImportDialog";
 import UTMImportDialog from "@/components/import/UTMImportDialog";
 import SuppressionImportDialog from "@/components/import/SuppressionImportDialog";
 import AttributeImportDialog, { exportAttributes } from "@/components/attributes/AttributeImportDialog";
@@ -40,6 +41,13 @@ const IMPORT_SECTIONS = [
         desc: "Import manual attribute definitions and their expected values, then assign people to each." },
       { key: "attr-rule", kind: "attribute", source: "rule", icon: SlidersHorizontal, title: "Rule Attributes",
         desc: "Import computed attributes defined by rules over profile data." },
+    ],
+  },
+  {
+    label: "Commerce",
+    cards: [
+      { key: "orders", kind: "orders", icon: ShoppingCart, title: "Orders / Transactions",
+        desc: "Bulk-import your own order history from a CSV. Orders create/attach customer profiles and feed segments and the AI analyst - like synced store data. One row per line item." },
     ],
   },
   {
@@ -417,6 +425,7 @@ export default function ImportData() {
 
       {/* Import dialogs - one mounts at a time based on the active card. */}
       <ProfileImportDialog open={active?.kind === "profiles"} onClose={closeImport} />
+      <OrderImportDialog open={active?.kind === "orders"} onClose={closeImport} />
       <UTMImportDialog open={active?.kind === "utm"} onClose={closeImport} existingCampaigns={campaigns} />
       <SuppressionImportDialog open={active?.kind === "suppression"} onClose={closeImport} />
       <AttributeImportDialog

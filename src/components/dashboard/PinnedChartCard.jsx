@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical, MoreHorizontal, Trash2, AlertTriangle } from "lucide-react";
+import { Maximize2, Minimize2, Pencil, Check, TrendingUp, TrendingDown, MessageSquare, RefreshCw, GripVertical, MoreHorizontal, Trash2, AlertTriangle, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -344,10 +344,25 @@ export default function PinnedChartCard({ chart: initialChart, onRemove, onCycle
         <MiniChart type={chartType} config={filteredConfig} />
       </div>
 
-      {chart.last_refreshed && (
-        <p className="text-[10px] text-muted-foreground mt-2 flex-shrink-0">
-          Refreshed {format(new Date(chart.last_refreshed), "MMM d, h:mm a")}
-        </p>
+      {(chart.created_by_name || chart.last_refreshed) && (
+        <div className="mt-2 flex-shrink-0 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
+          {/* Creator attribution: charts live on the shared workspace dashboard, so
+              tag each with who pinned it. */}
+          {chart.created_by_name ? (
+            <span
+              className="inline-flex items-center gap-1 min-w-0 bg-secondary/60 border border-border rounded-full px-1.5 py-0.5"
+              title={`Created by ${chart.created_by_name}`}
+            >
+              <User className="w-2.5 h-2.5 flex-shrink-0" />
+              <span className="truncate">{chart.created_by_name}</span>
+            </span>
+          ) : <span />}
+          {chart.last_refreshed && (
+            <span className="flex-shrink-0">
+              Refreshed {format(new Date(chart.last_refreshed), "MMM d, h:mm a")}
+            </span>
+          )}
+        </div>
       )}
 
     </div>

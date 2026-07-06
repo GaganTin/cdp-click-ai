@@ -1713,6 +1713,8 @@ function ReviewPanel() {
   const [search, setSearch] = useState("");      // debounced
   const [sel, setSel] = useState(() => new Set()); // selected page ids for bulk verify
   const [confirmAll, setConfirmAll] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef(null);
 
   const attrKey = attrSel.join(",");
   const valueKey = valueSel.join(",");
@@ -1722,6 +1724,13 @@ function ReviewPanel() {
 
   // Debounce the search so typing doesn't refetch every keystroke.
   useEffect(() => { const id = setTimeout(() => setSearch(searchInput.trim()), 350); return () => clearTimeout(id); }, [searchInput]);
+  // Close the Filters popover on an outside click (ignore the portaled MultiSelect).
+  useEffect(() => {
+    if (!showFilters) return;
+    const handler = (e) => { if (e.target.closest?.("[data-multiselect-popover]")) return; if (filterRef.current && !filterRef.current.contains(e.target)) setShowFilters(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showFilters]);
   // Changing the attribute set resets the (now possibly stale) value picks.
   useEffect(() => { setValueSel([]); }, [attrKey]);
   // Any filter change invalidates the current page selection.
@@ -1748,10 +1757,13 @@ function ReviewPanel() {
     const m = new Map();
     for (const pg of pages) for (const tg of (pg.tags || [])) {
       if (attrSel.length && !attrSel.includes(tg.attribute_id)) continue;
-      if (!m.has(tg.value_id)) m.set(tg.value_id, { value: tg.value_id, label: `${tg.attribute}: ${tg.label || tg.value}` });
+      // Just the value - no attribute-name prefix (kept short + readable).
+      if (!m.has(tg.value_id)) m.set(tg.value_id, { value: tg.value_id, label: tg.label || tg.value });
     }
     return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
   })();
+  const attrLabelById = (id) => attrOpts.find((o) => o.value === id)?.label || id;
+  const valueLabelById = (id) => valueOpts.find((o) => o.value === id)?.label || id;
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["attr-tagged-pages"] });
@@ -1828,7 +1840,7 @@ function ReviewPanel() {
         </p>
       )}
 
-      {/* Controls - dropdown filter + multi-select attribute/value + wide search */}
+      {/* Controls - state dropdown + Filters popover (attribute/value) + wide search */}
       <div className="flex items-center gap-2 flex-wrap mb-3">
         <Select value={filter} onValueChange={setFilter}>
           <SelectTrigger className="h-8 w-36 text-xs flex-shrink-0"><SelectValue /></SelectTrigger>
@@ -1839,25 +1851,66 @@ function ReviewPanel() {
           </SelectContent>
         </Select>
         {filter !== "untagged" && (
-          <>
-            <MultiSelect className="w-48 flex-shrink-0" value={attrSel} onChange={setAttrSel} options={attrOpts}
-              placeholder={t("All attributes")} searchPlaceholder={t("Search attributes…")} />
-            <MultiSelect className="w-52 flex-shrink-0" value={valueSel} onChange={setValueSel} options={valueOpts}
-              placeholder={t("All values")} searchPlaceholder={t("Search values…")} disabled={valueOpts.length === 0} />
-          </>
+          <div ref={filterRef} className="relative flex-shrink-0">
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setShowFilters((f) => !f)}>
+              <Filter className="w-3.5 h-3.5" /> {t("Filters")}
+              {(attrSel.length > 0 || valueSel.length > 0) && <span className="w-1.5 h-1.5 rounded-full bg-foreground flex-shrink-0" />}
+            </Button>
+            {showFilters && (
+              <div className="absolute left-0 top-full mt-1 z-30 bg-popover border border-border rounded-lg shadow-lg p-4 w-72">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{t("Filter by")}</p>
+                  {(attrSel.length > 0 || valueSel.length > 0) && (
+                    <button onClick={() => { setAttrSel([]); setValueSel([]); }} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Clear all")}</button>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1">{t("Attribute")}</p>
+                    <MultiSelect value={attrSel} onChange={setAttrSel} options={attrOpts}
+                      placeholder={t("All attributes")} searchPlaceholder={t("Search attributes…")} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1">{t("Value")}</p>
+                    <MultiSelect value={valueSel} onChange={setValueSel} options={valueOpts}
+                      placeholder={valueOpts.length === 0 ? t("No values in view") : t("All values")}
+                      searchPlaceholder={t("Search values…")} disabled={valueOpts.length === 0} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         <div className="relative flex-1 min-w-[12rem]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search pages by title or URL…")}
             className="w-full h-8 pl-8 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
         </div>
-        {activeFilterCount > 0 && (
-          <button onClick={() => { setAttrSel([]); setValueSel([]); setSearchInput(""); }}
-            className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 flex-shrink-0">
-            <X className="w-3 h-3" /> {t("Clear filters")}
-          </button>
-        )}
       </div>
+
+      {/* Active filter chips */}
+      {(attrSel.length > 0 || valueSel.length > 0 || search) && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {attrSel.map((id) => (
+            <span key={`a-${id}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+              {t("Attribute")}: <strong>{attrLabelById(id)}</strong>
+              <button onClick={() => setAttrSel(attrSel.filter((x) => x !== id))} className="hover:text-foreground text-muted-foreground ml-0.5"><X className="w-3 h-3" /></button>
+            </span>
+          ))}
+          {valueSel.map((id) => (
+            <span key={`v-${id}`} className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+              {t("Value")}: <strong>{valueLabelById(id)}</strong>
+              <button onClick={() => setValueSel(valueSel.filter((x) => x !== id))} className="hover:text-foreground text-muted-foreground ml-0.5"><X className="w-3 h-3" /></button>
+            </span>
+          ))}
+          {search && (
+            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-border bg-secondary/40">
+              {t("Search")}: <strong>{search}</strong>
+              <button onClick={() => setSearchInput("")} className="hover:text-foreground text-muted-foreground ml-0.5"><X className="w-3 h-3" /></button>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Bulk-verify toolbar */}
       {needsReviewPages.length > 0 && (

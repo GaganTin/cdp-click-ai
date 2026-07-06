@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Zap, X } from "lucide-react";
 import { useState } from "react";
 import { usePlan } from "@/lib/usePlan";
+import { useRole } from "@/lib/useRole";
 
 const STORAGE_KEY = "trial-banner-dismissed";
 
@@ -14,6 +15,9 @@ function writeDismissed() {
 
 export default function TrialBanner() {
   const { isFreePlan, isLoadingPlans, isTrialExpired, daysLeft, planConfig, upgradePlan } = usePlan();
+  // Only the workspace's account owner can act on billing, so only they see the
+  // upgrade CTA. Everyone else still sees the informational trial status.
+  const { isOwner } = useRole();
   const [dismissed, setDismissed] = useState(readDismissed);
   const planName = planConfig?.name ?? "Lite";
   const trialDays = planConfig?.trial_days ?? 90;
@@ -36,15 +40,19 @@ export default function TrialBanner() {
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-destructive/10 border-b border-destructive/20 text-sm">
         <div className="flex items-center gap-2 text-destructive font-medium">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          Your {planName} Plan free trial has ended. Upgrade to continue using features.
+          {isOwner
+            ? `Your ${planName} Plan free trial has ended. Upgrade to continue using features.`
+            : `Your ${planName} Plan free trial has ended. Contact your account owner to upgrade.`}
         </div>
-        <Link
-          to="/settings?tab=billing"
-          className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 bg-destructive text-destructive-foreground text-xs font-semibold rounded-md hover:bg-destructive/90 transition-colors"
-        >
-          <Zap className="w-3 h-3" />
-          Upgrade now
-        </Link>
+        {isOwner && (
+          <Link
+            to="/settings?tab=billing"
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1 bg-destructive text-destructive-foreground text-xs font-semibold rounded-md hover:bg-destructive/90 transition-colors"
+          >
+            <Zap className="w-3 h-3" />
+            Upgrade now
+          </Link>
+        )}
       </div>
     );
   }
@@ -66,13 +74,15 @@ export default function TrialBanner() {
         </span>
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <Link
-          to="/settings?tab=billing"
-          className="inline-flex items-center gap-1.5 px-3 py-1 bg-foreground text-background text-xs font-semibold rounded-md hover:bg-foreground/80 transition-colors"
-        >
-          <Zap className="w-3 h-3" />
-          Upgrade to {upgradeLabel}
-        </Link>
+        {isOwner && (
+          <Link
+            to="/settings?tab=billing"
+            className="inline-flex items-center gap-1.5 px-3 py-1 bg-foreground text-background text-xs font-semibold rounded-md hover:bg-foreground/80 transition-colors"
+          >
+            <Zap className="w-3 h-3" />
+            Upgrade to {upgradeLabel}
+          </Link>
+        )}
         <button
           onClick={() => { writeDismissed(); setDismissed(true); }}
           className="text-muted-foreground hover:text-foreground transition-colors"

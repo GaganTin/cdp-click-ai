@@ -427,6 +427,46 @@ export const appClient = {
     async mergeCandidates(status = "pending") { return request(`/profiles/merge-candidates?status=${encodeURIComponent(status)}`); },
     async dismissMergeCandidate(id) { return request(`/profiles/merge-candidates/${encodeURIComponent(id)}/dismiss`, { method: "POST" }); },
   },
+  commerce: {
+    // Manual order/transaction CSV import into the neutral commerce layer. Orders
+    // flow into profiles, segments and the AI analyst just like synced store data.
+    downloadOrderTemplate() {
+      const headers = [
+        "customer_email", "customer_name", "order_ref", "order_date", "order_status",
+        "currency", "product_sku", "product_name", "quantity", "unit_price", "discount_amount",
+      ];
+      const sample = [
+        ["jane@example.com", "Jane Smith", "ORD-1001", "2024-03-15", "completed", "USD", "SKU-001", "Blue T-Shirt", "2", "19.99", "0"],
+        ["jane@example.com", "Jane Smith", "ORD-1001", "2024-03-15", "completed", "USD", "SKU-002", "Baseball Cap", "1", "24.99", "5.00"],
+      ];
+      const cell = v => (String(v).includes(",") ? `"${v}"` : String(v));
+      const csv = [headers.join(","), ...sample.map(r => r.map(cell).join(","))].join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "orders_import_template.csv";
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    },
+    async importOrders(file) {
+      const fd = new FormData();
+      fd.append("file", file);
+      // multipart upload → raw fetch (not request()), so set the company header ourselves.
+      const headers = {};
+      if (_currentCompanyId) headers["x-company-id"] = _currentCompanyId;
+      const res = await fetch(`${API_BASE}/commerce/import`, {
+        method: "POST", body: fd, credentials: "include", headers,
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || "Import failed");
+      }
+      return res.json();
+    },
+    async deleteImportBatch(batchId) {
+      return request(`/commerce/import/batch/${encodeURIComponent(batchId)}`, { method: "DELETE" });
+    },
+  },
   edm: {
     listCampaigns: () => request("/edm/campaigns"),
     createCampaign: (data) => request("/edm/campaigns", { method: "POST", body: JSON.stringify(data) }),

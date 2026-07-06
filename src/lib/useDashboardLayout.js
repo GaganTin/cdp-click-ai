@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
+import { useAuth } from "@/lib/AuthContext";
 
 // The dashboard layout (tabs, per-tab chart assignments, per-chart sizes) is
 // persisted server-side in the company-scoped key/value store (app.settings),
-// NOT in localStorage - so it follows the workspace across browsers/devices and
-// is shared by every member, the same way pinned charts already are.
+// NOT in localStorage - so it follows the workspace across browsers/devices.
+//
+// Tabs carry per-user visibility: a tab is `public` (every member sees it) or
+// `private` (only its creator sees it). Because the whole layout is ONE shared
+// document, private tabs still live in that document but are filtered out for
+// everyone except their creator on read, and preserved on write (see
+// mergeVisibleTabs) so one member's save never drops another's private tabs.
 const LAYOUT_KEY = "dashboard_layout";
 const LAYOUT_LABEL = "Dashboard layout";
 
@@ -14,6 +20,48 @@ export const DEFAULT_LAYOUT = {
   tabAssignments: { main: [] },
   chartSizes: {},
 };
+
+// A tab is visible to a user if it's public (default when unset) or the user
+// created it. Legacy tabs (no visibility/created_by) are treated as public.
+function tabVisibleTo(tab, userId) {
+  return tab?.visibility !== "private" || tab?.created_by === userId;
+}
+
+// Merge the user's next *visible* tab list back into the full tab list,
+// preserving tabs the user can't see (other members' private tabs) so a save
+// from one member never drops another member's private tabs. Hidden tabs are
+// re-anchored immediately after the visible tab that preceded them in the old
+// order, keeping their position as stable as possible across edits.
+function mergeVisibleTabs(fullPrev, visibleNext, canSee) {
+  const hidden = (fullPrev || []).filter((t) => !canSee(t));
+  if (!hidden.length) return visibleNext; // nothing hidden to preserve
+
+  // anchor = id of the nearest preceding visible tab (null => front of list).
+  const anchorOf = new Map();
+  let lastVisibleId = null;
+  for (const t of fullPrev) {
+    if (canSee(t)) lastVisibleId = t.id;
+    else anchorOf.set(t.id, lastVisibleId);
+  }
+  const byAnchor = new Map(); // anchorId|null -> [hidden tabs] (order preserved)
+  for (const h of hidden) {
+    const a = anchorOf.get(h.id) ?? null;
+    if (!byAnchor.has(a)) byAnchor.set(a, []);
+    byAnchor.get(a).push(h);
+  }
+
+  const result = [];
+  for (const h of byAnchor.get(null) || []) result.push(h); // front-anchored
+  for (const vt of visibleNext) {
+    result.push(vt);
+    for (const h of byAnchor.get(vt.id) || []) result.push(h);
+  }
+  // Hidden tabs whose anchor was removed from the visible set would be orphaned
+  // - append them so they always survive the round-trip.
+  const emitted = new Set(result.map((t) => t.id));
+  for (const h of hidden) if (!emitted.has(h.id)) result.push(h);
+  return result;
+}
 
 // Coerce whatever the server returns into a well-formed layout. Legacy values
 // used `null` for an "all charts" tab; we normalise those away so a chart only
@@ -50,9 +98,15 @@ function normalizeLayout(raw) {
  * `useState` updater API (`setTabs`, `setTabAssignments`, `setChartSizes`).
  * Every change updates the React Query cache immediately and is persisted to
  * the server (debounced so rapid edits coalesce into one write).
+ *
+ * `tabs` returned here is already filtered to what the current user may see;
+ * `setTabs` accepts that visible list (updater or value) and merges it back
+ * into the full stored layout, preserving other members' private tabs.
  */
 export function useDashboardLayout() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
 
   const { data, isLoading } = useQuery({
     queryKey: ["dashboardLayout"],
@@ -64,7 +118,8 @@ export function useDashboardLayout() {
     staleTime: 60_000,
   });
 
-  // Local working copy, seeded once from the server so edits are instant.
+  // Local working copy, seeded once from the server so edits are instant. This
+  // holds the FULL layout (all members' tabs); filtering happens on the way out.
   const [layout, setLayout] = useState(null);
   useEffect(() => {
     if (data && layout === null) setLayout(data);
@@ -114,13 +169,26 @@ export function useDashboardLayout() {
     }));
   }, [update]);
 
+  // setTabs is visibility-aware: the caller works with the *visible* tab list,
+  // and we merge that back into the full stored list (see mergeVisibleTabs).
+  const setTabs = useCallback((updater) => {
+    update((full) => {
+      const canSee = (t) => tabVisibleTo(t, userId);
+      const visiblePrev = (full.tabs || []).filter(canSee);
+      const visibleNext = typeof updater === "function" ? updater(visiblePrev) : updater;
+      return { ...full, tabs: mergeVisibleTabs(full.tabs || [], visibleNext, canSee) };
+    });
+  }, [update, userId]);
+
   const current = layout || data || DEFAULT_LAYOUT;
+  const visibleTabs = (current.tabs || []).filter((t) => tabVisibleTo(t, userId));
 
   return {
-    tabs: current.tabs,
+    tabs: visibleTabs,
     tabAssignments: current.tabAssignments,
     chartSizes: current.chartSizes,
-    setTabs: makeSetter("tabs"),
+    userId,
+    setTabs,
     setTabAssignments: makeSetter("tabAssignments"),
     setChartSizes: makeSetter("chartSizes"),
     isLoading: isLoading || layout === null,

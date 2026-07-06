@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Lock, Zap } from "lucide-react";
 import { usePlan } from "@/lib/usePlan";
+import { useRole } from "@/lib/useRole";
 
 /**
  * Wraps a feature that requires an active plan.
@@ -14,6 +15,9 @@ import { usePlan } from "@/lib/usePlan";
  */
 export default function PlanGate({ children = null, feature = "this feature", inline = false }) {
   const { canUseFeatures, upgradePlan } = usePlan();
+  // Billing is owner-only: non-owners see the wall but are directed to their
+  // account owner rather than an upgrade action they can't complete.
+  const { isOwner } = useRole();
 
   if (canUseFeatures) return children;
 
@@ -40,26 +44,30 @@ export default function PlanGate({ children = null, feature = "this feature", in
       <div>
         <p className="font-semibold text-base">Your free trial has ended</p>
         <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-          Upgrade to continue using {feature}. Your data is safe - nothing has been deleted.
+          {isOwner
+            ? <>Upgrade to continue using {feature}. Your data is safe - nothing has been deleted.</>
+            : <>Ask your account owner to upgrade to continue using {feature}. Your data is safe - nothing has been deleted.</>}
         </p>
       </div>
-      <div className="flex flex-col sm:flex-row items-center gap-3">
-        {upgradePlan && (
-          <Link
-            to="/settings?tab=billing"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+      {isOwner && (
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          {upgradePlan && (
+            <Link
+              to="/settings?tab=billing"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              <Zap className="w-4 h-4" />
+              {upgradeLabel}
+            </Link>
+          )}
+          <a
+            href={upgradePlan?.cta_external ? upgradePlan.cta_href : "mailto:support@clickcdp.com?subject=Upgrade to Paid"}
+            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
-            <Zap className="w-4 h-4" />
-            {upgradeLabel}
-          </Link>
-        )}
-        <a
-          href={upgradePlan?.cta_external ? upgradePlan.cta_href : "mailto:support@clickcdp.com?subject=Upgrade to Paid"}
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Contact sales
-        </a>
-      </div>
+            Contact sales
+          </a>
+        </div>
+      )}
     </div>
   );
 }
@@ -70,13 +78,31 @@ export default function PlanGate({ children = null, feature = "this feature", in
  */
 export function PlanGatedButton({ children, onClick, className = "", disabled = false, ...props }) {
   const { canUseFeatures } = usePlan();
+  const { isOwner } = useRole();
 
   if (!canUseFeatures) {
+    // Owner: link straight to billing to upgrade. Non-owner: locked, no billing
+    // link (they can't upgrade) - direct them to their account owner instead.
+    const title = isOwner
+      ? "Your free trial has ended - upgrade to continue"
+      : "Your free trial has ended - ask your account owner to upgrade";
+    if (!isOwner) {
+      return (
+        <span
+          className={`inline-flex items-center gap-1.5 text-sm font-medium ${className} opacity-60 cursor-not-allowed select-none`}
+          title={title}
+          onClick={e => e.stopPropagation()}
+        >
+          <Lock className="w-3.5 h-3.5 flex-shrink-0" />
+          {children}
+        </span>
+      );
+    }
     return (
       <Link
         to="/settings?tab=billing"
         className={`inline-flex items-center gap-1.5 text-sm font-medium ${className} opacity-60 cursor-not-allowed`}
-        title="Your free trial has ended - upgrade to continue"
+        title={title}
         onClick={e => e.stopPropagation()}
       >
         <Lock className="w-3.5 h-3.5 flex-shrink-0" />

@@ -364,6 +364,10 @@ export default function Analyst() {
       description: chartConfig.description || "",
       query: chartConfig.query || "",
       last_refreshed: new Date().toISOString(),
+      // The dashboard is a shared workspace surface - pinned charts are visible to
+      // every member (attributed to their creator via the card's "by" tag), unlike
+      // the per-user-private AI Analyst chats.
+      visibility: "company",
     });
     queryClient.invalidateQueries({ queryKey: ["pinnedCharts"] });
     toast.success("Chart pinned - dashboard preview opened");

@@ -264,7 +264,7 @@ async function syncCommerceProfiles(pg, cid) {
       member_reg_channel, is_opt_in_email, is_opt_in_sms, tags
     )
     SELECT
-      cc.company_id, cc.customer_id, cc.source_platform, cc.capsuite_ref, false,
+      cc.company_id, cc.customer_id, cc.source_platform, cc.capsuite_ref, COALESCE(cc.is_manual, false),
       cc.primary_email, cc.primary_phone,
       COALESCE(cc.has_email, false), COALESCE(cc.has_phone, false),
       cc.first_name, cc.last_name, cc.full_name, COALESCE(cc.display_name, cc.full_name),
@@ -1459,11 +1459,16 @@ app.get("/api/entities/:entity", authenticate, async (req, res) => {
     if (config.multiTenant) {
       const companyId = await companyGuard(req, res);
       if (!companyId) return;
+      // Join the creator so the UI can attribute the item to a user (e.g. the
+      // "created by" tag on dashboard charts). Table aliased to `e` so the
+      // ORDER BY column (which also exists on app.users) isn't ambiguous.
       const { rows } = await p.query(
-        `SELECT * FROM ${config.table}
-         WHERE company_id = $1
-           AND (visibility = 'company' OR created_by = $2)
-         ORDER BY ${order} LIMIT $3`,
+        `SELECT e.*, cu.full_name AS created_by_name, cu.email AS created_by_email
+           FROM ${config.table} e
+           LEFT JOIN app.users cu ON cu.id = e.created_by
+          WHERE e.company_id = $1
+            AND (e.visibility = 'company' OR e.created_by = $2)
+          ORDER BY e.${order} LIMIT $3`,
         [companyId, req.user.id, limit]
       );
       return res.json(rows.map(normalizeRow));
@@ -1692,16 +1697,20 @@ app.delete("/api/entities/:entity/:id", authenticate, async (req, res) => {
 });
 
 // ── Conversations - backed by app.conversations ───────────────────────────────
+// AI Analyst chats are PRIVATE to the user who created them - never shared at the
+// workspace/company/account level. Every read/write is scoped by created_by =
+// req.user.id (in addition to company_id), so no member - not even an admin or the
+// account owner - can see or touch another user's conversations.
 
 app.get("/api/agents/conversations", authenticate, async (req, res) => {
   try {
     const p = requirePool();
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
-    const params = [companyId];
-    let q = "SELECT * FROM app.conversations WHERE company_id = $1";
+    const params = [companyId, req.user.id];
+    let q = "SELECT * FROM app.conversations WHERE company_id = $1 AND created_by = $2";
     if (req.query.agent_name) {
-      q += " AND agent_name = $2";
+      q += " AND agent_name = $3";
       params.push(req.query.agent_name);
     }
     q += " ORDER BY updated_date DESC LIMIT 200";
@@ -1718,9 +1727,9 @@ app.post("/api/agents/conversations", authenticate, async (req, res) => {
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
     const { rows } = await p.query(
-      `INSERT INTO app.conversations (company_id, agent_name, metadata)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [companyId, req.body.agent_name || "cdp_analyst", req.body.metadata || {}]
+      `INSERT INTO app.conversations (company_id, created_by, agent_name, metadata)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [companyId, req.user.id, req.body.agent_name || "cdp_analyst", req.body.metadata || {}]
     );
     res.status(201).json(normalizeRow(rows[0]));
   } catch (err) {
@@ -1734,8 +1743,8 @@ app.get("/api/agents/conversations/:id", authenticate, async (req, res) => {
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
     const { rows } = await p.query(
-      "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2",
-      [req.params.id, companyId]
+      "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2 AND created_by = $3",
+      [req.params.id, companyId, req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: "Conversation not found" });
     res.json(normalizeRow(rows[0]));
@@ -1759,10 +1768,11 @@ app.patch("/api/agents/conversations/:id", authenticate, async (req, res) => {
         ? `metadata = metadata || $${i + 1}`
         : `${c} = $${i + 1}`
     ).join(", ");
-    const values = [...cols.map((c) => req.body[c]), req.params.id, companyId];
+    const values = [...cols.map((c) => req.body[c]), req.params.id, companyId, req.user.id];
 
     const { rows } = await p.query(
-      `UPDATE app.conversations SET ${setClauses} WHERE id = $${values.length - 1} AND company_id = $${values.length} RETURNING *`,
+      `UPDATE app.conversations SET ${setClauses}
+       WHERE id = $${values.length - 2} AND company_id = $${values.length - 1} AND created_by = $${values.length} RETURNING *`,
       values
     );
     if (rows.length === 0) return res.status(404).json({ error: "Conversation not found" });
@@ -1777,7 +1787,7 @@ app.delete("/api/agents/conversations/:id", authenticate, async (req, res) => {
     const p = requirePool();
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
-    await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2", [req.params.id, companyId]);
+    await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2 AND created_by = $3", [req.params.id, companyId, req.user.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -1794,10 +1804,10 @@ app.post("/api/agents/conversations/:id/messages", authenticate, async (req, res
     // Block once the account has spent its monthly AI allowance (no new spend).
     if (!(await enforceAiQuota(p, req, res, { companyId }))) return;
 
-    // Fetch current conversation
+    // Fetch current conversation (owner-scoped: a user can only post to their own chat)
     const { rows: convRows } = await p.query(
-      "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2",
-      [req.params.id, companyId]
+      "SELECT * FROM app.conversations WHERE id = $1 AND company_id = $2 AND created_by = $3",
+      [req.params.id, companyId, req.user.id]
     );
     if (convRows.length === 0) return res.status(404).json({ error: "Conversation not found" });
 
@@ -2038,7 +2048,7 @@ app.post("/api/functions/deleteConversation", authenticate, async (req, res) => 
     const p = requirePool();
     const companyId = await companyGuard(req, res);
     if (!companyId) return;
-    await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2", [req.body.conversation_id, companyId]);
+    await p.query("DELETE FROM app.conversations WHERE id = $1 AND company_id = $2 AND created_by = $3", [req.body.conversation_id, companyId, req.user.id]);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -2927,6 +2937,276 @@ app.delete("/api/profiles/customers/:memberId", authenticate, async (req, res) =
   }
 });
 
+// ── Commerce: manual transaction/order CSV import ─────────────────────────────
+// Lets users hand-upload their own orders (like the Shopify feed) into the same
+// neutral commerce layer, tagged source_platform='manual'. Because the profile
+// builder, segment engine and AI analyst all already read commerce.*, imported
+// orders flow straight into profiles / segments / analyst with no extra wiring.
+// One denormalised CSV = one row per line item, grouped by (customer_email, order_ref).
+
+const ORDER_IMPORT_HEADERS = [
+  "customer_email", "customer_name", "order_ref", "order_date", "order_status",
+  "currency", "product_sku", "product_name", "quantity", "unit_price", "discount_amount",
+];
+const ORDER_IMPORT_SAMPLE = [
+  ["jane@example.com", "Jane Smith", "ORD-1001", "2024-03-15", "completed", "USD", "SKU-001", "Blue T-Shirt", "2", "19.99", "0"],
+  ["jane@example.com", "Jane Smith", "ORD-1001", "2024-03-15", "completed", "USD", "SKU-002", "Baseball Cap", "1", "24.99", "5.00"],
+];
+const ORDER_STATUSES = new Set(["draft", "confirmed", "completed", "cancelled"]);
+const csvCell = v => (String(v ?? "").includes(",") ? `"${v}"` : String(v ?? ""));
+
+// Deterministic ids so a re-uploaded file updates rows instead of duplicating.
+const manualCustomerId = (ref, email) => `${ref || "man"}_cust_man_${createHash("md5").update(email.toLowerCase()).digest("hex").slice(0, 16)}`;
+const manualOrderId = (ref, email, orderRef) => `${ref || "man"}_ord_man_${createHash("md5").update(`${email.toLowerCase()}|${orderRef}`).digest("hex").slice(0, 16)}`;
+
+app.get("/api/commerce/import/template", (_req, res) => {
+  const csv = [
+    ORDER_IMPORT_HEADERS.join(","),
+    ...ORDER_IMPORT_SAMPLE.map(r => r.map(csvCell).join(",")),
+  ].join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", 'attachment; filename="orders_import_template.csv"');
+  res.send(csv);
+});
+
+app.post("/api/commerce/import", authenticate, upload.single("file"), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+
+  let text;
+  try {
+    text = fs.readFileSync(req.file.path, "utf8");
+  } finally {
+    try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
+  }
+
+  try {
+    const { rows: csvRows } = parseCSV(text);
+    if (csvRows.length === 0) return res.status(400).json({ error: "CSV has no data rows" });
+
+    const { rows: coRows } = await pool.query("SELECT capsuite_ref FROM app.companies WHERE id = $1", [companyId]);
+    const capsuiteRef = coRows[0]?.capsuite_ref || null;
+
+    // 1. Validate + group rows into orders keyed by (email, order_ref).
+    const errors = [];
+    const orders = new Map(); // key -> { email, name, orderRef, date, status, currency, lines[] }
+    for (let i = 0; i < csvRows.length; i++) {
+      const row = csvRows[i];
+      const lineNum = i + 2;
+      const email = (row.customer_email || "").trim().toLowerCase();
+      const orderRef = (row.order_ref || "").trim();
+      if (!email) { errors.push({ row: lineNum, error: "Missing required field: customer_email" }); continue; }
+      if (!orderRef) { errors.push({ row: lineNum, error: "Missing required field: order_ref" }); continue; }
+      if (!row.order_date) { errors.push({ row: lineNum, error: "Missing required field: order_date" }); continue; }
+
+      const key = `${email}||${orderRef}`;
+      if (!orders.has(key)) {
+        const status = (row.order_status || "completed").trim().toLowerCase();
+        orders.set(key, {
+          email, name: (row.customer_name || "").trim(), orderRef,
+          date: row.order_date.trim(),
+          status: ORDER_STATUSES.has(status) ? status : "completed",
+          currency: (row.currency || "").trim() || null,
+          lines: [],
+        });
+      }
+      const qty = parseFloat(row.quantity) || 1;
+      const unitPrice = parseFloat(row.unit_price) || 0;
+      const discount = parseFloat(row.discount_amount) || 0;
+      orders.get(key).lines.push({
+        sku: (row.product_sku || "").trim() || null,
+        name: (row.product_name || "").trim() || null,
+        qty, unitPrice, discount,
+        net: qty * unitPrice - discount,
+      });
+    }
+
+    const orderList = [...orders.values()];
+    if (orderList.length === 0) {
+      return res.status(400).json({ error: "No valid orders to import", details: errors });
+    }
+
+    // 2. Resolve each customer to an existing profile by email, else mint a new id.
+    //    Existing matches attach orders to the current golden record WITHOUT
+    //    overwriting its fields; only newly-minted customers create a profile.
+    const emails = [...new Set(orderList.map(o => o.email))];
+    const { rows: idRows } = await pool.query(
+      `SELECT LOWER(identity_value) AS email, member_id
+         FROM app.profile_identities
+        WHERE company_id = $2 AND identity_type = 'email' AND LOWER(identity_value) = ANY($1)`,
+      [emails, companyId]
+    );
+    const emailToMember = new Map(idRows.map(r => [r.email, r.member_id]));
+    const mintedNew = []; // { email, name, customerId }
+    for (const o of orderList) {
+      if (emailToMember.has(o.email)) { o.customerId = emailToMember.get(o.email); o.isNew = false; }
+      else {
+        o.customerId = manualCustomerId(capsuiteRef, o.email);
+        o.isNew = true;
+        if (!mintedNew.find(m => m.customerId === o.customerId)) mintedNew.push({ email: o.email, name: o.name, customerId: o.customerId });
+      }
+    }
+
+    // Enforce the plan's profile limit against the NEW customers we'd create.
+    if (mintedNew.length) {
+      const profileCap = await planLimit(pool, companyId, "profiles");
+      if (profileCap != null) {
+        const { rows: [pc] } = await pool.query(
+          "SELECT COUNT(*)::int AS n FROM app.customer_profiles WHERE company_id = $1", [companyId]
+        );
+        if (pc.n + mintedNew.length > profileCap) {
+          return res.status(403).json({
+            error: `Importing these orders would create ${mintedNew.length} new profiles, exceeding your plan's ${profileCap}-profile limit (you have ${pc.n}). Upgrade for more.`,
+          });
+        }
+      }
+    }
+
+    // 3. One upload batch for provenance / undo.
+    const { rows: [batch] } = await pool.query(
+      `INSERT INTO manual.upload_batches (company_id, uploaded_by, entity_type, file_name, row_count, status)
+       VALUES ($1, $2, 'sale', $3, $4, 'completed') RETURNING id`,
+      [companyId, req.user?.id || null, req.file.originalname || null, orderList.length]
+    );
+    const batchId = batch.id;
+
+    // 4. Upsert new customers (existing ones are left untouched).
+    for (const m of mintedNew) {
+      const parts = (m.name || "").trim().split(/\s+/);
+      const first = parts[0] || null;
+      const last = parts.length > 1 ? parts.slice(1).join(" ") : null;
+      await pool.query(
+        `INSERT INTO commerce.customer (
+           customer_id, company_id, capsuite_ref, source_platform, source_id,
+           primary_email, has_email, first_name, last_name, full_name, display_name,
+           join_date, is_manual, upload_batch_id
+         ) VALUES ($1,$2,$3,'manual',$4,$5,true,$6,$7,$8,$8,NOW(),true,$9)
+         ON CONFLICT (customer_id) DO UPDATE SET
+           primary_email   = EXCLUDED.primary_email,
+           has_email       = true,
+           full_name       = COALESCE(EXCLUDED.full_name, commerce.customer.full_name),
+           display_name    = COALESCE(EXCLUDED.display_name, commerce.customer.display_name),
+           is_manual       = true,
+           upload_batch_id = EXCLUDED.upload_batch_id`,
+        [m.customerId, companyId, capsuiteRef, m.email, m.email, first, last, m.name || null, batchId]
+      );
+    }
+
+    // 5. Upsert order headers + replace their line items. A bad row (e.g. an
+    //    unparseable order_date) is reported and skipped, not fatal to the batch.
+    let imported = 0;
+    for (const o of orderList) {
+      const orderId = manualOrderId(capsuiteRef, o.email, o.orderRef);
+      const netAmount = o.lines.reduce((s, l) => s + l.net, 0);
+      try {
+      await pool.query(
+        `INSERT INTO commerce."order" (
+           order_id, company_id, capsuite_ref, source_platform, source_id, customer_id,
+           order_ref, channel, order_date,
+           order_year, order_month, order_day, order_week,
+           net_amount, currency, order_status, is_manual, upload_batch_id
+         ) VALUES (
+           $1,$2,$3,'manual',$4,$5,$6,'manual',$7::timestamptz,
+           EXTRACT(YEAR FROM $7::timestamptz)::int, EXTRACT(MONTH FROM $7::timestamptz)::int,
+           EXTRACT(DAY FROM $7::timestamptz)::int, EXTRACT(WEEK FROM $7::timestamptz)::int,
+           $8,$9,$10,true,$11
+         )
+         ON CONFLICT (order_id) DO UPDATE SET
+           customer_id   = EXCLUDED.customer_id,
+           order_ref     = EXCLUDED.order_ref,
+           order_date    = EXCLUDED.order_date,
+           order_year    = EXCLUDED.order_year,
+           order_month   = EXCLUDED.order_month,
+           order_day     = EXCLUDED.order_day,
+           order_week    = EXCLUDED.order_week,
+           net_amount    = EXCLUDED.net_amount,
+           currency      = EXCLUDED.currency,
+           order_status  = EXCLUDED.order_status,
+           is_manual     = true,
+           upload_batch_id = EXCLUDED.upload_batch_id`,
+        [orderId, companyId, capsuiteRef, o.orderRef, o.customerId, o.orderRef, o.date, netAmount, o.currency, o.status, batchId]
+      );
+
+      // Replace this order's lines so a re-import mirrors the file exactly.
+      await pool.query(`DELETE FROM commerce.order_line WHERE order_id = $1 AND company_id = $2`, [orderId, companyId]);
+      for (let li = 0; li < o.lines.length; li++) {
+        const l = o.lines[li];
+        await pool.query(
+          `INSERT INTO commerce.order_line (
+             order_line_id, company_id, capsuite_ref, source_platform, source_id,
+             order_id, customer_id, order_date, line_type,
+             product_sku, product_name, qty, qty_ordered,
+             unit_price_net, discount_amt, currency, is_manual, upload_batch_id
+           ) VALUES ($1,$2,$3,'manual',$4,$5,$6,$7::timestamptz,'line_item',
+             $8,$9,$10,$10,$11,$12,$13,true,$14)`,
+          [`${orderId}_${li}`, companyId, capsuiteRef, o.orderRef, orderId, o.customerId, o.date,
+           l.sku, l.name, l.qty, l.unitPrice, l.discount, o.currency, batchId]
+        );
+      }
+      imported++;
+      } catch (e) {
+        errors.push({ row: o.orderRef, error: `Order ${o.orderRef}: ${String(e.message || e)}` });
+      }
+    }
+
+    // 6. Rebuild profiles/identities/aggregates from the new commerce rows.
+    await refreshCommerceProfiles(pool, companyId);
+
+    res.json({
+      ok: true,
+      imported,
+      newProfiles: mintedNew.length,
+      skipped: errors.length,
+      batchId,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// ── Commerce: undo a manual order import (delete everything in one batch) ──────
+app.delete("/api/commerce/import/batch/:batchId", authenticate, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: "Database not configured" });
+  const companyId = await companyGuard(req, res);
+  if (!companyId) return;
+  const batchId = req.params.batchId;
+  try {
+    const { rows: [b] } = await pool.query(
+      "SELECT id FROM manual.upload_batches WHERE id = $1 AND company_id = $2 AND entity_type = 'sale'",
+      [batchId, companyId]
+    );
+    if (!b) return res.status(404).json({ error: "Import batch not found" });
+
+    // Customers minted by THIS batch → their auto-created profiles get removed too
+    // (identities cascade off app.customer_profiles). Orders attached to pre-existing
+    // profiles just lose their rows; the refresh below recomputes those aggregates.
+    const { rows: cust } = await pool.query(
+      "SELECT customer_id FROM commerce.customer WHERE upload_batch_id = $1 AND company_id = $2",
+      [batchId, companyId]
+    );
+    const mintedIds = cust.map(r => r.customer_id);
+
+    await pool.query("DELETE FROM commerce.order_line WHERE upload_batch_id = $1 AND company_id = $2", [batchId, companyId]);
+    await pool.query('DELETE FROM commerce."order" WHERE upload_batch_id = $1 AND company_id = $2', [batchId, companyId]);
+    await pool.query("DELETE FROM commerce.customer WHERE upload_batch_id = $1 AND company_id = $2", [batchId, companyId]);
+    if (mintedIds.length) {
+      await pool.query(
+        "DELETE FROM app.customer_profiles WHERE company_id = $1 AND is_manual = true AND member_id = ANY($2)",
+        [companyId, mintedIds]
+      );
+    }
+    await pool.query("DELETE FROM manual.upload_batches WHERE id = $1 AND company_id = $2", [batchId, companyId]);
+
+    await refreshCommerceProfiles(pool, companyId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
 // ── Profiles: a customer's commerce transactions (orders + line items) ────────
 // Reads the platform-neutral commerce layer (Shopify today; Shopline/Odoo land
 // in the same tables tagged by source_platform). Response keys keep the trxn_*
@@ -3313,6 +3593,91 @@ app.get("/api/segments/:id/export", authenticate, async (req, res) => {
   }
 });
 
+// ── Dashboard layout visibility (server-side privacy boundary) ───────────────
+// The dashboard layout is one company-shared document, but individual TABS can
+// be private to their creator. These helpers enforce that at the API layer, so a
+// member can never retrieve OR overwrite another member's private tab (its name,
+// chart assignments) even by calling the settings endpoint directly - the UI
+// filter is only a convenience; this is the actual boundary.
+const DASHBOARD_LAYOUT_KEY = "dashboard_layout";
+
+// A tab is visible to a user if it's public (default when unset) or they made it.
+function tabVisibleTo(tab, userId) {
+  return tab?.visibility !== "private" || tab?.created_by === userId;
+}
+
+function parseLayout(value) {
+  if (value == null) return null;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+// Strip tabs (and their assignments) the user may not see. Returns a JSON string;
+// non-parseable/empty values pass through untouched so non-layout data is safe.
+function filterDashboardLayout(value, userId) {
+  const layout = parseLayout(value);
+  if (!layout || !Array.isArray(layout.tabs)) return value;
+  const visibleTabs = layout.tabs.filter(t => tabVisibleTo(t, userId));
+  const visibleIds = new Set(visibleTabs.map(t => t.id));
+  const tabAssignments = {};
+  for (const [tabId, arr] of Object.entries(layout.tabAssignments || {})) {
+    if (visibleIds.has(tabId)) tabAssignments[tabId] = arr;
+  }
+  return JSON.stringify({ ...layout, tabs: visibleTabs, tabAssignments });
+}
+
+// Merge a user's edited (visible-only) layout back into the full stored layout,
+// preserving other members' private tabs + their assignments. Hidden tabs are
+// re-anchored after the visible tab that preceded them in the stored order.
+function mergeDashboardLayout(incomingValue, storedValue, userId) {
+  const incoming = parseLayout(incomingValue) || { tabs: [], tabAssignments: {}, chartSizes: {} };
+  const stored = parseLayout(storedValue) || { tabs: [], tabAssignments: {}, chartSizes: {} };
+  const canSee = (t) => tabVisibleTo(t, userId);
+
+  const storedTabs = Array.isArray(stored.tabs) ? stored.tabs : [];
+  const incomingTabs = Array.isArray(incoming.tabs) ? incoming.tabs : [];
+  const hidden = storedTabs.filter(t => !canSee(t));
+
+  let mergedTabs;
+  if (!hidden.length) {
+    mergedTabs = incomingTabs;
+  } else {
+    const anchorOf = new Map();
+    let lastVisibleId = null;
+    for (const t of storedTabs) {
+      if (canSee(t)) lastVisibleId = t.id;
+      else anchorOf.set(t.id, lastVisibleId);
+    }
+    const byAnchor = new Map();
+    for (const h of hidden) {
+      const a = anchorOf.get(h.id) ?? null;
+      if (!byAnchor.has(a)) byAnchor.set(a, []);
+      byAnchor.get(a).push(h);
+    }
+    mergedTabs = [];
+    for (const h of byAnchor.get(null) || []) mergedTabs.push(h);
+    for (const vt of incomingTabs) {
+      mergedTabs.push(vt);
+      for (const h of byAnchor.get(vt.id) || []) mergedTabs.push(h);
+    }
+    const emitted = new Set(mergedTabs.map(t => t.id));
+    for (const h of hidden) if (!emitted.has(h.id)) mergedTabs.push(h);
+  }
+
+  // Assignments: visible tabs take the user's latest; hidden tabs keep stored.
+  const tabAssignments = {};
+  for (const tab of mergedTabs) {
+    tabAssignments[tab.id] = canSee(tab)
+      ? (incoming.tabAssignments?.[tab.id] ?? stored.tabAssignments?.[tab.id] ?? [])
+      : (stored.tabAssignments?.[tab.id] ?? []);
+  }
+  // Chart sizes are keyed by chartId (a chart can sit on several tabs), so keep
+  // stored sizes and layer the user's changes on top - matches prior behaviour.
+  const chartSizes = { ...(stored.chartSizes || {}), ...(incoming.chartSizes || {}) };
+
+  return JSON.stringify({ ...stored, ...incoming, tabs: mergedTabs, tabAssignments, chartSizes });
+}
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 app.get("/api/settings", authenticate, async (req, res) => {
   if (!pool) return res.status(503).json({ error: "Database not configured" });
@@ -3323,7 +3688,11 @@ app.get("/api/settings", authenticate, async (req, res) => {
       "SELECT key, value, label, updated_date FROM app.settings WHERE company_id = $1 ORDER BY key",
       [companyId]
     );
-    const settings = Object.fromEntries(rows.map(r => [r.key, { value: r.value, label: r.label, updated_date: r.updated_date }]));
+    const settings = Object.fromEntries(rows.map(r => {
+      // Enforce per-user tab privacy before the layout ever leaves the server.
+      const value = r.key === DASHBOARD_LAYOUT_KEY ? filterDashboardLayout(r.value, req.user.id) : r.value;
+      return [r.key, { value, label: r.label, updated_date: r.updated_date }];
+    }));
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: String(err.message || err) });
@@ -3336,6 +3705,40 @@ app.put("/api/settings/:key", authenticate, async (req, res) => {
   if (!companyId) return;
   const { key } = req.params;
   const { value, label } = req.body;
+
+  // The dashboard layout is a shared document with per-user-private tabs. Merge
+  // the incoming (visible-only) layout into the stored full doc under a row lock
+  // so a member's save can't drop or expose another member's private tabs, and
+  // concurrent saves serialise instead of clobbering each other.
+  if (key === DASHBOARD_LAYOUT_KEY) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows: existing } = await client.query(
+        "SELECT value FROM app.settings WHERE company_id = $1 AND key = $2 FOR UPDATE",
+        [companyId, key]
+      );
+      const merged = mergeDashboardLayout(value, existing[0]?.value, req.user.id);
+      const { rows } = await client.query(
+        `INSERT INTO app.settings (company_id, key, value, label, updated_date)
+         VALUES ($1, $2, $3, $4, NOW())
+         ON CONFLICT (company_id, key)
+         DO UPDATE SET value = EXCLUDED.value, label = COALESCE(EXCLUDED.label, app.settings.label), updated_date = NOW()
+         RETURNING *`,
+        [companyId, key, merged, label ?? null]
+      );
+      await client.query("COMMIT");
+      // Never echo the full doc back - filter to what the caller may see.
+      res.json({ ...rows[0], value: filterDashboardLayout(rows[0].value, req.user.id) });
+    } catch (err) {
+      await client.query("ROLLBACK").catch(() => {});
+      res.status(500).json({ error: String(err.message || err) });
+    } finally {
+      client.release();
+    }
+    return;
+  }
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO app.settings (company_id, key, value, label, updated_date)

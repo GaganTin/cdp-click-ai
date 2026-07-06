@@ -85,7 +85,7 @@ async function provisionUserWithCompany(client, {
     `INSERT INTO app.accounts (name, slug, plan, plan_expires_at)
      VALUES ($1, $2, 'lite',
        NOW() + (COALESCE((SELECT trial_days FROM app.plans WHERE id = 'lite'), 90)::text || ' days')::interval)
-     RETURNING id, plan`,
+     RETURNING id, plan, plan_expires_at, plan_upgraded_at`,
     [company_name, accountSlug]
   );
 
@@ -219,7 +219,10 @@ async function fetchUserWithCompanies(pool, userId) {
        COALESCE(
          json_agg(
            json_build_object('id', c.id, 'name', c.name, 'slug', c.slug,
-             'plan', c.plan, 'logo_url', c.logo_url, 'role', cm.role)
+             'plan', ca.plan, 'plan_expires_at', ca.plan_expires_at,
+             'plan_upgraded_at', ca.plan_upgraded_at,
+             'is_account_owner', (ca.owner_user_id = u.id),
+             'logo_url', c.logo_url, 'role', cm.role)
            ORDER BY cm.joined_at
          ) FILTER (WHERE c.id IS NOT NULL),
          '[]'
@@ -227,6 +230,7 @@ async function fetchUserWithCompanies(pool, userId) {
      FROM app.users u
      LEFT JOIN app.company_members cm ON cm.user_id = u.id AND cm.status = 'active'
      LEFT JOIN app.companies c ON c.id = cm.company_id AND c.is_active = true
+     LEFT JOIN app.accounts ca ON ca.id = c.account_id
      WHERE u.id = $1 AND u.is_active = true
      GROUP BY u.id`,
     [userId]
@@ -306,7 +310,15 @@ export function createAuthRouter(pool) {
           ...user,
           account_id: account.id,
           account: { id: account.id, plan: account.plan },
-          companies: [{ ...company, role: "admin" }],
+          // Carry the workspace's account plan/trial state so usePlan (which is
+          // workspace-scoped) has it immediately, before the first /me refresh.
+          companies: [{
+            ...company,
+            role: "admin",
+            is_account_owner: true,
+            plan_expires_at: account.plan_expires_at,
+            plan_upgraded_at: account.plan_upgraded_at,
+          }],
         },
         token,
         email_verification,
@@ -450,7 +462,15 @@ export function createAuthRouter(pool) {
           ...user,
           account_id: account.id,
           account: { id: account.id, plan: account.plan },
-          companies: [{ ...company, role: "admin" }],
+          // Carry the workspace's account plan/trial state so usePlan (which is
+          // workspace-scoped) has it immediately, before the first /me refresh.
+          companies: [{
+            ...company,
+            role: "admin",
+            is_account_owner: true,
+            plan_expires_at: account.plan_expires_at,
+            plan_upgraded_at: account.plan_upgraded_at,
+          }],
         },
         token,
       });
@@ -513,7 +533,10 @@ export function createAuthRouter(pool) {
            COALESCE(
              json_agg(
                json_build_object('id', c.id, 'name', c.name, 'slug', c.slug,
-                 'plan', c.plan, 'logo_url', c.logo_url, 'role', cm.role)
+                 'plan', ca.plan, 'plan_expires_at', ca.plan_expires_at,
+                 'plan_upgraded_at', ca.plan_upgraded_at,
+                 'is_account_owner', (ca.owner_user_id = u.id),
+                 'logo_url', c.logo_url, 'role', cm.role)
                ORDER BY cm.joined_at
              ) FILTER (WHERE c.id IS NOT NULL),
              '[]'
@@ -521,6 +544,7 @@ export function createAuthRouter(pool) {
          FROM app.users u
          LEFT JOIN app.company_members cm ON cm.user_id = u.id AND cm.status = 'active'
          LEFT JOIN app.companies c ON c.id = cm.company_id AND c.is_active = true
+         LEFT JOIN app.accounts ca ON ca.id = c.account_id
          WHERE LOWER(u.email) = LOWER($1) AND u.is_active = true
          GROUP BY u.id`,
         [email]
@@ -714,7 +738,10 @@ export function createAuthRouter(pool) {
            COALESCE(
              json_agg(
                json_build_object('id', c.id, 'name', c.name, 'slug', c.slug,
-                 'plan', c.plan, 'logo_url', c.logo_url, 'role', cm.role,
+                 'plan', ca.plan, 'plan_expires_at', ca.plan_expires_at,
+                 'plan_upgraded_at', ca.plan_upgraded_at,
+                 'is_account_owner', (ca.owner_user_id = u.id),
+                 'logo_url', c.logo_url, 'role', cm.role,
                  'created_date', c.created_date)
                ORDER BY cm.joined_at
              ) FILTER (WHERE c.id IS NOT NULL),
@@ -724,6 +751,7 @@ export function createAuthRouter(pool) {
          JOIN app.accounts a ON a.id = u.account_id
          LEFT JOIN app.company_members cm ON cm.user_id = u.id AND cm.status = 'active'
          LEFT JOIN app.companies c ON c.id = cm.company_id AND c.is_active = true
+         LEFT JOIN app.accounts ca ON ca.id = c.account_id
          WHERE u.id = $1 AND u.is_active = true
          GROUP BY u.id, a.id`,
         [req.user.id]

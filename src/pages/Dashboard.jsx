@@ -3,7 +3,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil, Trash2, ChevronDown } from "lucide-react";
+import { MessageSquare, Target, Users, Plus, X, Check, GripVertical, Pencil, Trash2, ChevronDown, Lock, Globe } from "lucide-react";
 import PageGuide from "@/components/PageGuide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,7 @@ export default function Dashboard() {
 
   // Tabs, per-tab chart assignments and chart sizes are persisted in the DB
   // (company-scoped app.settings) via this hook - nothing is stored locally.
-  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes } = useDashboardLayout();
+  const { tabs, setTabs, tabAssignments, setTabAssignments, chartSizes, setChartSizes, userId } = useDashboardLayout();
 
   const [activeTab, setActiveTab] = useState("main");
   const [editingTab, setEditingTab] = useState(null);
@@ -105,9 +105,18 @@ export default function Dashboard() {
     // Pick the first "Tab N" that isn't already taken so we never create a duplicate.
     let n = tabs.length + 1;
     while (isDuplicateName(`Tab ${n}`)) n++;
-    setTabs(prev => [...prev, { id, name: `Tab ${n}` }]);
+    // New tabs are owned by their creator and public by default; the owner can
+    // flip them to private (visible only to them) via the lock toggle.
+    setTabs(prev => [...prev, { id, name: `Tab ${n}`, created_by: userId, visibility: "public" }]);
     setTabAssignments(prev => ({ ...prev, [id]: [] }));
     setActiveTab(id);
+  };
+
+  // Owner-only: flip a tab between public (all members) and private (only me).
+  const toggleTabVisibility = (tabId) => {
+    setTabs(prev => prev.map(t =>
+      t.id === tabId ? { ...t, visibility: t.visibility === "private" ? "public" : "private" } : t
+    ));
   };
 
   // Reorder tabs via native drag-and-drop.
@@ -257,7 +266,25 @@ export default function Dashboard() {
                     onDoubleClick={() => startEdit(tab)}
                     title={t("Drag to reorder · double-click to rename")}
                   >
+                    {tab.visibility === "private" && (
+                      <span title={t("Private tab - only you can see it")} className="flex-shrink-0">
+                        <Lock className="w-3 h-3 opacity-60" />
+                      </span>
+                    )}
                     {tab.name}
+                    {tab.created_by === userId && (
+                      <span
+                        className="opacity-0 group-hover:opacity-60 hover:!opacity-100"
+                        title={tab.visibility === "private"
+                          ? t("Make public (visible to all members)")
+                          : t("Make private (only you can see it)")}
+                        onClick={e => { e.stopPropagation(); toggleTabVisibility(tab.id); }}
+                      >
+                        {tab.visibility === "private"
+                          ? <Globe className="w-2.5 h-2.5" />
+                          : <Lock className="w-2.5 h-2.5" />}
+                      </span>
+                    )}
                     {activeTab === tab.id && (
                       <span
                         className="opacity-0 group-hover:opacity-60 hover:!opacity-100"

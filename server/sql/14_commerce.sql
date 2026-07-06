@@ -41,7 +41,11 @@ CREATE TABLE IF NOT EXISTS commerce.customer (
   is_opt_in_email BOOLEAN,
   is_opt_in_sms   BOOLEAN,
   tags            TEXT,
-  source_extra    JSONB
+  source_extra    JSONB,
+  -- Manual CSV import provenance (source_platform='manual'). NULL/false for
+  -- DAG-loaded platform rows; the commerce_landing DAG ignores these columns.
+  is_manual       BOOLEAN DEFAULT false,
+  upload_batch_id UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.product (
@@ -109,7 +113,10 @@ CREATE TABLE IF NOT EXISTS commerce."order" (
   total_refunded_amt NUMERIC,
   net_payment_amt    NUMERIC,
   remark             TEXT,
-  source_extra       JSONB
+  source_extra       JSONB,
+  -- Manual CSV import provenance (see commerce.customer note above).
+  is_manual          BOOLEAN DEFAULT false,
+  upload_batch_id    UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.order_line (
@@ -137,7 +144,10 @@ CREATE TABLE IF NOT EXISTS commerce.order_line (
   bundle_id        TEXT,
   bundle_name      TEXT,
   remark           TEXT,
-  source_extra     JSONB
+  source_extra     JSONB,
+  -- Manual CSV import provenance (see commerce.customer note above).
+  is_manual        BOOLEAN DEFAULT false,
+  upload_batch_id  UUID
 );
 
 CREATE TABLE IF NOT EXISTS commerce.inventory_level (
@@ -195,6 +205,10 @@ CREATE INDEX IF NOT EXISTS commerce_order_customer_idx         ON commerce."orde
 CREATE INDEX IF NOT EXISTS commerce_order_customer_only_idx    ON commerce."order" (customer_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_company_idx     ON commerce.order_line (company_id);
 CREATE INDEX IF NOT EXISTS commerce_order_line_order_idx       ON commerce.order_line (order_id);
+-- Manual-import batch undo: delete all commerce rows from one upload batch.
+CREATE INDEX IF NOT EXISTS commerce_order_batch_idx            ON commerce."order" (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_order_line_batch_idx       ON commerce.order_line (upload_batch_id);
+CREATE INDEX IF NOT EXISTS commerce_customer_batch_idx         ON commerce.customer (upload_batch_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_company_idx       ON commerce.customer (company_id);
 CREATE INDEX IF NOT EXISTS commerce_customer_email_idx         ON commerce.customer (company_id, lower(primary_email));
 CREATE INDEX IF NOT EXISTS commerce_product_company_idx        ON commerce.product (company_id);
