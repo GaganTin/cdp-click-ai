@@ -2519,6 +2519,27 @@ const BLANK_COND = () => ({ field: "", operator: "", value: "" });
 const BLANK_GROUP = () => ({ op: "AND", conditions: [BLANK_COND()] });
 const BLANK_RULE = () => ({ value: "", match: "OR", groups: [BLANK_GROUP()] });
 
+// A condition's value is "filled" only when it carries a value appropriate to the
+// field type. Bool operators (is yes / is no) are self-contained and need none.
+const conditionValueFilled = (cond, def) => {
+  if (!def) return false;
+  if (def.type === "bool") return true;
+  const v = cond.value;
+  if (def.type === "int") {
+    return cond.operator === "between"
+      ? Array.isArray(v) && v[0] !== "" && v[0] != null && v[1] !== "" && v[1] != null
+      : !Array.isArray(v) && v !== "" && v != null;
+  }
+  if (def.type === "enum" || def.type === "refmulti") return Array.isArray(v) && v.length > 0;
+  return v != null && v !== ""; // ref + recency + fallback
+};
+// Fully specified: a field, an operator, and (unless bool) a value.
+const isConditionComplete = (cond, fieldDefs) =>
+  !!cond.field && !!cond.operator && conditionValueFilled(cond, fieldDefs.find((f) => f.field === cond.field));
+// The user has begun filling this row (so a blank one isn't flagged as unfinished).
+const isConditionStarted = (cond) =>
+  !!cond.field || !!cond.operator || (Array.isArray(cond.value) ? cond.value.length > 0 : cond.value !== "" && cond.value != null);
+
 // Normalize a stored rule to the groups shape. Rules saved before nesting have a
 // flat { op, conditions } - wrap them in a single group so they still edit.
 const normalizeRule = (r) => {
@@ -2564,7 +2585,7 @@ function GroupBlock({ group, fieldDefs, optsFor, refOptionsFor, attributeOptions
 function RuleRow({ rule, idx, scope, timePeriod, fieldDefs, optsFor, refOptionsFor, attributeOptions, onChange, onRemove, canRemove }) {
   const { t } = usePreferences();
   const setGroup = (i, ng) => onChange({ ...rule, groups: rule.groups.map((g, j) => (j === i ? ng : g)) });
-  const ready = (rule.groups || []).some((g) => (g.conditions || []).some((c) => c.field && c.operator));
+  const ready = (rule.groups || []).some((g) => (g.conditions || []).some((c) => isConditionComplete(c, fieldDefs)));
   const { data: prev } = useQuery({
     queryKey: ["rule-preview", scope, JSON.stringify(rule.groups), rule.match, timePeriod || ""],
     queryFn: () => appClient.attributes.rulePreview(scope, { ...rule, time_period: timePeriod || null }),
@@ -2653,16 +2674,22 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
   }, [attr?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Drop empty conditions / groups; keep a value-rule only if it has a value and
-  // at least one usable group.
+  // at least one fully-specified group (a condition needs field + operator + value).
   const cleanRules = rules
     .map((r) => ({
       value: (r.value || "").trim(),
       match: r.match === "AND" ? "AND" : "OR",
       groups: (r.groups || [])
-        .map((g) => ({ op: g.op === "OR" ? "OR" : "AND", conditions: (g.conditions || []).filter((c) => c.field && c.operator) }))
+        .map((g) => ({ op: g.op === "OR" ? "OR" : "AND", conditions: (g.conditions || []).filter((c) => isConditionComplete(c, fieldDefs)) }))
         .filter((g) => g.conditions.length),
     }))
     .filter((r) => r.value && r.groups.length);
+
+  // A half-filled condition (a field or operator picked, but not a complete
+  // field + operator + value) blocks Save so nothing is left dangling.
+  const hasIncompleteCondition = fieldDefs.length > 0 && rules.some((r) =>
+    (r.groups || []).some((g) => (g.conditions || []).some((c) => isConditionStarted(c) && !isConditionComplete(c, fieldDefs)))
+  );
 
   const invalidate = () => { qc.invalidateQueries({ queryKey: ["attribute", attributeId] }); qc.invalidateQueries({ queryKey: ["attributes"] }); };
   const ruleConfig = () => ({ match: "first", time_period: timePeriod || null, daily_refresh: dailyRefresh, rules: cleanRules });
@@ -2670,8 +2697,13 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
   // Save is enabled whenever the status, settings, or rules changed. It persists
   // everything in one shot; tags are applied (recomputed onto profiles) only when
   // the saved status is Active - saving a Draft / Archived attribute just stores it.
+  // No save is allowed while any condition is half-filled - the user must finish
+  // or remove it first (warned below the action bar).
   const statusChanged = !!attr && pendingStatus !== attr.status;
-  const dirty = (defDirty && !!cleanRules.length) || statusChanged;
+  const dirty = !hasIncompleteCondition && ((defDirty && !!cleanRules.length) || statusChanged);
+  const saveTitle = hasIncompleteCondition
+    ? t("Finish or remove the unfinished condition - each needs a field, operator, and value.")
+    : (defDirty && !cleanRules.length ? t("Add at least one complete rule before saving.") : undefined);
   const saveMut = useMutation({
     mutationFn: async () => {
       await appClient.attributes.update(attributeId, { status: pendingStatus, rule: ruleConfig() });
@@ -2714,7 +2746,15 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
             onSave={() => saveMut.mutate()}
             dirty={dirty}
             saving={saveMut.isPending}
+            saveTitle={saveTitle}
           />
+
+          {hasIncompleteCondition && (
+            <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 mt-3 flex items-start gap-2 text-xs">
+              <AlertCircle className="w-3.5 h-3.5 text-yellow-600 mt-0.5 flex-shrink-0" />
+              <span>{t("A condition is unfinished. Give every condition a field, operator, and value - or remove it - before saving.")}</span>
+            </div>
+          )}
 
           <StatusReminder status={pendingStatus} />
 

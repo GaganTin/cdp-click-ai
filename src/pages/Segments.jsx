@@ -309,6 +309,13 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
   const chips = criteriaToChips(criteria);
   const attrChips = attrValueIds.map((id) => valueLabel[id]).filter(Boolean);
   const allChips = [...chips, ...attrChips];
+  // A segment can only be made Active once it has targeting criteria - without
+  // any, "active" would mean "everyone". If criteria are cleared while Active is
+  // selected, quietly fall back to Draft so the form never holds an invalid state.
+  const hasCriteria = allChips.length > 0;
+  useEffect(() => {
+    if (!hasCriteria && form.status === "active") set("status", "draft");
+  }, [hasCriteria]);
 
   // Live preview: how many profiles currently match the criteria being built.
   // Debounced so dragging/typing a range doesn't fire a request per keystroke.
@@ -333,6 +340,11 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
   const previewCount = previewData?.count;
 
   const handleSubmit = () => {
+    // Guard: Active requires targeting criteria (see hasCriteria above).
+    if (form.status === "active" && !hasCriteria) {
+      toast.error(t("Add at least one profile criterion before activating this segment."));
+      return;
+    }
     // Description is whatever the user typed - never auto-appended. The criteria are
     // kept separately in metadata.criteria, so mixing them into the description just
     // duplicated the "Criteria: …" text on every re-save.
@@ -538,10 +550,13 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
             <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="draft">{t("Draft")}</SelectItem>
-              <SelectItem value="active">{t("Active")}</SelectItem>
+              <SelectItem value="active" disabled={!hasCriteria}>{t("Active")}</SelectItem>
               <SelectItem value="archived">{t("Archived")}</SelectItem>
             </SelectContent>
           </Select>
+          {!hasCriteria && (
+            <p className="text-[11px] text-muted-foreground mt-1">{t("Add profile criteria to activate this segment.")}</p>
+          )}
         </div>
       </div>
 
