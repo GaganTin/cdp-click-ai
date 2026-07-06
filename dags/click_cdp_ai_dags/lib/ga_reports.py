@@ -51,8 +51,25 @@ def _webhook_secret():
 
 
 def _params(context):
+    """Resolved run parameters for this dag_run.
+
+    API/queue-triggered runs carry everything in ``dag_run.conf``. SCHEDULED runs
+    have an empty conf, so relying on conf alone loses each DAG's declared Param
+    defaults - most importantly ``integration_type`` (googleSearchConsole / shopify),
+    which then silently fell back to "googleAnalytics" and made GSC/Shopify daily
+    syncs stamp GA's last_synced_date instead of their own. Airflow's
+    ``context["params"]`` already holds the declared Param defaults with any conf
+    overrides applied, so prefer it and layer conf on top for safety.
+    """
+    params = context.get("params") or {}
     dag_run = context.get("dag_run")
-    return (dag_run.conf if dag_run and dag_run.conf else {}) or {}
+    conf = (dag_run.conf if dag_run and dag_run.conf else None)
+    if params:
+        merged = dict(params)
+        if conf:
+            merged.update(conf)
+        return merged
+    return conf or {}
 
 
 def notify_dag_complete(params, is_synced, error=None, records_synced=None):
@@ -92,6 +109,62 @@ def notify_dag_complete(params, is_synced, error=None, records_synced=None):
     return True
 
 
+def update_integration_status(params, is_synced, error=None):
+    """Write the sync result straight to ``app.data_integrations`` FROM THE DAG.
+
+    The DAG is the source of truth for the integration sync status - not the Node
+    reconciler cron (which used to stamp last_synced_date on a 30s interval). Rules:
+
+      - success  -> is_synced=true, last_synced_date=NOW(), clear the error;
+      - failure  -> is_sync_error=true, sync_error=<msg>, and last_synced_date is
+                    LEFT UNTOUCHED (only a successful run advances the sync date).
+
+    Scope: job/queue-triggered runs carry ``company_id`` -> that one workspace;
+    scheduled all-workspace runs carry none -> every connected workspace of this
+    integration type (exactly the ones the daily run just refreshed). Best-effort:
+    a status-write hiccup is logged, never raised, so it can't fail the DAG."""
+    integration_type = params.get("integration_type", "googleAnalytics")
+    company_id = params.get("company_id")
+
+    from dags.click_cdp_ai_dags.lib import config as ga_config
+    from dags.click_cdp_ai_dags.lib import db
+    conn_kwargs = ga_config.get_pg_conn_kwargs()
+    if not conn_kwargs:
+        _log.warning("[sync-status] Postgres not configured; skipping data_integrations update")
+        return False
+
+    if is_synced:
+        set_sql = ("SET is_synced=true, last_synced_date=NOW(), "
+                   "is_sync_error=false, sync_error=NULL, updated_date=NOW()")
+        set_vals = ()
+    else:
+        set_sql = "SET is_sync_error=true, sync_error=%s, updated_date=NOW()"
+        set_vals = ((str(error) if error else "Sync failed")[:2000],)
+
+    if company_id:
+        where_sql, where_vals = "WHERE integration_type=%s AND company_id=%s", (integration_type, company_id)
+    else:
+        where_sql, where_vals = "WHERE integration_type=%s AND is_connected=true", (integration_type,)
+
+    sql = f"UPDATE app.data_integrations {set_sql} {where_sql}"
+    sql_vals = set_vals + where_vals
+
+    def _run(conn):
+        with conn.cursor() as cur:
+            cur.execute(sql, sql_vals)
+            return cur.rowcount
+
+    try:
+        n = db.run_tx(conn_kwargs, _run)
+        _log.info("[sync-status] %s is_synced=%s -> updated %s row(s)%s",
+                  integration_type, bool(is_synced), n,
+                  "" if company_id else " (all connected workspaces)")
+        return True
+    except Exception as exc:  # noqa: BLE001 - status write must never fail the DAG
+        _log.error("[sync-status] data_integrations update failed: %s", exc)
+        return False
+
+
 def on_dag_start_callback(**context):
     """No-op marker task. The Node queue worker already flips the job to 'running'
     when it claims it; this just records the start in the task log."""
@@ -110,6 +183,8 @@ def on_dag_failure_callback(context):
     params = _params(context)
     exception = context.get("exception", "Unknown error, try again.")
     _notify_teams_failure(context, params, exception)
+    # DAG owns the integration status: record the error WITHOUT advancing last_synced_date.
+    update_integration_status(params, is_synced=False, error=exception)
     return notify_dag_complete(params, is_synced=False, error=exception)
 
 
@@ -167,6 +242,8 @@ def make_orchestrator_failure_callback(child_trigger_task_ids):
     def _callback(context):
         params = _params(context)
         exception = context.get("exception", "Unknown error, try again.")
+        # DAG owns the integration status: record the error, do NOT touch last_synced_date.
+        update_integration_status(params, is_synced=False, error=exception)
         # Always report job status to Node (the orchestrator owns job_id/company_id).
         notify_dag_complete(params, is_synced=False, error=exception)
         failed = _failed_task_ids(context)
@@ -186,7 +263,12 @@ def report_success(results=None, **context):
     (ignored) upstream task output so this can sit downstream of an expanded task.
     For scheduled all-workspace runs (no job_id/company_id) it reports with
     ``scheduled=true`` so last_synced_date is stamped on every connected workspace."""
-    return notify_dag_complete(_params(context), is_synced=True)
+    params = _params(context)
+    # DAG owns the integration status: stamp is_synced=true + last_synced_date=NOW()
+    # directly (source of truth). The webhook still fires for job status /
+    # notifications / profile rebuild.
+    update_integration_status(params, is_synced=True)
+    return notify_dag_complete(params, is_synced=True)
 
 
 # --------------------------------------------------------------------------- #

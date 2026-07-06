@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useStickyState } from "@/lib/useStickyState";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 import AttributesAnalyticsPanel from "@/components/attributes/AttributesAnalyticsPanel";
 import AttributeImportDialog from "@/components/attributes/AttributeImportDialog";
 import PageGuide from "@/components/PageGuide";
@@ -22,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MultiSelect } from "@/components/ui/multi-select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -75,6 +77,7 @@ function closestMatch(value, candidates, threshold = 0.72) {
 // ── Live job status banner ────────────────────────────────────
 function JobStatus({ job, onCancel, compact }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [confirmCancel, setConfirmCancel] = useState(false);
   if (!job) return null;
   const p = job.progress || {};
@@ -118,7 +121,7 @@ function JobStatus({ job, onCancel, compact }) {
         {counts && <span>· {counts}</span>}
         {elapsed != null && <span>· {fmt(elapsed)} {t("elapsed")}</span>}
         {eta && <span className="text-foreground">· {eta}</span>}
-        {onCancel && <button onClick={() => setConfirmCancel(true)} className="ml-1 hover:text-foreground underline">{t("cancel")}</button>}
+        {onCancel && <button onClick={() => setConfirmCancel(true)} disabled={!canWrite} className={`ml-1 hover:text-foreground underline ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>{t("cancel")}</button>}
       </div>
 
       {/* Cancelling stops the run mid-flight: AI tagging + profile updates for this
@@ -131,7 +134,7 @@ function JobStatus({ job, onCancel, compact }) {
           </p>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" size="sm" onClick={() => setConfirmCancel(false)}>{t("Keep running")}</Button>
-            <Button variant="default" size="sm" onClick={() => { setConfirmCancel(false); onCancel?.(); }}>{t("Cancel run")}</Button>
+            <Button variant="default" size="sm" disabled={!canWrite} onClick={() => { setConfirmCancel(false); onCancel?.(); }}>{t("Cancel run")}</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -160,6 +163,7 @@ function StatusReminder({ status }) {
 // parent applies (recomputes tags onto profiles) only when the status is Active.
 function AttributeActionBar({ status, onStatusChange, lastRun, onSave, dirty, saving, saveTitle }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   return (
     <div className="flex items-center justify-between gap-3 mt-3 pb-3 border-b border-border">
       <div className="flex items-center gap-2">
@@ -173,7 +177,7 @@ function AttributeActionBar({ status, onStatusChange, lastRun, onSave, dirty, sa
         </Select>
         {lastRun && <span className="text-[11px] text-muted-foreground">{t("Updated")} {formatDistanceToNow(new Date(lastRun), { addSuffix: true })}</span>}
       </div>
-      <Button size="sm" className="h-8 gap-1.5" disabled={!dirty || saving} onClick={onSave} title={saveTitle}>
+      <Button size="sm" className="h-8 gap-1.5" disabled={!dirty || saving || !canWrite} onClick={onSave} title={!canWrite ? t("Viewers can't make changes") : saveTitle}>
         {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {t("Save")}
       </Button>
     </div>
@@ -192,6 +196,7 @@ const parseValues = (text) =>
 
 function AttributeForm({ initial, onSubmit, isPending, submitLabel, defaultSource }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [form, setForm] = useState(initial || {
     ...EMPTY,
     source: defaultSource || "web_content",
@@ -304,7 +309,7 @@ function AttributeForm({ initial, onSubmit, isPending, submitLabel, defaultSourc
         </div>
       )}
 
-      <Button className="w-full" disabled={!form.name.trim() || isPending} onClick={submit}>
+      <Button className="w-full" disabled={!form.name.trim() || isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={submit}>
         {submitLabel}
       </Button>
     </div>
@@ -341,6 +346,7 @@ function ValueRow({
   selectable, selected, onToggleSelect, suggestion, onAcceptSuggestion,
 }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [showPages, setShowPages] = useState(false);
   const pending = value.is_exception && !value.is_approved;
   const mergeTargets = canMerge ? siblings.filter((s) => s.id !== value.id && s.is_approved && !s.merged_into) : [];
@@ -362,8 +368,8 @@ function ValueRow({
         </span>
         {suggestion && onAcceptSuggestion && (
           <button title={t("Looks like") + ` "${suggestion.display_label || suggestion.value}" - ` + t("merge into it")}
-            onClick={() => onAcceptSuggestion(value, suggestion)}
-            className="text-[10px] px-1.5 py-0.5 rounded-full border border-yellow-500/40 text-yellow-600 hover:bg-yellow-500/10 whitespace-nowrap flex items-center gap-1 flex-shrink-0">
+            onClick={() => onAcceptSuggestion(value, suggestion)} disabled={!canWrite}
+            className={`text-[10px] px-1.5 py-0.5 rounded-full border border-yellow-500/40 text-yellow-600 hover:bg-yellow-500/10 whitespace-nowrap flex items-center gap-1 flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
             <GitMerge className="w-3 h-3" /> {suggestion.display_label || suggestion.value}?
           </button>
         )}
@@ -373,7 +379,7 @@ function ValueRow({
           return (
             <DropdownMenu key={dim}>
               <DropdownMenuTrigger asChild>
-                <button className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${cur ? "border-border text-foreground" : "border-dashed border-border text-muted-foreground"} hover:text-foreground`}>
+                <button disabled={!canWrite} className={`text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${cur ? "border-border text-foreground" : "border-dashed border-border text-muted-foreground"} hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
                   {cur ? (single ? cur : `${dim}: ${cur}`) : `+ ${dim}`}
                 </button>
               </DropdownMenuTrigger>
@@ -390,12 +396,12 @@ function ValueRow({
         })}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
           {pending && (
-            <button title={t("Approve")} onClick={() => onApprove(value)} className="p-1 hover:text-foreground text-muted-foreground"><Check className="w-3.5 h-3.5" /></button>
+            <button title={t("Approve")} onClick={() => onApprove(value)} disabled={!canWrite} className={`p-1 hover:text-foreground text-muted-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Check className="w-3.5 h-3.5" /></button>
           )}
           {mergeTargets.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button title={t("Merge into…")} className="p-1 hover:text-foreground text-muted-foreground"><GitMerge className="w-3.5 h-3.5" /></button>
+                <button title={t("Merge into…")} disabled={!canWrite} className={`p-1 hover:text-foreground text-muted-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><GitMerge className="w-3.5 h-3.5" /></button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
                 <p className="text-[10px] text-muted-foreground px-2 py-1">{t("Merge into")}</p>
@@ -406,7 +412,7 @@ function ValueRow({
             </DropdownMenu>
           )}
           {canDelete && (
-            <button title={t("Delete")} onClick={() => onDelete(value)} className="p-1 hover:text-destructive text-muted-foreground"><Trash2 className="w-3.5 h-3.5" /></button>
+            <button title={t("Delete")} onClick={() => onDelete(value)} disabled={!canWrite} className={`p-1 hover:text-destructive text-muted-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Trash2 className="w-3.5 h-3.5" /></button>
           )}
         </div>
       </div>
@@ -418,6 +424,7 @@ function ValueRow({
 // ── Merged value row (folded into a canonical value) ──────────
 function MergedValueRow({ value, target, targets, onUnmerge, onChangeTarget }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   return (
     <div className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-secondary/40 group">
       <span className="text-sm truncate text-muted-foreground line-through max-w-[40%]">{value.display_label || value.value}</span>
@@ -427,7 +434,7 @@ function MergedValueRow({ value, target, targets, onUnmerge, onChangeTarget }) {
         {targets.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button title={t("Change merge target")} className="p-1 hover:text-foreground text-muted-foreground"><GitMerge className="w-3.5 h-3.5" /></button>
+              <button title={t("Change merge target")} disabled={!canWrite} className={`p-1 hover:text-foreground text-muted-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><GitMerge className="w-3.5 h-3.5" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
               <p className="text-[10px] text-muted-foreground px-2 py-1">{t("Merge into instead")}</p>
@@ -437,7 +444,7 @@ function MergedValueRow({ value, target, targets, onUnmerge, onChangeTarget }) {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        <button title={t("Un-merge (restore as its own value)")} onClick={() => onUnmerge(value)} className="p-1 hover:text-foreground text-muted-foreground"><Undo2 className="w-3.5 h-3.5" /></button>
+        <button title={t("Un-merge (restore as its own value)")} onClick={() => onUnmerge(value)} disabled={!canWrite} className={`p-1 hover:text-foreground text-muted-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Undo2 className="w-3.5 h-3.5" /></button>
       </div>
     </div>
   );
@@ -474,6 +481,7 @@ function JobHistory({ jobs }) {
 // ── Add-group modal (create an empty group under the dimension) ──
 function AddGroupDialog({ open, onClose, dimension, existing = [], onAdd }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [name, setName] = useState("");
   const dim = dimension || "group";
   const trimmed = name.trim();
@@ -492,7 +500,7 @@ function AddGroupDialog({ open, onClose, dimension, existing = [], onAdd }) {
             {dupe && <p className="text-[11px] text-destructive mt-1">{t("A group called")} “{trimmed}” {t("already exists.")}</p>}
             <p className="text-[11px] text-muted-foreground mt-1">{t("Creates an empty")} {dim.toLowerCase()} - {t("assign values to it from each value's group menu.")}</p>
           </div>
-          <Button className="w-full" disabled={!trimmed || dupe} onClick={submit}>{t("Add")} {dim.toLowerCase()}</Button>
+          <Button className="w-full" disabled={!trimmed || dupe || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={submit}>{t("Add")} {dim.toLowerCase()}</Button>
         </div>
       </DialogContent>
     </Dialog>
@@ -507,6 +515,7 @@ function TestTab({
   testMut, linkModeMut, selectLinkMut, delLinkMut,
 }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const links = testLinks?.links || [];
   const max = testLinks?.max || 50;
   const refreshMode = testLinks?.refresh_mode || "static";
@@ -537,8 +546,8 @@ function TestTab({
       <div className="rounded-lg border border-border p-3 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Test pages")} · {links.length}/{max}</p>
-          <button onClick={() => linkModeMut.mutate(refreshMode === "daily" ? "static" : "daily")}
-            className={`text-[11px] px-2 py-1 rounded-md border ${refreshMode === "daily" ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"}`}
+          <button onClick={() => linkModeMut.mutate(refreshMode === "daily" ? "static" : "daily")} disabled={!canWrite}
+            className={`text-[11px] px-2 py-1 rounded-md border ${refreshMode === "daily" ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground"} ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
             title={t("Re-pull the GA top pages automatically each day")}>
             {t("Refresh daily:")} {refreshMode === "daily" ? t("on") : t("off")}
           </button>
@@ -547,8 +556,8 @@ function TestTab({
         {/* Select-all / clear */}
         {links.length > 0 && (
           <div className="flex items-center gap-3 text-[11px]">
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => selectLinkMut.mutate({ ids: null, is_selected: true })}>{t("Select all")}</button>
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => selectLinkMut.mutate({ ids: null, is_selected: false })}>{t("Clear")}</button>
+            <button disabled={!canWrite} className={`text-muted-foreground hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`} onClick={() => selectLinkMut.mutate({ ids: null, is_selected: true })}>{t("Select all")}</button>
+            <button disabled={!canWrite} className={`text-muted-foreground hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`} onClick={() => selectLinkMut.mutate({ ids: null, is_selected: false })}>{t("Clear")}</button>
             <span className="text-muted-foreground ml-auto">{selectedCount} {t("selected for the dry-run")}</span>
           </div>
         )}
@@ -562,13 +571,13 @@ function TestTab({
           <div className="max-h-72 overflow-y-auto divide-y divide-border/60">
             {links.map((l) => (
               <div key={l.id} className="flex items-center gap-2 py-1.5 group">
-                <input type="checkbox" checked={l.is_selected} className="accent-foreground flex-shrink-0"
+                <input type="checkbox" checked={l.is_selected} disabled={!canWrite} className="accent-foreground flex-shrink-0"
                   onChange={() => selectLinkMut.mutate({ ids: [l.id], is_selected: !l.is_selected })} />
                 <div className="min-w-0 flex-1">
                   {l.title && <p className="text-xs font-medium truncate" title={l.title}>{l.title}</p>}
                   <p className={`truncate ${l.title ? "text-[10px] text-muted-foreground" : "text-xs"}`} title={decodeUrl(l.url)}>{decodeUrl(l.url)}</p>
                 </div>
-                <button onClick={() => delLinkMut.mutate(l.id)} title={t("Remove from the set")} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive flex-shrink-0"><X className="w-3.5 h-3.5" /></button>
+                <button onClick={() => delLinkMut.mutate(l.id)} disabled={!canWrite} title={t("Remove from the set")} className={`opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive flex-shrink-0 ${!canWrite ? "pointer-events-none" : ""}`}><X className="w-3.5 h-3.5" /></button>
               </div>
             ))}
           </div>
@@ -600,6 +609,7 @@ function TestTab({
 
 function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [tab, setTab] = useState("values");
   const [newValue, setNewValue] = useState("");
@@ -761,7 +771,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
         <h2 className="font-heading text-lg font-semibold">{attr?.name || t("Attribute")}</h2>
         {attr && onEdit && <button onClick={() => onEdit(attr)} title={t("Edit settings")} className="text-muted-foreground hover:text-foreground"><Pencil className="w-3.5 h-3.5" /></button>}
         {attr && onClone && (
-          <button onClick={() => cloneMut.mutate()} disabled={cloneMut.isPending} title={t("Clone into a new draft")} className="text-muted-foreground hover:text-foreground"><Copy className="w-3.5 h-3.5" /></button>
+          <button onClick={() => cloneMut.mutate()} disabled={cloneMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : t("Clone into a new draft")} className={`text-muted-foreground hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Copy className="w-3.5 h-3.5" /></button>
         )}
       </div>
 
@@ -787,7 +797,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
             {/* Action bar */}
             <div className="flex items-center justify-between gap-3 mt-3 pb-3 border-b border-border">
               <div className="flex items-center gap-2">
-                <Select value={attr.status} onValueChange={(v) => statusMut.mutate(v)}>
+                <Select value={attr.status} onValueChange={(v) => statusMut.mutate(v)} disabled={!canWrite}>
                   <SelectTrigger className="h-8 w-28 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="draft">{t("Draft")}</SelectItem>
@@ -802,8 +812,8 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                   <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => setShowHistory((s) => !s)} title={t("Run history")}>
                     <History className="w-3.5 h-3.5" /> {t("History")}
                   </Button>
-                  <Button size="sm" className="h-8 gap-1.5" disabled={ACTIVE_JOB(job) || runMut.isPending}
-                    title={attr.status === "active"
+                  <Button size="sm" className="h-8 gap-1.5" disabled={ACTIVE_JOB(job) || runMut.isPending || !canWrite}
+                    title={!canWrite ? t("Viewers can't make changes") : attr.status === "active"
                       ? t("Re-tag your crawled pages and update targeting.")
                       : t("Tag your crawled pages so you can preview and verify results. Values only reach profiles once this attribute is Active.")}
                     onClick={() => runMut.mutate()}>
@@ -843,7 +853,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                     <Input value={newValue} onChange={(e) => setNewValue(e.target.value)}
                       placeholder={t("Add a known value (e.g. England)")} className="h-8 text-sm"
                       onKeyDown={(e) => { if (e.key === "Enter" && newValue.trim()) addValueMut.mutate(newValue.trim()); }} />
-                    <Button size="sm" variant="outline" className="h-8" disabled={!newValue.trim() || addValueMut.isPending}
+                    <Button size="sm" variant="outline" className="h-8" disabled={!newValue.trim() || addValueMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                       onClick={() => addValueMut.mutate(newValue.trim())}>{t("Add")}</Button>
                   </div>
 
@@ -862,11 +872,11 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                           {reviewSel.size > 0 && (
                             <>
                               <span className="text-[11px] text-muted-foreground">{reviewSel.size} {t("selected")}</span>
-                              <Button size="sm" variant="outline" className="h-7 gap-1" disabled={bulkMut.isPending}
+                              <Button size="sm" variant="outline" className="h-7 gap-1" disabled={bulkMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                                 onClick={() => bulkMut.mutate({ ids: [...reviewSel], action: "approve" })}>
                                 <Check className="w-3 h-3" /> {t("Approve")}
                               </Button>
-                              <Button size="sm" variant="outline" className="h-7 gap-1 text-destructive" disabled={bulkMut.isPending}
+                              <Button size="sm" variant="outline" className="h-7 gap-1 text-destructive" disabled={bulkMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                                 onClick={() => bulkMut.mutate({ ids: [...reviewSel], action: "reject" })}>
                                 <Ban className="w-3 h-3" /> {t("Reject")}
                               </Button>
@@ -920,7 +930,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             <span className="text-[11px] text-muted-foreground">{approvedSel.size} {t("selected")}</span>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={bulkMut.isPending || !mergeTargets.length}>
+                                <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={bulkMut.isPending || !mergeTargets.length || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}>
                                   <GitMerge className="w-3 h-3" /> {t("Merge into…")}
                                 </Button>
                               </DropdownMenuTrigger>
@@ -936,7 +946,7 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                             {dimensions.map((dim) => (
                               <DropdownMenu key={dim}>
                                 <DropdownMenuTrigger asChild>
-                                  <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={bulkMut.isPending}>
+                                  <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={bulkMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}>
                                     <Layers className="w-3 h-3" /> {t("Set")} {dim}…
                                   </Button>
                                 </DropdownMenuTrigger>
@@ -1009,11 +1019,11 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                       {dimensions.map((dim) => (
                         <span key={dim} className="h-7 pl-2.5 pr-1 rounded-full bg-secondary/60 border border-border flex items-center gap-1 text-xs">
                           {dim}
-                          <button title={t("Rename dimension")} className="p-0.5 text-muted-foreground hover:text-foreground"
+                          <button title={t("Rename dimension")} disabled={!canWrite} className={`p-0.5 text-muted-foreground hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
                             onClick={() => { const n = window.prompt(t("Rename dimension"), dim); if (n && n.trim() && n.trim() !== dim) renameDimensionMut.mutate({ oldName: dim, newName: n.trim() }); }}>
                             <Pencil className="w-2.5 h-2.5" />
                           </button>
-                          <button title={t("Remove dimension")} className="p-0.5 text-muted-foreground hover:text-destructive"
+                          <button title={t("Remove dimension")} disabled={!canWrite} className={`p-0.5 text-muted-foreground hover:text-destructive ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
                             onClick={() => { if (window.confirm(`${t("Remove the")} "${dim}" ${t("dimension? Values keep their other groups.")}`)) removeDimensionMut.mutate(dim); }}>
                             <X className="w-2.5 h-2.5" />
                           </button>
@@ -1021,10 +1031,10 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                       ))}
                       <div className="flex items-center gap-1">
                         <Input value={newDimension} onChange={(e) => setNewDimension(e.target.value)}
-                          placeholder={t("Add a dimension… e.g. Continent")} className="h-7 text-xs w-48"
+                          placeholder={t("Add a dimension… e.g. Continent")} className="h-7 text-xs w-64"
                           onKeyDown={(e) => { if (e.key === "Enter" && newDimension.trim()) { addDimensionMut.mutate(newDimension.trim()); setNewDimension(""); } }} />
-                        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!newDimension.trim() || addDimensionMut.isPending}
-                          onClick={() => { addDimensionMut.mutate(newDimension.trim()); setNewDimension(""); }}>{t("Add")}</Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs flex-shrink-0" disabled={!newDimension.trim() || addDimensionMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
+                          onClick={() => { addDimensionMut.mutate(newDimension.trim()); setNewDimension(""); }}>{t("Add a Group")}</Button>
                       </div>
                     </div>
                     <p className="text-[11px] text-muted-foreground">{t("Roll values up into higher-level dimensions (e.g. Country → Continent AND GDP) so you can target a whole group in Segments. Each value takes one group per dimension. To delete a value, use the")} <strong>{t("Values")}</strong> {t("tab.")}</p>
@@ -1046,10 +1056,10 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <p className="text-xs font-semibold flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-muted-foreground" /> {dim}</p>
                             <div className="flex items-center gap-1.5">
-                              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setAddGroupDim(dim)}>{t("Add group")}</Button>
-                              <Button size="sm" className="h-7 gap-1 text-xs" disabled={autogroupMut.isPending}
+                              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setAddGroupDim(dim)}>{t("Add a Sub Group")}</Button>
+                              <Button size="sm" className="h-7 gap-1 text-xs" disabled={autogroupMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                                 onClick={() => autogroupMut.mutate(dim)}>
-                                {autogroupMut.isPending && autogroupMut.variables === dim ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} {t("Group with AI")}
+                                {autogroupMut.isPending && autogroupMut.variables === dim ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />} {t("Sub Group with AI")}
                               </Button>
                             </div>
                           </div>
@@ -1144,8 +1154,8 @@ function AttributeDetail({ attributeId, onBack, onEdit, onClone }) {
                         {(pg.values || []).map((v) => (
                           <span key={v.id} className="text-[10px] pl-2 pr-1 py-0.5 rounded-full bg-secondary/60 border border-border flex items-center gap-1">
                             {v.value}
-                            <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: v.id })} title={t("Remove this tag")}
-                              className="text-muted-foreground hover:text-destructive">
+                            <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: v.id })} disabled={!canWrite} title={t("Remove this tag")}
+                              className={`text-muted-foreground hover:text-destructive ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
                               <X className="w-2.5 h-2.5" />
                             </button>
                           </span>
@@ -1209,6 +1219,7 @@ function AttrPicker({ attrs, selected, onToggle, onAll, t }) {
 // "Add to Suppression List"). Patterns are substrings or globs ("/about/*").
 function ExclusionsDialog({ open, onClose, existing, onAdd }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [mode, setMode] = useState("single");
   const [single, setSingle] = useState("");
   const [paste, setPaste] = useState("");
@@ -1297,7 +1308,7 @@ function ExclusionsDialog({ open, onClose, existing, onAdd }) {
         )}
 
         {fresh.length > 0 && <p className="text-[11px] text-muted-foreground">{fresh.length} {fresh.length !== 1 ? t("new patterns ready to add.") : t("new pattern ready to add.")}</p>}
-        <Button className="w-full" disabled={!fresh.length} onClick={submit}>
+        <Button className="w-full" disabled={!fresh.length || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={submit}>
           {t("Add")}{fresh.length ? ` ${fresh.length}` : ""} {fresh.length === 1 ? t("exclusion") : t("exclusions")}
         </Button>
       </DialogContent>
@@ -1307,6 +1318,7 @@ function ExclusionsDialog({ open, onClose, existing, onAdd }) {
 
 function PagesPanel() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [view, setView] = useState("valid");
   const [search, setSearch] = useState("");
@@ -1420,19 +1432,19 @@ function PagesPanel() {
         )}
         {view === "valid" && <span className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap">{pg.word_count} {t("words")} · {pg.tag_count} {t("tags")}{pg.needs_retag ? ` · ${t("changed")}` : ""}</span>}
         {view !== "excluded" && (
-          <button title={t("Re-scrape this page")} onClick={() => rerunMut.mutate({ ids: [pg.id], mode: "scrape" })} disabled={rerunMut.isPending}
-            className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+          <button title={t("Re-scrape this page")} onClick={() => rerunMut.mutate({ ids: [pg.id], mode: "scrape" })} disabled={rerunMut.isPending || !canWrite}
+            className={`p-1 text-muted-foreground hover:text-foreground flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
             <RotateCw className="w-3.5 h-3.5" />
           </button>
         )}
         {view === "valid" && (
-          <button title={t("Re-tag this page")} onClick={() => rerunMut.mutate({ ids: [pg.id], mode: "tag" })} disabled={rerunMut.isPending}
-            className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+          <button title={t("Re-tag this page")} onClick={() => rerunMut.mutate({ ids: [pg.id], mode: "tag" })} disabled={rerunMut.isPending || !canWrite}
+            className={`p-1 text-muted-foreground hover:text-foreground flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         )}
-        <button title={pg.is_excluded ? t("Re-include in crawling") : t("Exclude from crawling")} onClick={() => exclMut.mutate({ id: pg.id, is_excluded: !pg.is_excluded })}
-          className="p-1 text-muted-foreground hover:text-foreground flex-shrink-0">
+        <button title={pg.is_excluded ? t("Re-include in crawling") : t("Exclude from crawling")} onClick={() => exclMut.mutate({ id: pg.id, is_excluded: !pg.is_excluded })} disabled={!canWrite}
+          className={`p-1 text-muted-foreground hover:text-foreground flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
           {pg.is_excluded ? <RotateCcw className="w-3.5 h-3.5" /> : <Ban className="w-3.5 h-3.5" />}
         </button>
       </div>
@@ -1468,8 +1480,8 @@ function PagesPanel() {
           </div>
         ) : <p className="text-[10px] text-muted-foreground mt-1">{t("No current tags")}</p>}
       </div>
-      <button title={t("Keep the existing tags and dismiss the change")} onClick={() => keepMut.mutate([pg.id])} disabled={keepMut.isPending}
-        className="text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground flex-shrink-0">
+      <button title={t("Keep the existing tags and dismiss the change")} onClick={() => keepMut.mutate([pg.id])} disabled={keepMut.isPending || !canWrite}
+        className={`text-[11px] px-2 py-1 rounded-md border border-border text-muted-foreground hover:text-foreground flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
         {t("Keep")}
       </button>
     </div>
@@ -1491,9 +1503,9 @@ function PagesPanel() {
             </button>
           ))}
         </div>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={crawlMut.isPending || !cs?.ga_connected}
+        <Button variant="outline" size="sm" className="h-8 gap-1.5" disabled={crawlMut.isPending || !cs?.ga_connected || !canWrite}
           onClick={() => crawlMut.mutate()}
-          title={!cs?.ga_connected
+          title={!canWrite ? t("Viewers can't make changes") : !cs?.ga_connected
             ? t("Connect Google Analytics to crawl pages.")
             : t("Crawl your site's pages into this list without tagging - review and exclude them, then test attributes before a full Reconstruct.")}>
           {crawlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
@@ -1522,7 +1534,7 @@ function PagesPanel() {
                 className="w-16 h-7 px-1.5 border border-input rounded-md bg-background outline-none focus:ring-1 focus:ring-ring" placeholder="60" />
               {t("chars")}
             </label>
-            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!thresholdDirty || thresholdMut.isPending}
+            <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!thresholdDirty || thresholdMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
               onClick={() => thresholdMut.mutate()}>
               {thresholdMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : t("Save")}
             </Button>
@@ -1531,7 +1543,7 @@ function PagesPanel() {
           <div className="flex gap-2 max-w-md">
             <Input value={newUrl} onChange={(e) => setNewUrl(decodeUrl(e.target.value))} placeholder={t("https://… add a page the crawler missed")} className="h-8 text-sm"
               onKeyDown={(e) => { if (e.key === "Enter" && newUrl.trim()) addMut.mutate(newUrl.trim()); }} />
-            <Button size="sm" className="h-8" disabled={!newUrl.trim() || addMut.isPending} onClick={() => addMut.mutate(newUrl.trim())}>
+            <Button size="sm" className="h-8" disabled={!newUrl.trim() || addMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => addMut.mutate(newUrl.trim())}>
               {addMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t("Add")}
             </Button>
           </div>
@@ -1550,13 +1562,13 @@ function PagesPanel() {
               <div className="ml-auto flex items-center gap-2">
                 <AttrPicker attrs={activeAttrs} selected={retagAttrs} onToggle={toggleAttr}
                   onAll={() => setRetagAttrs(retagAttrs.size === activeAttrs.length ? new Set() : new Set(activeAttrs.map((a) => a.id)))} t={t} />
-                <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={!changedSel.size || !retagAttrs.size || retagMut.isPending}
+                <Button size="sm" className="h-7 gap-1.5 text-xs" disabled={!changedSel.size || !retagAttrs.size || retagMut.isPending || !canWrite}
                   onClick={() => retagMut.mutate({ page_ids: [...changedSel], attribute_ids: [...retagAttrs] })}
-                  title={!retagAttrs.size ? t("Pick at least one attribute") : ""}>
+                  title={!canWrite ? t("Viewers can't make changes") : !retagAttrs.size ? t("Pick at least one attribute") : ""}>
                   {retagMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   {t("Re-tag selected")}
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!changedSel.size || keepMut.isPending}
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!changedSel.size || keepMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                   onClick={() => keepMut.mutate([...changedSel])}>
                   {t("Keep selected")}
                 </Button>
@@ -1571,9 +1583,9 @@ function PagesPanel() {
         <div className="flex items-start justify-between gap-3 mb-3">
           <p className="text-xs text-muted-foreground">{t("Pages the crawler couldn't read - blocked, empty, or an error page. These are never tagged.")}</p>
           {(counts.failed ?? 0) > 0 && (
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs flex-shrink-0" disabled={exclFailedMut.isPending}
+            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs flex-shrink-0" disabled={exclFailedMut.isPending || !canWrite}
               onClick={() => exclFailedMut.mutate()}
-              title={t("Move every failed page to the Excluded tab so the crawler skips them.")}>
+              title={!canWrite ? t("Viewers can't make changes") : t("Move every failed page to the Excluded tab so the crawler skips them.")}>
               {exclFailedMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3" />}
               {t("Exclude all failed")}
             </Button>
@@ -1586,7 +1598,7 @@ function PagesPanel() {
         <div className="rounded-lg border border-border bg-secondary/10 p-3 mb-4">
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs font-medium">{t("Exclusion rules")} · {patterns.length}</p>
-            <Button size="sm" variant="outline" className="h-7 gap-1.5" onClick={() => setExclOpen(true)}>
+            <Button size="sm" variant="outline" className="h-7 gap-1.5" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setExclOpen(true)}>
               <Plus className="w-3.5 h-3.5" /> {t("Add / Import")}
             </Button>
           </div>
@@ -1598,7 +1610,7 @@ function PagesPanel() {
               {patterns.map((p) => (
                 <span key={p} className="h-6 px-2 rounded-full bg-background border border-border flex items-center gap-1">
                   <code className="text-[10px]">{p}</code>
-                  <button title={t("Remove rule")} onClick={() => patternMut.mutate(patterns.filter((x) => x !== p))} className="text-muted-foreground hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
+                  <button title={t("Remove rule")} onClick={() => patternMut.mutate(patterns.filter((x) => x !== p))} disabled={!canWrite} className={`text-muted-foreground hover:text-destructive ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><X className="w-2.5 h-2.5" /></button>
                 </span>
               ))}
             </div>
@@ -1640,6 +1652,7 @@ function PagesPanel() {
 // attribute; in an attribute's Tagged-pages tab the attribute is fixed.
 function AddTag({ pageId, attributes = [], fixedAttr, suggestions = [], onAdded }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [open, setOpen] = useState(false);
   const [attrId, setAttrId] = useState(fixedAttr?.id || "");
   const [value, setValue] = useState("");
@@ -1653,8 +1666,8 @@ function AddTag({ pageId, attributes = [], fixedAttr, suggestions = [], onAdded 
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/40">
+      <button onClick={() => setOpen(true)} disabled={!canWrite}
+        className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>
         <Plus className="w-2.5 h-2.5" /> {t("Tag")}
       </button>
     );
@@ -1677,8 +1690,8 @@ function AddTag({ pageId, attributes = [], fixedAttr, suggestions = [], onAdded 
       {suggestions.length > 0 && (
         <datalist id={listId}>{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
       )}
-      <button disabled={!canAdd || addMut.isPending} onClick={() => addMut.mutate()}
-        className="h-6 px-1.5 rounded-md border border-input text-muted-foreground hover:text-foreground disabled:opacity-40 flex-shrink-0" title={t("Add tag")}>
+      <button disabled={!canAdd || addMut.isPending || !canWrite} onClick={() => addMut.mutate()}
+        className="h-6 px-1.5 rounded-md border border-input text-muted-foreground hover:text-foreground disabled:opacity-40 flex-shrink-0" title={!canWrite ? t("Viewers can't make changes") : t("Add tag")}>
         <Check className="w-3 h-3" />
       </button>
       <button onClick={() => setOpen(false)}
@@ -1691,47 +1704,82 @@ function AddTag({ pageId, attributes = [], fixedAttr, suggestions = [], onAdded 
 
 function ReviewPanel() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [filter, setFilter] = useState("new"); // new | all | untagged
-  const [attrFilter, setAttrFilter] = useState(""); // attribute id, "" = all
+  const [attrSel, setAttrSel] = useState([]);   // selected attribute ids (multi)
+  const [valueSel, setValueSel] = useState([]); // selected value ids (multi)
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");      // debounced
   const [sel, setSel] = useState(() => new Set()); // selected page ids for bulk verify
   const [confirmAll, setConfirmAll] = useState(false);
 
+  const attrKey = attrSel.join(",");
+  const valueKey = valueSel.join(",");
+  // A filter narrowed to specific attributes/values only verifies THOSE tags, not
+  // the whole page. Untagged pages have no tags, so the tag filters don't apply there.
+  const filterActive = filter !== "untagged" && (attrSel.length > 0 || valueSel.length > 0);
+
   // Debounce the search so typing doesn't refetch every keystroke.
   useEffect(() => { const id = setTimeout(() => setSearch(searchInput.trim()), 350); return () => clearTimeout(id); }, [searchInput]);
-  // A changed filter/attribute/search invalidates the current selection.
-  useEffect(() => { setSel(new Set()); }, [filter, attrFilter, search]);
+  // Changing the attribute set resets the (now possibly stale) value picks.
+  useEffect(() => { setValueSel([]); }, [attrKey]);
+  // Any filter change invalidates the current page selection.
+  useEffect(() => { setSel(new Set()); }, [filter, attrKey, valueKey, search]);
+
+  // When a tag filter is active we fetch the whole matching slice and narrow
+  // new/all client-side (the server "new" HAVING is page-level, so it would mix in
+  // pages that are new for OTHER attributes).
+  const serverFilter = filter === "untagged" ? "untagged" : (filterActive ? null : (filter === "new" ? "new" : null));
 
   const { data, isLoading } = useQuery({
-    queryKey: ["attr-tagged-pages", filter, attrFilter, search],
-    queryFn: () => appClient.attributes.taggedPages(filter === "all" ? null : filter, { attribute_id: attrFilter || undefined, search: search || undefined }),
+    queryKey: ["attr-tagged-pages", filter, attrKey, valueKey, search],
+    queryFn: () => appClient.attributes.taggedPages(serverFilter, { attribute_ids: attrSel, value_ids: valueSel, search: search || undefined }),
   });
   const pages = data?.pages || [];
   const summary = data?.summary || { new_pages: 0, new_labels: 0 };
 
   const { data: allAttrs = [] } = useQuery({ queryKey: ["attributes"], queryFn: () => appClient.attributes.list() });
   const contentAttrs = allAttrs.filter((a) => a.source === "web_content" && a.status !== "archived");
+  const attrOpts = contentAttrs.map((a) => ({ value: a.id, label: a.name }));
+  // Value options come from the tags actually present in the current scope (so they
+  // include pending, not-yet-approved values); narrowed to the picked attributes.
+  const valueOpts = (() => {
+    const m = new Map();
+    for (const pg of pages) for (const tg of (pg.tags || [])) {
+      if (attrSel.length && !attrSel.includes(tg.attribute_id)) continue;
+      if (!m.has(tg.value_id)) m.set(tg.value_id, { value: tg.value_id, label: `${tg.attribute}: ${tg.label || tg.value}` });
+    }
+    return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
+  })();
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["attr-tagged-pages"] });
     qc.invalidateQueries({ queryKey: ["attr-review-count"] });
     qc.invalidateQueries({ queryKey: ["attributes"] });
   };
-  const reviewMut = useMutation({ mutationFn: (pageId) => appClient.attributes.reviewPage(pageId), onSuccess: invalidate });
-  // Filter-aware "verify all": marks the WHOLE matching slice reviewed server-side.
-  const reviewAllMut = useMutation({
-    mutationFn: () => appClient.attributes.reviewAllPages({ filter: filter === "all" ? null : filter, attribute_id: attrFilter || undefined, search: search || undefined }),
-    onSuccess: (r) => { setSel(new Set()); toast.success(`${r?.verified ?? 0} ${t("pages verified")}`); invalidate(); },
+  // One verify path for per-page / selected / all. When a tag filter is active the
+  // server verifies ONLY the matching tags (by approving those values); otherwise it
+  // marks the whole page(s) reviewed.
+  const verifyMut = useMutation({
+    mutationFn: (opts) => appClient.attributes.reviewAllPages(opts),
+    onSuccess: (r) => {
+      setSel(new Set()); setConfirmAll(false);
+      const n = r?.verified ?? 0;
+      toast.success(r?.mode === "tags"
+        ? `${n} ${n === 1 ? t("tag verified") : t("tags verified")}`
+        : `${n} ${n === 1 ? t("page verified") : t("pages verified")}`);
+      invalidate();
+    },
     onError: (e) => toast.error(e.message),
   });
-  // Verify an explicit selection.
-  const verifySelMut = useMutation({
-    mutationFn: (ids) => appClient.attributes.reviewAllPages({ page_ids: ids }),
-    onSuccess: (r) => { setSel(new Set()); toast.success(`${r?.verified ?? 0} ${t("pages verified")}`); invalidate(); },
-    onError: (e) => toast.error(e.message),
-  });
+  const verifyScope = (extra) => filterActive
+    ? { attribute_ids: attrSel, value_ids: valueSel, ...extra }
+    : { ...extra };
+  const verifyPages = (ids) => verifyMut.mutate(verifyScope({ page_ids: ids }));
+  const verifyAll = () => verifyMut.mutate(filterActive
+    ? { attribute_ids: attrSel, value_ids: valueSel, search: search || undefined }
+    : { filter: filter === "all" ? null : filter, search: search || undefined });
   // Verify-by-value: approving a pending value cascades to auto-verify every page
   // whose tags are now all approved (backend markFullyApprovedPagesReviewed).
   const approveValueMut = useMutation({
@@ -1742,51 +1790,73 @@ function ReviewPanel() {
   const untagMut = useMutation({ mutationFn: ({ pageId, valueId }) => appClient.attributes.deletePageTag(pageId, valueId), onSuccess: invalidate });
 
   const toggleSel = (id) => setSel((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const needsReviewPages = pages.filter((p) => p.needs_review);
+
+  // Decorate + filter client-side: shownTags = only the tags matching the active
+  // filter; a page needs review (in filtered mode) if any shown tag is unverified.
+  const matchTag = (tg) => (!attrSel.length || attrSel.includes(tg.attribute_id)) && (!valueSel.length || valueSel.includes(tg.value_id));
+  const decorated = pages.map((pg) => {
+    const shownTags = filterActive ? (pg.tags || []).filter(matchTag) : (pg.tags || []);
+    const needsReview = filterActive ? shownTags.some((tg) => !tg.is_approved) : pg.needs_review;
+    return { ...pg, shownTags, needsReview };
+  });
+  const visible = decorated.filter((pg) => {
+    if (filter === "untagged") return true;
+    if (filterActive && pg.shownTags.length === 0) return false;
+    if (filter === "new") return pg.needsReview;
+    return true;
+  });
+  const needsReviewPages = visible.filter((p) => p.needsReview);
   const allNeedsSelected = needsReviewPages.length > 0 && needsReviewPages.every((p) => sel.has(p.id));
+  const activeFilterCount = attrSel.length + valueSel.length + (search ? 1 : 0);
 
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">{t("Loading…")}</p>;
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
-        <div>
-          <p className="text-xs text-muted-foreground max-w-xl">
-            {filter === "untagged"
-              ? t("Valid pages the AI left untagged. Verify a page to confirm it needs no tags, or add one yourself with + Tag.")
-              : t("Pages the AI has tagged. Verify a page to confirm its labels, or verify a value (✓ on a pending tag) to clear every page that uses it. Remove a wrong tag with the ✕.")}
-          </p>
-          {(summary.new_pages > 0 || summary.new_labels > 0) && (
-            <p className="text-[11px] text-yellow-600 mt-1 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />
-              {summary.new_pages} {summary.new_pages === 1 ? t("new page") : t("new pages")} · {summary.new_labels} {summary.new_labels === 1 ? t("new label") : t("new labels")} {t("to review")}
-            </p>
-          )}
+      {/* Intro - full width */}
+      <p className="text-xs text-muted-foreground mb-2">
+        {filter === "untagged"
+          ? t("Valid pages the AI left untagged. Verify a page to confirm it needs no tags, or add one yourself with + Tag.")
+          : filterActive
+            ? t("Verifying here confirms only the filtered tags on each page - other attributes on the same page stay pending. Verify a value (✓ on a pending tag) to clear it everywhere, or remove a wrong tag with the ✕.")
+            : t("Pages the AI has tagged. Verify a page to confirm all its labels, or verify a value (✓ on a pending tag) to clear every page that uses it. Filter by an attribute or value to verify just those tags. Remove a wrong tag with the ✕.")}
+      </p>
+      {!filterActive && filter !== "untagged" && (summary.new_pages > 0 || summary.new_labels > 0) && (
+        <p className="text-[11px] text-yellow-600 mb-2 flex items-center gap-1">
+          <AlertCircle className="w-3 h-3" />
+          {summary.new_pages} {summary.new_pages === 1 ? t("new page") : t("new pages")} · {summary.new_labels} {summary.new_labels === 1 ? t("new label") : t("new labels")} {t("to review")}
+        </p>
+      )}
+
+      {/* Controls - dropdown filter + multi-select attribute/value + wide search */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        <Select value={filter} onValueChange={setFilter}>
+          <SelectTrigger className="h-8 w-36 text-xs flex-shrink-0"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="new">{t("Needs review")}</SelectItem>
+            <SelectItem value="all">{t("All tagged")}</SelectItem>
+            <SelectItem value="untagged">{t("Untagged")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {filter !== "untagged" && (
+          <>
+            <MultiSelect className="w-48 flex-shrink-0" value={attrSel} onChange={setAttrSel} options={attrOpts}
+              placeholder={t("All attributes")} searchPlaceholder={t("Search attributes…")} />
+            <MultiSelect className="w-52 flex-shrink-0" value={valueSel} onChange={setValueSel} options={valueOpts}
+              placeholder={t("All values")} searchPlaceholder={t("Search values…")} disabled={valueOpts.length === 0} />
+          </>
+        )}
+        <div className="relative flex-1 min-w-[12rem]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search pages by title or URL…")}
+            className="w-full h-8 pl-8 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
-          <div className="flex items-center gap-1">
-            {[["new", t("New to review")], ["all", t("All tagged")], ["untagged", t("Untagged")]].map(([k, label]) => (
-              <button key={k} onClick={() => setFilter(k)}
-                className={`text-[11px] px-2 py-1 rounded-md border ${filter === k ? "border-foreground bg-foreground text-background" : "border-border text-muted-foreground hover:text-foreground"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {filter !== "untagged" && (
-            <Select value={attrFilter || "__all"} onValueChange={(v) => setAttrFilter(v === "__all" ? "" : v)}>
-              <SelectTrigger className="h-7 w-40 text-xs"><SelectValue placeholder={t("All attributes")} /></SelectTrigger>
-              <SelectContent className="max-h-64">
-                <SelectItem value="__all">{t("All attributes")}</SelectItem>
-                {contentAttrs.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
-          <div className="relative w-44">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
-            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("Search pages…")}
-              className="w-full h-7 pl-7 pr-2 text-xs bg-background border border-input rounded-md outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-        </div>
+        {activeFilterCount > 0 && (
+          <button onClick={() => { setAttrSel([]); setValueSel([]); setSearchInput(""); }}
+            className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1 flex-shrink-0">
+            <X className="w-3 h-3" /> {t("Clear filters")}
+          </button>
+        )}
       </div>
 
       {/* Bulk-verify toolbar */}
@@ -1799,39 +1869,39 @@ function ReviewPanel() {
           {sel.size > 0 && (
             <>
               <span className="text-[11px] text-muted-foreground">{sel.size} {t("selected")}</span>
-              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={verifySelMut.isPending}
-                onClick={() => verifySelMut.mutate([...sel])}>
-                <Check className="w-3 h-3" /> {t("Verify selected")}
+              <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" disabled={verifyMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
+                onClick={() => verifyPages([...sel])}>
+                <Check className="w-3 h-3" /> {filterActive ? t("Verify selected tags") : t("Verify selected")}
               </Button>
             </>
           )}
-          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs ml-auto" disabled={reviewAllMut.isPending}
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs ml-auto" disabled={verifyMut.isPending || !canWrite}
             onClick={() => setConfirmAll(true)}
-            title={t("Verify every page matching the current filter, search and attribute - not just the ones shown.")}>
+            title={!canWrite ? t("Viewers can't make changes") : t("Verify everything matching the current filters - not just the pages shown.")}>
             <CheckCheck className="w-3 h-3" /> {t("Mark all verified")}
           </Button>
         </div>
       )}
 
-      {pages.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="border border-dashed border-border rounded-lg p-10 text-center max-w-lg mx-auto mt-6">
           <ListChecks className="w-7 h-7 text-muted-foreground mx-auto mb-2 opacity-40" />
-          <p className="text-sm font-medium mb-1">{search || attrFilter ? t("No pages match") : filter === "new" ? t("Nothing new to review") : filter === "untagged" ? t("No untagged pages") : t("No tagged pages yet")}</p>
-          <p className="text-xs text-muted-foreground">{search || attrFilter ? t("Try a different search or attribute.") : filter === "new" ? t("New pages and labels show up here after a reconstruct.") : filter === "untagged" ? t("Every valid page has at least one tag.") : t("Run Reconstruct to tag your crawled pages.")}</p>
+          <p className="text-sm font-medium mb-1">{activeFilterCount > 0 ? t("No pages match") : filter === "new" ? t("Nothing new to review") : filter === "untagged" ? t("No untagged pages") : t("No tagged pages yet")}</p>
+          <p className="text-xs text-muted-foreground">{activeFilterCount > 0 ? t("Try different filters or a different search.") : filter === "new" ? t("New pages and labels show up here after a reconstruct.") : filter === "untagged" ? t("Every valid page has at least one tag.") : t("Run Reconstruct to tag your crawled pages.")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {pages.map((pg) => (
-            <div key={pg.id} className={`border rounded-lg p-3 ${pg.needs_review ? "border-yellow-500/40 bg-yellow-500/5" : "border-border"}`}>
+          {visible.map((pg) => (
+            <div key={pg.id} className={`border rounded-lg p-3 ${pg.needsReview ? "border-yellow-500/40 bg-yellow-500/5" : "border-border"}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-2 min-w-0">
-                  {pg.needs_review && (
+                  {pg.needsReview && (
                     <input type="checkbox" checked={sel.has(pg.id)} onChange={() => toggleSel(pg.id)}
                       className="accent-foreground mt-0.5 flex-shrink-0" title={t("Select for bulk verify")} />
                   )}
                   <div className="min-w-0">
                     <p className="text-xs font-medium truncate flex items-center gap-1.5">
-                      {pg.needs_review && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" title={t("Needs review")} />}
+                      {pg.needsReview && <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 flex-shrink-0" title={t("Needs review")} />}
                       {pg.title || decodeUrl(pg.url)}
                     </p>
                     <a href={pg.url} target="_blank" rel="noreferrer" className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 truncate">
@@ -1839,15 +1909,15 @@ function ReviewPanel() {
                     </a>
                   </div>
                 </div>
-                {pg.needs_review && (
-                  <Button size="sm" variant="outline" className="h-6 px-2 gap-1 text-[11px] flex-shrink-0" disabled={reviewMut.isPending}
-                    onClick={() => reviewMut.mutate(pg.id)}>
+                {pg.needsReview && (
+                  <Button size="sm" variant="outline" className="h-6 px-2 gap-1 text-[11px] flex-shrink-0" disabled={verifyMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : filterActive ? t("Verify the filtered tags on this page") : t("Verify all tags on this page")}
+                    onClick={() => verifyPages([pg.id])}>
                     <Check className="w-3 h-3" /> {t("Verify")}
                   </Button>
                 )}
               </div>
               <div className="flex flex-wrap gap-1 mt-2">
-                {(pg.tags || []).map((tg) => (
+                {(pg.shownTags || []).map((tg) => (
                   <span key={tg.value_id}
                     className={`group/tag inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border ${
                       tg.is_approved ? "border-foreground/40 bg-secondary text-foreground"
@@ -1858,13 +1928,13 @@ function ReviewPanel() {
                     {tg.is_approved
                       ? <Check className="w-2.5 h-2.5 flex-shrink-0" />
                       : (
-                        <button title={t("Verify this value everywhere")} disabled={approveValueMut.isPending}
+                        <button title={!canWrite ? t("Viewers can't make changes") : t("Verify this value everywhere")} disabled={approveValueMut.isPending || !canWrite}
                           onClick={() => approveValueMut.mutate(tg.value_id)}
-                          className="hover:text-foreground text-yellow-600 flex-shrink-0"><Check className="w-2.5 h-2.5" /></button>
+                          className={`hover:text-foreground text-yellow-600 flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Check className="w-2.5 h-2.5" /></button>
                       )}
                     <span className="text-muted-foreground">{tg.attribute}:</span> {tg.label || tg.value}
-                    <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: tg.value_id })}
-                      className="opacity-0 group-hover/tag:opacity-100 hover:text-destructive"><X className="w-2.5 h-2.5" /></button>
+                    <button onClick={() => untagMut.mutate({ pageId: pg.id, valueId: tg.value_id })} disabled={!canWrite}
+                      className={`opacity-0 group-hover/tag:opacity-100 hover:text-destructive ${!canWrite ? "pointer-events-none" : ""}`}><X className="w-2.5 h-2.5" /></button>
                   </span>
                 ))}
                 <AddTag pageId={pg.id} attributes={contentAttrs} onAdded={invalidate} />
@@ -1874,20 +1944,20 @@ function ReviewPanel() {
         </div>
       )}
 
-      {/* Confirm filter-aware verify-all */}
+      {/* Confirm verify-all */}
       <Dialog open={confirmAll} onOpenChange={setConfirmAll}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><CheckCheck className="w-4 h-4" /> {t("Mark all verified?")}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {t("This verifies every page matching the current view")}
-            {attrFilter ? ` (${contentAttrs.find((a) => a.id === attrFilter)?.name || t("attribute")})` : ""}
+            {filterActive
+              ? t("This verifies ONLY the filtered tags on every page matching the current view - other attributes on those pages stay pending. It covers pages beyond the ones shown here and can't be undone in bulk.")
+              : t("This verifies every page matching the current view, including pages beyond the ones shown here. It can't be undone in bulk.")}
             {search ? ` · “${search}”` : ""}
-            {t(" - including pages beyond the ones shown here. It can't be undone in bulk.")}
           </p>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" size="sm" onClick={() => setConfirmAll(false)}>{t("Cancel")}</Button>
-            <Button size="sm" disabled={reviewAllMut.isPending} onClick={() => { setConfirmAll(false); reviewAllMut.mutate(); }}>
-              {reviewAllMut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} {t("Verify all")}
+            <Button size="sm" disabled={verifyMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={verifyAll}>
+              {verifyMut.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" />} {t("Verify all")}
             </Button>
           </div>
         </DialogContent>
@@ -1899,6 +1969,7 @@ function ReviewPanel() {
 // ── Attribute card ────────────────────────────────────────────
 function AttributeCard({ attr, onOpen, onDelete, onEdit, onClone }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   return (
     <div className="border border-border rounded-lg p-5 hover:shadow-sm transition-shadow cursor-pointer" onClick={onOpen}>
       <div className="flex items-start justify-between">
@@ -1918,9 +1989,9 @@ function AttributeCard({ attr, onOpen, onDelete, onEdit, onClone }) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
             <DropdownMenuItem onClick={onEdit}><Pencil className="w-3.5 h-3.5 mr-2" /> {t("Edit")}</DropdownMenuItem>
-            {onClone && <DropdownMenuItem onClick={onClone}><Copy className="w-3.5 h-3.5 mr-2" /> {t("Clone")}</DropdownMenuItem>}
+            {onClone && <DropdownMenuItem onClick={onClone} disabled={!canWrite}><Copy className="w-3.5 h-3.5 mr-2" /> {t("Clone")}</DropdownMenuItem>}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onDelete} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> {t("Delete")}</DropdownMenuItem>
+            <DropdownMenuItem onClick={onDelete} disabled={!canWrite} className="text-destructive"><Trash2 className="w-3.5 h-3.5 mr-2" /> {t("Delete")}</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -1984,6 +2055,7 @@ function GaPropertyBar() {
 // AI proposes attributes by reading a sample of crawled pages.
 function SuggestDialog({ open, onClose, onCreate, creatingName }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [created, setCreated] = useState(() => new Set());
   const { data, isFetching, refetch } = useQuery({
     queryKey: ["attr-suggest"],
@@ -2019,7 +2091,7 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
                       <p className="text-[11px] text-muted-foreground mt-0.5">{s.description}</p>
                     </div>
                     <Button size="sm" variant={isCreated ? "outline" : "default"} className="h-7 flex-shrink-0"
-                      disabled={isCreated || creatingName === s.name}
+                      disabled={isCreated || creatingName === s.name || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                       onClick={() => { onCreate(s); setCreated((c) => new Set([...c, s.name])); }}>
                       {creatingName === s.name ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isCreated ? t("Added") : t("Create")}
                     </Button>
@@ -2053,6 +2125,7 @@ function SuggestDialog({ open, onClose, onCreate, creatingName }) {
 // the definitions are kept but their data must be re-sourced.
 function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, crawling, onCrawl, onCreate, onSuggest, firstStepsOnly = false }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const navigate = useNavigate();
   // The current step is the first one not yet done (steps 4 & 5 are never auto-done).
   const doneFlags = [gaConnected, gaSynced, pagesCrawled, false, false];
@@ -2165,7 +2238,7 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
             <>
               {t("Read your site's pages (URL + title) so you can review them and test attributes before tagging. No AI tagging happens yet.")}
               <div className="mt-2">
-                <Button size="sm" className="h-8 gap-1.5" onClick={onCrawl} disabled={!gaSynced || crawling}>
+                <Button size="sm" className="h-8 gap-1.5" onClick={onCrawl} disabled={!gaSynced || crawling || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}>
                   {crawling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
                   {crawling ? t("Crawling…") : t("Crawl pages")}
                 </Button>
@@ -2179,8 +2252,8 @@ function FirstRunChecklist({ gaConnected, gaSynced, pagesCrawled, crawledPages, 
               {canCreate ? t("Name a dimension (e.g. “Country Name”) and give the AI an instruction.")
                 : t("Finish the steps above first - attributes need crawled pages to tag and test against.")}
               <div className="flex items-center gap-2 mt-2">
-                <Button size="sm" className="h-8 gap-1.5" onClick={onCreate} disabled={!canCreate}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
-                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest} disabled={!canCreate}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
+                <Button size="sm" className="h-8 gap-1.5" onClick={onCreate} disabled={!canCreate || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={onSuggest} disabled={!canCreate || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
               </div>
             </Step>
             <Step done={false} n={5} current={currentN === 5} title={t("Reconstruct to tag your pages")}>
@@ -2594,6 +2667,7 @@ function RuleDetail({ attributeId, onBack, onEdit }) {
 // value so we can warn and offer a one-click "Move here".
 function AssignDialog({ attributeId, value, onClose }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [mode, setMode] = useState("segment");
   const [audience, setAudience] = useState("customer");
@@ -2662,7 +2736,7 @@ function AssignDialog({ attributeId, value, onClose }) {
             </div>
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" disabled={busy} onClick={() => setConflicts(null)}>{t("Cancel")}</Button>
-              <Button className="flex-1" disabled={busy} onClick={() => conflicts.retry()}>
+              <Button className="flex-1" disabled={busy || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => conflicts.retry()}>
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : `${t("Move")} ${conflicts.list.length} ${t("& assign")}`}
               </Button>
             </div>
@@ -2695,7 +2769,7 @@ function AssignDialog({ attributeId, value, onClose }) {
               {segOptions.map((s) => <option key={s.id} value={s.id}>{s.name}{s.estimated_size ? ` (${s.estimated_size.toLocaleString()})` : ""}</option>)}
             </select>
             {segOptions.length === 0 && <p className="text-[11px] text-muted-foreground">{t("No matching segments yet - create one on the Segments page.")}</p>}
-            <Button className="w-full" disabled={!segmentId || segMut.isPending} onClick={() => segMut.mutate()}>
+            <Button className="w-full" disabled={!segmentId || segMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => segMut.mutate()}>
               {segMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Assign everyone in segment")}
             </Button>
           </div>
@@ -2712,7 +2786,7 @@ function AssignDialog({ attributeId, value, onClose }) {
                   </button>
                 ); })}
             </div>
-            <Button className="w-full" disabled={!picked.size || pickMut.isPending} onClick={() => pickMut.mutate()}>
+            <Button className="w-full" disabled={!picked.size || pickMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => pickMut.mutate()}>
               {pickMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : `${t("Assign")} ${picked.size || ""} ${t("selected")}`}
             </Button>
           </div>
@@ -2721,7 +2795,7 @@ function AssignDialog({ attributeId, value, onClose }) {
             <p className="text-[11px] text-muted-foreground">{t("Paste")} {entityType === "customer" ? t("emails or member IDs") : t("visitor IDs")} - {t("one per line or comma-separated. Unknown ones are skipped.")}</p>
             <Textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)} rows={6} className="text-sm"
               placeholder={entityType === "customer" ? "john@example.com\njane@example.com" : "apid-123\napid-456"} />
-            <Button className="w-full" disabled={!pasteText.trim() || importMut.isPending} onClick={() => importMut.mutate()}>
+            <Button className="w-full" disabled={!pasteText.trim() || importMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => importMut.mutate()}>
               {importMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Assign list")}
             </Button>
           </div>
@@ -2735,6 +2809,7 @@ function AssignDialog({ attributeId, value, onClose }) {
 
 function ManualValueRow({ attributeId, value, onAssign, onDelete }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: people = [] } = useQuery({
@@ -2754,8 +2829,8 @@ function ManualValueRow({ attributeId, value, onAssign, onDelete }) {
           {value.display_label || value.value}
         </button>
         <span className="text-[10px] text-muted-foreground">{Number(value.profile_count || 0).toLocaleString()} {t("assigned")}</span>
-        <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => onAssign(value)}><Plus className="w-3 h-3" /> {t("Assign")}</Button>
-        <button onClick={() => onDelete(value)} title={t("Delete value")} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
+        <Button size="sm" variant="outline" className="h-7 gap-1" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => onAssign(value)}><Plus className="w-3 h-3" /> {t("Assign")}</Button>
+        <button onClick={() => onDelete(value)} disabled={!canWrite} title={t("Delete value")} className={`text-muted-foreground hover:text-destructive ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
       {open && (
         <div className="mt-2 space-y-0.5 pl-5">
@@ -2764,7 +2839,7 @@ function ManualValueRow({ attributeId, value, onAssign, onDelete }) {
               <div key={`${p.entity_type}:${p.entity_id}`} className="flex items-center gap-2 text-xs py-0.5">
                 <span className="flex-1 truncate">{p.name || p.email || p.entity_id}{p.name && p.email ? <span className="text-muted-foreground"> · {p.email}</span> : null}</span>
                 <Badge variant="secondary" className="text-[9px] h-4 px-1.5 flex-shrink-0">{p.entity_type === "anonymous" ? t("anon") : t("customer")}</Badge>
-                <button onClick={() => unassignMut.mutate({ entity_id: p.entity_id, entity_type: p.entity_type })} className="text-muted-foreground hover:text-destructive"><X className="w-3 h-3" /></button>
+                <button onClick={() => unassignMut.mutate({ entity_id: p.entity_id, entity_type: p.entity_type })} disabled={!canWrite} className={`text-muted-foreground hover:text-destructive ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}><X className="w-3 h-3" /></button>
               </div>
             ))}
         </div>
@@ -2775,6 +2850,7 @@ function ManualValueRow({ attributeId, value, onAssign, onDelete }) {
 
 function ManualDetail({ attributeId, onBack, onEdit }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [newValue, setNewValue] = useState("");
   const [assignFor, setAssignFor] = useState(null);
@@ -2833,7 +2909,7 @@ function ManualDetail({ attributeId, onBack, onEdit }) {
           <div className="flex gap-2 mt-4">
             <Input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder={t("Add a value (e.g. VIP)")} className="h-8 text-sm flex-1"
               onKeyDown={(e) => { if (e.key === "Enter" && newValue.trim()) addValueMut.mutate(newValue.trim()); }} />
-            <Button size="sm" variant="outline" className="h-8 flex-shrink-0" disabled={!newValue.trim() || addValueMut.isPending} onClick={() => addValueMut.mutate(newValue.trim())}>{t("Add value")}</Button>
+            <Button size="sm" variant="outline" className="h-8 flex-shrink-0" disabled={!newValue.trim() || addValueMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => addValueMut.mutate(newValue.trim())}>{t("Add value")}</Button>
           </div>
 
           <div className="mt-3">
@@ -2861,6 +2937,7 @@ function ManualDetail({ attributeId, onBack, onEdit }) {
 // one each (others removed), then the switch proceeds.
 function ResolveDuplicatesDialog({ attributeId, conflicts, onClose, onResolved }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   // Values arrive oldest-first; default to keeping the most recent per person.
   const [keep, setKeep] = useState(() => {
     const m = {};
@@ -2921,7 +2998,7 @@ function ResolveDuplicatesDialog({ attributeId, conflicts, onClose, onResolved }
         </div>
         <div className="flex gap-2">
           <Button variant="outline" className="flex-1" disabled={resolveMut.isPending} onClick={onClose}>{t("Cancel")}</Button>
-          <Button className="flex-1" disabled={resolveMut.isPending} onClick={() => resolveMut.mutate()}>
+          <Button className="flex-1" disabled={resolveMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => resolveMut.mutate()}>
             {resolveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("Keep selected & switch to single")}
           </Button>
         </div>
@@ -3155,6 +3232,7 @@ function attributeGuide(t, source) {
 
 export default function Attributes() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState("web_content");
   const [contentSub, setContentSub] = useState("attributes");
@@ -3330,8 +3408,8 @@ export default function Attributes() {
             return (
             <div className="flex items-center gap-2">
               {tabAttrs.length > 0 && (
-                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running || !pagesCrawled}
-                  title={!pagesCrawled ? createGateMsg : ""}
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={running || !pagesCrawled || !canWrite}
+                  title={!canWrite ? t("Viewers can't make changes") : !pagesCrawled ? createGateMsg : ""}
                   onClick={() => {
                     if (activeCount === 0) { toast.error(t("No active attributes - set at least one attribute to Active first.")); return; }
                     runAllMut.mutate();
@@ -3340,15 +3418,15 @@ export default function Attributes() {
                   {running ? t("Running…") : t("Reconstruct all")}
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!canCreate} title={createGateMsg}
+              <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!canCreate || !canWrite} title={!canWrite ? t("Viewers can't make changes") : createGateMsg}
                 onClick={() => setSuggestOpen(true)}><Sparkles className="w-3.5 h-3.5" /> {t("Suggest with AI")}</Button>
-              <Button size="sm" className="h-9 gap-1.5" disabled={!canCreate} title={createGateMsg}
+              <Button size="sm" className="h-9 gap-1.5" disabled={!canCreate || !canWrite} title={!canWrite ? t("Viewers can't make changes") : createGateMsg}
                 onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
             </div>
             );
           })()}
           {(activeTab === "rule" || activeTab === "manual") && !selectedAttrId && (
-            <Button size="sm" className="h-9 gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+            <Button size="sm" className="h-9 gap-1.5" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
           )}
         </div>
 
@@ -3404,7 +3482,7 @@ export default function Attributes() {
               <p className="text-xs text-muted-foreground mb-4">
                 {t("Compute a value from profile fields - e.g. \"Engagement Level\" (High/Medium/Low) from GA sessions, or \"Life Stage\" from age. Works for customers and anonymous visitors.")}
               </p>
-              <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+              <Button size="sm" className="gap-1.5" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
             </div>
           ) : (
             <CardGrid intro={t(SOURCES.rule.desc)} {...gridProps} />
@@ -3423,7 +3501,7 @@ export default function Attributes() {
               <p className="text-xs text-muted-foreground mb-4">
                 {t("Define values (e.g. \"Account Tier\" → VIP / Standard) and assign people from a segment, a search, or a pasted list.")}
               </p>
-              <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
+              <Button size="sm" className="gap-1.5" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5" /> {t("New Attribute")}</Button>
             </div>
           ) : (
             <CardGrid intro={t(SOURCES.manual.desc)} {...gridProps} />
@@ -3520,7 +3598,7 @@ export default function Attributes() {
           </p>
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>{t("Cancel")}</Button>
-            <Button variant="destructive" size="sm" disabled={deleteMut.isPending}
+            <Button variant="destructive" size="sm" disabled={deleteMut.isPending || !canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
               onClick={() => {
                 const id = deleteTarget.id;
                 deleteMut.mutate(id);

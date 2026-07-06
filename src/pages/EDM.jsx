@@ -3,6 +3,7 @@ import TableToolbar from "@/components/ui/TableToolbar";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 import { usePlan } from "@/lib/usePlan";
+import { useRole } from "@/lib/useRole";
 import { useStickyState } from "@/lib/useStickyState";
 import { DateRangeBar, KpiTile } from "@/components/analytics/AnalyticsKit";
 import { toast } from "sonner";
@@ -140,6 +141,7 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
   const [confirmSend, setConfirmSend] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const { canUseFeatures } = usePlan();
+  const { canWrite } = useRole();
   const { t } = usePreferences();
   const Icon = STATUS_ICONS[campaign.status] || Clock;
   const canSend = ["draft", "scheduled"].includes(campaign.status) && canUseFeatures;
@@ -206,12 +208,12 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
             <Eye className="w-3 h-3" /> {t("Preview")}
           </Button>
           {canSend && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setConfirmSend(true)}>
+            <Button variant="ghost" size="sm" disabled={!canWrite} className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setConfirmSend(true)}>
               <Send className="w-3 h-3" /> {t("Send")}
             </Button>
           )}
           {canEdit && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
+            <Button variant="ghost" size="sm" disabled={!canWrite} className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(campaign)}>
               <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
           )}
@@ -221,12 +223,12 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
             </Button>
           )}
           {canDelete && (
-            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" title={t("Delete draft")} onClick={() => onDelete(campaign.id)}>
+            <Button variant="ghost" size="icon" disabled={!canWrite} className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" title={t("Delete draft")} onClick={() => onDelete(campaign.id)}>
               <Trash2 className="w-3 h-3" />
             </Button>
           )}
           {canArchive && (
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 ml-auto text-muted-foreground hover:text-foreground" title={t("Archive email")} onClick={() => onArchive(campaign.id)}>
+            <Button variant="ghost" size="sm" disabled={!canWrite} className="h-7 text-xs gap-1.5 ml-auto text-muted-foreground hover:text-foreground" title={t("Archive email")} onClick={() => onArchive(campaign.id)}>
               <Archive className="w-3 h-3" /> {t("Archive")}
             </Button>
           )}
@@ -251,7 +253,7 @@ function EmailCard({ campaign, onEdit, onStats, onSend, onDelete, onArchive }) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { setConfirmSend(false); onSend(campaign.id); }}>
+            <AlertDialogAction disabled={!canWrite} onClick={() => { setConfirmSend(false); onSend(campaign.id); }}>
               {t("Send")}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -378,6 +380,7 @@ function EmailCalendar({ campaigns, onEdit, onStats }) {
 // ── Emails tab ─────────────────────────────────────────────────────────────────
 function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -591,7 +594,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
           <p className="font-medium text-foreground mb-1">{t("No emails yet")}</p>
           <p className="text-xs mb-4">{t("Create your first email, or start from a template.")}</p>
           <div className="flex items-center justify-center gap-2">
-            <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
+            <Button size="sm" disabled={!canWrite} className="gap-1.5 h-9" onClick={onCreate}>
               <Plus className="w-3.5 h-3.5" /> {t("New Email")}
             </Button>
             <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={onBrowseTemplates}>
@@ -646,6 +649,7 @@ function EmailsTab({ onCreate, onEdit, onStats, onBrowseTemplates }) {
 // ── Templates tab ─────────────────────────────────────────────────────────────
 function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
@@ -677,19 +681,19 @@ function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
             <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => setPreviewOpen(true)}>
               <Eye className="w-3 h-3" /> {t("Preview")}
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onDuplicate(template.id)}>
+            <Button variant="ghost" size="sm" disabled={!canWrite} className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onDuplicate(template.id)}>
               <Copy className="w-3 h-3" /> {t("Clone")}
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(template)}>
+            <Button variant="ghost" size="sm" disabled={!canWrite} className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground" onClick={() => onEdit(template)}>
               <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(template.id)}>
+            <Button variant="ghost" size="icon" disabled={!canWrite} className="h-7 w-7 ml-auto text-muted-foreground hover:text-destructive" onClick={() => onDelete(template.id)}>
               <Trash2 className="w-3 h-3" />
             </Button>
           </div>
           {/* Primary action */}
           <div className="px-3 pb-2.5">
-            <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={() => onUse(template)}>
+            <Button size="sm" disabled={!canWrite} className="w-full h-8 text-xs gap-1.5" onClick={() => onUse(template)}>
               <Plus className="w-3 h-3" /> {t("Use Template")}
             </Button>
           </div>
@@ -709,6 +713,7 @@ function TemplateCard({ template, onUse, onEdit, onDelete, onDuplicate }) {
 
 function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const fileInputRef = useRef(null);
   const [search, setSearch] = useState("");
@@ -799,7 +804,7 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
               </div>
             )}
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
+          <Button variant="outline" size="sm" disabled={!canWrite} className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
             <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
           </Button>
           <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
@@ -832,10 +837,10 @@ function TemplatesTab({ onCreate, onUse, onEdit, onImport }) {
           <p className="font-medium text-foreground mb-1">{t("No templates yet")}</p>
           <p className="text-xs mb-4">{t("Create reusable email templates to quickly start new emails.")}</p>
           <div className="flex items-center justify-center gap-2">
-            <Button size="sm" className="gap-1.5 h-9" onClick={onCreate}>
+            <Button size="sm" disabled={!canWrite} className="gap-1.5 h-9" onClick={onCreate}>
               <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
-            <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => fileInputRef.current?.click()}>
+            <Button size="sm" variant="outline" disabled={!canWrite} className="gap-1.5 h-9" onClick={() => fileInputRef.current?.click()}>
               <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
             </Button>
           </div>
@@ -1231,6 +1236,7 @@ const SUPP_COLS = [
 
 function SuppressionTab({ onRegisterOpen }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [search, setSearch]     = useState("");
   const [filters, setFilters]   = useState({});
@@ -1426,7 +1432,7 @@ function SuppressionTab({ onRegisterOpen }) {
               size="sm" variant="secondary"
               className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
               onClick={() => setConfirmRemove(true)}
-              disabled={bulkRemoveMutation.isPending}
+              disabled={bulkRemoveMutation.isPending || !canWrite}
             >
               {t("Delete")}
             </Button>
@@ -1572,7 +1578,7 @@ function SuppressionTab({ onRegisterOpen }) {
 
                   <Button
                     className="w-full gap-1.5"
-                    disabled={!importRows?.valid.length || importMutation.isPending}
+                    disabled={!importRows?.valid.length || importMutation.isPending || !canWrite}
                     onClick={() => importRows?.valid.length && importMutation.mutate(importRows.valid)}
                   >
                     {importMutation.isPending
@@ -1613,7 +1619,7 @@ function SuppressionTab({ onRegisterOpen }) {
               <Button
                 size="sm"
                 onClick={() => addEmail && effectiveReason && addMutation.mutate({ email: addEmail.trim(), reason: effectiveReason })}
-                disabled={!addEmail.trim() || !effectiveReason || addMutation.isPending}
+                disabled={!addEmail.trim() || !effectiveReason || addMutation.isPending || !canWrite}
               >
                 {addMutation.isPending ? t("Adding...") : t("Add to List")}
               </Button>
@@ -1635,7 +1641,7 @@ function SuppressionTab({ onRegisterOpen }) {
             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => bulkRemoveMutation.mutate([...selected])}
-              disabled={bulkRemoveMutation.isPending}
+              disabled={bulkRemoveMutation.isPending || !canWrite}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {bulkRemoveMutation.isPending ? t("Removing…") : t("Remove")}
@@ -1722,6 +1728,7 @@ function SuppressionTab({ onRegisterOpen }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function EDM() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [tab, setTab] = useState("emails");
   const [editorOpen, setEditorOpen] = useState(false);
@@ -1826,17 +1833,17 @@ export default function EDM() {
             <p className="text-sm text-muted-foreground mt-1">{t("Build, send, and track marketing emails.")}</p>
           </div>
           {tab === "emails" && canUseFeatures && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={openCreate}>
+            <Button size="sm" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} className="gap-1.5 h-9" onClick={openCreate}>
               <Plus className="w-3.5 h-3.5" /> {t("New Email")}
             </Button>
           )}
           {tab === "templates" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={openTemplateCreate}>
+            <Button size="sm" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} className="gap-1.5 h-9" onClick={openTemplateCreate}>
               <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
           )}
           {tab === "suppression" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => suppressionOpenerRef.current?.()}>
+            <Button size="sm" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} className="gap-1.5 h-9" onClick={() => suppressionOpenerRef.current?.()}>
               <Plus className="w-3.5 h-3.5" /> {t("Add Email")}
             </Button>
           )}

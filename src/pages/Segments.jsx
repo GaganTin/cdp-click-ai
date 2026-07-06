@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 import { Link } from "react-router-dom";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 
 
 const TABS = [
@@ -220,6 +221,7 @@ function criteriaToChips(criteria) {
 
 function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, submitLabel = "Save", segmentType = "customer" }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const isCustomer = segmentType === "customer";
   const emptyCrit = isCustomer ? CUST_CRITERIA_EMPTY : ANON_CRITERIA_EMPTY;
 
@@ -532,7 +534,7 @@ function SegmentForm({ initialValues, initialCriteria, onSubmit, isPending, subm
         </div>
       </div>
 
-      <Button onClick={handleSubmit} disabled={!form.name || isPending} className="w-full">
+      <Button onClick={handleSubmit} disabled={!form.name || isPending || !canWrite} className="w-full">
         {t(submitLabel)}
       </Button>
     </div>
@@ -555,6 +557,7 @@ function SegmentSize({ segmentId }) {
 
 export default function Segments() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [activeTab, setActiveTab] = useState("customer");
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -695,7 +698,8 @@ export default function Segments() {
             <p className="text-sm text-muted-foreground mt-1">{t("Create audience segments for targeted campaigns.")}</p>
           </div>
           {activeTab !== "analytics" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}>
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}
+              disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}>
               <Plus className="w-3.5 h-3.5" /> {t("New Segment")}
             </Button>
           )}
@@ -956,23 +960,23 @@ export default function Segments() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             {!seg.is_used && seg.status !== "archived" && (
-                              <DropdownMenuItem onClick={() => setEditTarget(seg)}>
+                              <DropdownMenuItem disabled={!canWrite} onClick={() => setEditTarget(seg)}>
                                 <Pencil className="w-3.5 h-3.5 mr-2" /> {t("Edit")}
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem onClick={() => handleClone(seg)}>
+                            <DropdownMenuItem disabled={!canWrite} onClick={() => handleClone(seg)}>
                               <Copy className="w-3.5 h-3.5 mr-2" /> {t("Clone")}
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleExport(seg)}>
                               <Download className="w-3.5 h-3.5 mr-2" /> {t("Export CSV")}
                             </DropdownMenuItem>
                             {seg.status !== "archived" && (
-                              <DropdownMenuItem onClick={() => handleArchive(seg)}>
+                              <DropdownMenuItem disabled={!canWrite} onClick={() => handleArchive(seg)}>
                                 <Archive className="w-3.5 h-3.5 mr-2" /> {t("Archive")}
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => deleteMutation.mutate(seg.id)} className="text-destructive">
+                            <DropdownMenuItem disabled={!canWrite} onClick={() => deleteMutation.mutate(seg.id)} className="text-destructive">
                               <Trash2 className="w-3.5 h-3.5 mr-2" /> {t("Delete")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { AlertCircle, Eye, Code2 } from "lucide-react";
 import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
+import { useRole } from "@/lib/useRole";
 import { toast } from "sonner";
 
 const DEFAULT_BLOCKS = [
@@ -17,6 +18,7 @@ const DEFAULT_BLOCKS = [
 ];
 
 export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, initial = null }) {
+  const { canWrite } = useRole();
   const isEdit = !!initial?.id;
   const [name, setName] = useState("New Template");
   const [subject, setSubject] = useState("");
@@ -164,7 +166,13 @@ export default function TemplateEditor({ open, onClose, onSave, onUseTemplate, i
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>
               Cancel
             </Button>
-            <Button size="sm" className="h-8 text-xs" onClick={() => handleSave()} disabled={saving}>
+            <Button
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => handleSave()}
+              disabled={saving || !canWrite}
+              title={!canWrite ? "Viewers can't make changes" : undefined}
+            >
               {saving ? "Saving..." : isEdit ? "Save Changes" : "Save Template"}
             </Button>
           </div>

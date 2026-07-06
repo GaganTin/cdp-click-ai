@@ -42,6 +42,7 @@ import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 import PageGuide from "@/components/PageGuide";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -194,6 +195,7 @@ const DEFAULT_FORM = {
 
 function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, initialContent = "", initialTemplateId = "" }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const uid = useId();
   const isEdit = !!initial;
 
@@ -336,7 +338,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
             <TooltipProvider delayDuration={150}>
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-1.5">
-                  <Switch id={`${uid}-active`} checked={form.is_active} onCheckedChange={v => set("is_active", v)} />
+                  <Switch id={`${uid}-active`} checked={form.is_active} onCheckedChange={v => set("is_active", v)} disabled={!canWrite} />
                   <Label htmlFor={`${uid}-active`} className="text-sm cursor-pointer">{t("Active")}</Label>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -350,7 +352,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
                   </Tooltip>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Switch id={`${uid}-default`} checked={form.is_default} onCheckedChange={v => set("is_default", v)} />
+                  <Switch id={`${uid}-default`} checked={form.is_default} onCheckedChange={v => set("is_default", v)} disabled={!canWrite} />
                   <Label htmlFor={`${uid}-default`} className="text-sm cursor-pointer">{t("Default pop-up")}</Label>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -512,7 +514,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
             <Button type="button" variant="outline" size="sm" onClick={onClose}>{t("Cancel")}</Button>
-            <Button type="submit" size="sm" disabled={isSaving}>
+            <Button type="submit" size="sm" disabled={isSaving || !canWrite}>
               {isSaving ? t("Saving…") : isEdit ? t("Save Changes") : t("Save as Draft")}
             </Button>
           </div>
@@ -526,6 +528,7 @@ function PopupFormDialog({ open, onClose, onSave, initial = null, isSaving, init
 
 function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats, segments = [] }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const accent = STATUS_ACCENT[popup.status] || STATUS_ACCENT.draft;
   const isActive = popup.status === "active";
   const typeLabel = INTERACTION_TYPES.find(it => it.value === popup.interaction_type)?.label || popup.interaction_type;
@@ -607,6 +610,7 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
         <Button
           variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
           onClick={() => onEdit(popup)}
+          disabled={!canWrite}
         >
           <Pencil className="w-3 h-3 flex-shrink-0" /> {t("Edit")}
         </Button>
@@ -621,6 +625,7 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
         <Button
           variant="ghost" size="sm" className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
           onClick={() => onToggleActive(popup)}
+          disabled={!canWrite}
         >
           {isActive ? <ToggleRight className="w-3.5 h-3.5 flex-shrink-0" /> : <ToggleLeft className="w-3.5 h-3.5 flex-shrink-0" />}
           {isActive ? t("Deactivate") : t("Activate")}
@@ -629,6 +634,7 @@ function PopupCard({ popup, onPreview, onEdit, onDelete, onToggleActive, onStats
           variant="ghost" size="icon" className="h-7 w-7 ml-auto flex-shrink-0 text-muted-foreground hover:text-destructive"
           title={t("Delete pop-up")}
           onClick={() => onDelete(popup.id)}
+          disabled={!canWrite}
         >
           <Trash2 className="w-3 h-3" />
         </Button>
@@ -843,6 +849,7 @@ function PopupCalendar({ popups, onPreview }) {
 
 function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onTemplateFormClose, actionsRef }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [preview, setPreview] = useState(null);
   const [previewDevice, setPreviewDevice] = useState("desktop");
@@ -1005,7 +1012,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
               </div>
             )}
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()}>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => fileInputRef.current?.click()} disabled={!canWrite}>
             <Upload className="w-3.5 h-3.5" /> {t("Import HTML")}
           </Button>
           <input ref={fileInputRef} type="file" accept=".html,.htm" className="hidden" onChange={handleImportFile} />
@@ -1066,13 +1073,13 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
           </div>
           <div className="flex items-center justify-between pt-1">
             {preview && !preview.builtin && (
-              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => { openEdit(preview); setPreview(null); }}>
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs" onClick={() => { openEdit(preview); setPreview(null); }} disabled={!canWrite}>
                 {t("Open in Builder")}
               </Button>
             )}
             <div className="flex gap-2 ml-auto">
               <Button variant="outline" size="sm" onClick={() => setPreview(null)}>{t("Close")}</Button>
-              <Button size="sm" onClick={() => { onUseTemplate(preview); setPreview(null); }}>
+              <Button size="sm" onClick={() => { onUseTemplate(preview); setPreview(null); }} disabled={!canWrite}>
                 {t("Use Template")}
               </Button>
             </div>
@@ -1105,7 +1112,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
             <AlertDialogAction
               onClick={() => deleteMutation.mutate(deleteTarget)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isPending || !canWrite}
             >
               {t("Delete")}
             </AlertDialogAction>
@@ -1120,6 +1127,7 @@ function TemplatesTab({ onUseTemplate, templateFormOpen, onTemplateFormOpen, onT
 
 function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   return (
     <div className="bg-background border border-border rounded-xl overflow-hidden hover:shadow-md hover:border-border/80 transition-all flex flex-col">
       <div className="h-1 flex-shrink-0 bg-gradient-to-r from-border to-muted-foreground/30" />
@@ -1146,6 +1154,7 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
           <Button
             variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
             onClick={onClone}
+            disabled={!canWrite}
           >
             <Copy className="w-3 h-3" /> {t("Clone")}
           </Button>
@@ -1153,6 +1162,7 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
             <Button
               variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
               onClick={onEdit}
+              disabled={!canWrite}
             >
               <Pencil className="w-3 h-3" /> {t("Edit")}
             </Button>
@@ -1161,6 +1171,7 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
             <Button
               variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
               onClick={onDelete}
+              disabled={!canWrite}
             >
               <Trash2 className="w-3 h-3" />
             </Button>
@@ -1168,7 +1179,7 @@ function TemplateCard({ template, onPreview, onUse, onEdit, onClone, onDelete })
         </div>
         {/* Primary action */}
         <div className="px-3 pb-2.5">
-          <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={onUse}>
+          <Button size="sm" className="w-full h-8 text-xs gap-1.5" onClick={onUse} disabled={!canWrite}>
             <Plus className="w-3 h-3" /> {t("Use Template")}
           </Button>
         </div>
@@ -1548,6 +1559,7 @@ const EMAIL_STATUS_OPTIONS = ["new", "contacted", "converted", "unsubscribed"];
 
 function EmailsTab({ popups }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [search, setSearch]   = useState("");
   const [filters, setFilters] = useState({});
@@ -1740,7 +1752,7 @@ function EmailsTab({ popups }) {
                 size="sm" variant="secondary"
                 className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
                 onClick={() => setProfileBulkTarget(selectedRows.filter(r => !r.profile_created))}
-                disabled={createProfileMutation.isPending}
+                disabled={createProfileMutation.isPending || !canWrite}
               >
                 {t("Create Profiles")} ({selectedRows.filter(r => !r.profile_created).length})
               </Button>
@@ -1749,6 +1761,7 @@ function EmailsTab({ popups }) {
               size="sm" variant="secondary"
               className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
               onClick={() => setBulkStatusOpen(true)}
+              disabled={!canWrite}
             >
               {t("Update Status")}
             </Button>
@@ -1902,7 +1915,7 @@ function EmailsTab({ popups }) {
             <AlertDialogCancel>{t("Cancel")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => createProfileMutation.mutate(profileBulkTarget)}
-              disabled={createProfileMutation.isPending}
+              disabled={createProfileMutation.isPending || !canWrite}
             >
               {createProfileMutation.isPending ? t("Creating…") : t("Create") + ` ${profileBulkTarget?.length} ` + (profileBulkTarget?.length !== 1 ? t("Profiles") : t("Profile"))}
             </AlertDialogAction>
@@ -1933,7 +1946,7 @@ function EmailsTab({ popups }) {
             <Button
               size="sm"
               onClick={() => bulkStatusMutation.mutate({ ids: [...selected], status: bulkStatus })}
-              disabled={bulkStatusMutation.isPending}
+              disabled={bulkStatusMutation.isPending || !canWrite}
             >
               {bulkStatusMutation.isPending ? t("Updating…") : t("Apply")}
             </Button>
@@ -1948,6 +1961,7 @@ function EmailsTab({ popups }) {
 
 export default function PopUp() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const [tab, setTab] = useState("popups");
   const [formOpen, setFormOpen] = useState(false);
@@ -2053,12 +2067,12 @@ export default function PopUp() {
             </p>
           </div>
           {tab === "popups" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()} disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
               <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
             </Button>
           )}
           {tab === "templates" && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => setTemplateFormOpen(true)}>
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => setTemplateFormOpen(true)} disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
               <Plus className="w-3.5 h-3.5" /> {t("New Template")}
             </Button>
           )}
@@ -2275,7 +2289,7 @@ export default function PopUp() {
                 <div className="border-t border-border pt-4 text-center space-y-3">
                   <p className="text-xs text-muted-foreground">{t("Start from a ready-made template, or build your own from scratch - then target a segment and publish.")}</p>
                   <div className="flex items-center justify-center gap-2">
-                    <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()}>
+                    <Button size="sm" className="gap-1.5 h-9" onClick={() => openCreate()} disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
                       <Plus className="w-3.5 h-3.5" /> {t("New Pop Up")}
                     </Button>
                     <Button size="sm" variant="outline" className="gap-1.5 h-9" onClick={() => setTab("templates")}>
@@ -2404,7 +2418,7 @@ export default function PopUp() {
           </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" size="sm" onClick={() => setPreviewTarget(null)}>{t("Close")}</Button>
-            <Button size="sm" onClick={() => { const target = previewTarget; setPreviewTarget(null); openEdit(target); }}>
+            <Button size="sm" onClick={() => { const target = previewTarget; setPreviewTarget(null); openEdit(target); }} disabled={!canWrite}>
               {t("Edit")}
             </Button>
           </div>
@@ -2425,7 +2439,7 @@ export default function PopUp() {
             <AlertDialogAction
               onClick={() => deleteMutation.mutate(deleteTarget)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deleteMutation.isPending}
+              disabled={deleteMutation.isPending || !canWrite}
             >
               {t("Delete")}
             </AlertDialogAction>

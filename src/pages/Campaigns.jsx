@@ -9,6 +9,7 @@ import {
   ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useRole } from "@/lib/useRole";
 import { MultiSelect } from "@/components/ui/multi-select";
 import { useStickyState } from "@/lib/useStickyState";
 import { usePlan } from "@/lib/usePlan";
@@ -67,6 +68,7 @@ const STATUS_OPTIONS = ["active", "paused", "completed", "archived"];
 
 export default function Campaigns() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [tab, setTab] = useState("utm");
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
@@ -307,7 +309,8 @@ export default function Campaigns() {
             <p className="text-sm text-muted-foreground mt-1">{t("Create, manage, and analyse your UTM tracking links.")}</p>
           </div>
           {tab === "utm" && canUseFeatures && (
-            <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}>
+            <Button size="sm" className="gap-1.5 h-9" onClick={() => setCreateOpen(true)}
+              disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
               <Plus className="w-3.5 h-3.5" /> {t("New UTM")}
             </Button>
           )}
@@ -437,7 +440,7 @@ export default function Campaigns() {
                   )}
                 </div>
                 <Button variant="outline" size="sm" className="h-9 gap-1.5"
-                  onClick={() => setImportOpen(true)}>
+                  onClick={() => setImportOpen(true)} disabled={!canWrite}>
                   <Upload className="w-3.5 h-3.5" /> {t("Import UTM")}
                 </Button>
               </div>
@@ -472,12 +475,14 @@ export default function Campaigns() {
                     {canEdit && (
                       <Button size="sm" variant="secondary"
                         className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+                        disabled={!canWrite}
                         onClick={() => { setEditTarget(single); setSelected(new Set()); }}>
                         {t("Edit")}
                       </Button>
                     )}
                     <Button size="sm" variant="secondary"
                       className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+                      disabled={!canWrite}
                       onClick={single ? () => { handleClone(single); setSelected(new Set()); } : handleBatchClone}>
                       {t("Clone")}
                     </Button>
@@ -494,7 +499,8 @@ export default function Campaigns() {
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="sm" variant="secondary"
-                          className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0">
+                          className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0"
+                          disabled={!canWrite}>
                           {t("Change Status")}
                         </Button>
                       </DropdownMenuTrigger>
@@ -507,6 +513,7 @@ export default function Campaigns() {
                     {canDelete && (
                       <Button size="sm" variant="secondary"
                         className="h-7 text-xs gap-1.5 bg-background/10 text-background hover:bg-background/20 border-0 text-red-300 hover:text-red-200"
+                        disabled={!canWrite}
                         onClick={() => setBatchDeleteOpen(true)}>
                         {t("Delete")}
                       </Button>
@@ -680,7 +687,7 @@ export default function Campaigns() {
           <p className="text-sm text-muted-foreground">{t("This action cannot be undone. Only draft campaigns will be deleted.")}</p>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" size="sm" onClick={() => setBatchDeleteOpen(false)}>{t("Cancel")}</Button>
-            <Button variant="destructive" size="sm" onClick={handleBatchDelete}>{t("Delete")}</Button>
+            <Button variant="destructive" size="sm" onClick={handleBatchDelete} disabled={!canWrite}>{t("Delete")}</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -10,6 +10,7 @@ import { usePlan } from "@/lib/usePlan";
 import { parseChartConfig } from "@/lib/utils";
 import { fmtCredits } from "@/lib/credits";
 import { useAuth } from "@/lib/AuthContext";
+import { useRole } from "@/lib/useRole";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -73,6 +74,8 @@ export default function Analyst() {
   const isNearBottom = useRef(true);
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  // Read-only viewers can chat but must not manage saved skills/templates.
+  const { canWrite } = useRole();
 
   // Load cross-page context data
   const { data: segments = [] } = useQuery({
@@ -891,10 +894,14 @@ ${JSON.stringify(chartBlock)}
                   </DialogTitle>
                   <div className="flex items-center gap-2 mr-6">
                     <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5"
+                      disabled={!canWrite}
+                      title={!canWrite ? "Viewers can't make changes" : undefined}
                       onClick={() => { setSkillDraft({ name: "", description: "", content: "", type: "context" }); setSkillsView("create"); }}>
                       <Plus className="w-3.5 h-3.5" /> New skill
                     </Button>
                     <Button size="sm" className="h-8 text-xs gap-1.5"
+                      disabled={!canWrite}
+                      title={!canWrite ? "Viewers can't make changes" : undefined}
                       onClick={() => { setSkillDraft({ name: "", description: "", content: "", type: "template" }); setSkillsView("create"); }}>
                       <Plus className="w-3.5 h-3.5" /> New template
                     </Button>
@@ -920,6 +927,8 @@ ${JSON.stringify(chartBlock)}
                       <p className="text-sm text-muted-foreground">No skills yet</p>
                       <p className="text-xs text-muted-foreground/70 mt-1">Create one to inject persistent instructions into any chat session</p>
                       <Button variant="outline" size="sm" className="mt-3 h-7 text-xs gap-1"
+                        disabled={!canWrite}
+                        title={!canWrite ? "Viewers can't make changes" : undefined}
                         onClick={() => { setSkillDraft({ name: "", description: "", content: "", type: "context" }); setSkillsView("create"); }}>
                         <Plus className="w-3 h-3" /> Create skill
                       </Button>
@@ -955,12 +964,14 @@ ${JSON.stringify(chartBlock)}
                             </div>
                             <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button variant="ghost" size="icon" className="h-7 w-7"
-                                title={canEdit ? "Edit" : "Only the creator or an admin can edit"}
-                                disabled={!canEdit}
+                                title={!canWrite ? "Viewers can't make changes" : (canEdit ? "Edit" : "Only the creator or an admin can edit")}
+                                disabled={!canEdit || !canWrite}
                                 onClick={() => openEditSkill(skill)}>
                                 <Pencil className="w-3 h-3" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                                disabled={!canWrite}
+                                title={!canWrite ? "Viewers can't make changes" : undefined}
                                 onClick={() => handleDeleteSkill(skill.id)}>
                                 <Trash2 className="w-3 h-3" />
                               </Button>
@@ -985,6 +996,8 @@ ${JSON.stringify(chartBlock)}
                       <p className="text-sm text-muted-foreground">No templates yet</p>
                       <p className="text-xs text-muted-foreground/70 mt-1">Save reusable prompts your whole team can launch with one click</p>
                       <Button variant="outline" size="sm" className="mt-3 h-7 text-xs gap-1"
+                        disabled={!canWrite}
+                        title={!canWrite ? "Viewers can't make changes" : undefined}
                         onClick={() => { setSkillDraft({ name: "", description: "", content: "", type: "template" }); setSkillsView("create"); }}>
                         <Plus className="w-3 h-3" /> Create template
                       </Button>
@@ -1014,12 +1027,14 @@ ${JSON.stringify(chartBlock)}
                             </div>
                             <div className="flex gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button variant="ghost" size="icon" className="h-7 w-7"
-                                disabled={!canEdit}
-                                title={canEdit ? "Edit" : "Only the creator or an admin can edit"}
+                                disabled={!canEdit || !canWrite}
+                                title={!canWrite ? "Viewers can't make changes" : (canEdit ? "Edit" : "Only the creator or an admin can edit")}
                                 onClick={() => openEditSkill(skill)}>
                                 <Pencil className="w-3 h-3" />
                               </Button>
                               <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                                disabled={!canWrite}
+                                title={!canWrite ? "Viewers can't make changes" : undefined}
                                 onClick={() => handleDeleteSkill(skill.id)}>
                                 <Trash2 className="w-3 h-3" />
                               </Button>
@@ -1088,7 +1103,9 @@ ${JSON.stringify(chartBlock)}
                     onClick={() => { setSkillsView("list"); setEditingSkill(null); setSkillDraft({ name: "", description: "", content: "", type: "context" }); }}>
                     Cancel
                   </Button>
-                  <Button size="sm" className="h-8" onClick={handleSaveSkill}>
+                  <Button size="sm" className="h-8" onClick={handleSaveSkill}
+                    disabled={!canWrite}
+                    title={!canWrite ? "Viewers can't make changes" : undefined}>
                     {skillsView === "edit"
                       ? "Save changes"
                       : (skillDraft.type === "template" ? "Create Template" : "Create Skill")}
@@ -1128,7 +1145,7 @@ ${JSON.stringify(chartBlock)}
                 <Button
                   variant="ghost" size="sm" className="text-xs text-muted-foreground h-8"
                   onClick={() => { setDraftPrompt(""); saveSettingsMutation.mutate(""); }}
-                  disabled={saveSettingsMutation.isPending}
+                  disabled={saveSettingsMutation.isPending || !canWrite}
                 >
                   Clear context
                 </Button>
@@ -1137,8 +1154,9 @@ ${JSON.stringify(chartBlock)}
                 <Button variant="outline" size="sm" className="h-8" onClick={() => setSettingsOpen(false)}>Cancel</Button>
                 <Button
                   size="sm" className="h-8"
-                  disabled={saveSettingsMutation.isPending || draftPrompt === savedPrompt}
+                  disabled={saveSettingsMutation.isPending || draftPrompt === savedPrompt || !canWrite}
                   onClick={() => saveSettingsMutation.mutate(draftPrompt)}
+                  title={!canWrite ? "Viewers can't make changes" : undefined}
                 >
                   {saveSettingsMutation.isPending ? "Saving…" : "Save"}
                 </Button>

@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   User, Lock, Bell, Building2, Users, ClipboardList,
   Trash2, Plus, Shield, Eye, EyeOff, Zap,
-  CreditCard, MessageCircle, CheckCircle2,
+  CreditCard, BarChart3, MessageCircle, CheckCircle2,
   ExternalLink, ChevronRight, ChevronDown, Mail,
   Upload, RefreshCw, Link2, Image as ImageIcon, Search,
   LogIn, LogOut, UserPlus, PenLine, UserMinus, KeyRound,
@@ -1508,15 +1508,6 @@ function BillingTab({ company }) {
   const { t } = usePreferences();
   const { planConfig, upgradePlan, isFreePlan, isPaidPlan, isTrialExpired, daysLeft, upgradedAt, plans } = usePlan();
 
-  const { data: usage, isLoading: usageLoading } = useQuery({
-    queryKey: ["billing-usage", company?.id],
-    queryFn: appClient.billing.getUsage,
-    enabled: !!company?.id,
-    staleTime: 60_000,
-  });
-
-  const limits = planConfig?.limits ?? {};
-
   const badgeClass = "text-xs px-2 py-0.5 rounded-full bg-secondary text-foreground font-medium border border-border";
   const statusBadge = isTrialExpired
     ? <span className={badgeClass}>{t("Trial expired")}</span>
@@ -1526,37 +1517,6 @@ function BillingTab({ company }) {
 
   // Free upgrades go through sales; surface the paid plan's contact link directly.
   const isContactSales = upgradePlan?.cta_external;
-
-  // Account-wide plan caps (current totals, NOT period-scoped). AI credits are
-  // period-scoped so they get their own dedicated section below.
-  const usageItems = [
-    { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
-    { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
-    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
-  ];
-
-  // ── AI credits for the current window (the one metric that resets) ──────────
-  // The window + its end come from the server (app.ai_quota) so the label is
-  // always exactly what enforcement uses: a trial gets one allowance through the
-  // trial end; a paid plan resets on ai_period_end (the billing-day anniversary).
-  const aiIsTrial     = usage?.ai_is_trial ?? isFreePlan;
-  const aiLimitRaw    = limits.ai_tokens;
-  const aiUnlimited   = aiLimitRaw === null || aiLimitRaw === undefined;
-  const aiUsedCredits = toCredits(usage?.ai_tokens_month ?? 0);
-  const aiLimitCredits = aiUnlimited ? null : toCredits(aiLimitRaw);
-  const aiRemaining   = aiUnlimited ? null : Math.max(0, aiLimitCredits - aiUsedCredits);
-  const aiPct         = aiUnlimited || aiLimitCredits <= 0
-    ? 0
-    : Math.min(100, Math.round((aiUsedCredits / aiLimitCredits) * 100));
-  const aiPeriodEnd   = usage?.ai_period_end ? new Date(usage.ai_period_end) : null;
-  const fmtDate       = (d) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  const aiCreditsDesc = aiIsTrial
-    ? t("A one-time credit allowance for your free trial - it does not reset.")
-    : t("Credits reset at the start of every billing month.");
-  const aiResetLine = aiIsTrial
-    ? (aiPeriodEnd ? `${isTrialExpired ? t("Trial ended") : t("Trial ends")} ${fmtDate(aiPeriodEnd)}` : null)
-    : (aiPeriodEnd ? `${t("Resets on")} ${fmtDate(aiPeriodEnd)}` : null);
-  const aiBarColor = aiPct >= 90 ? "bg-destructive" : aiPct >= 70 ? "bg-yellow-500" : "bg-foreground";
 
   return (
     <div className="space-y-8">
@@ -1598,8 +1558,113 @@ function BillingTab({ company }) {
               {planConfig.period && <span className="text-muted-foreground font-normal">{planConfig.period}</span>}
             </p>
           )}
+          <p className="text-xs text-muted-foreground pt-1">
+            {t("See your consumption against these limits on the")}{" "}
+            <Link to="/settings?tab=usage" className="text-primary font-medium hover:underline">{t("Usage")}</Link>{" "}
+            {t("page.")}
+          </p>
         </div>
       </Section>
+
+      {/* All plans */}
+      <Section title={t("All plans")} description={t("Compare plans and upgrade at any time.")}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+          {plans.filter(p => p.is_active).map(p => (
+            <div
+              key={p.id}
+              className={`border rounded-lg p-5 space-y-4 ${
+                p.is_highlighted ? "border-primary/50 bg-primary/5" : "border-border"
+              } ${p.id === company?.plan ? "ring-2 ring-primary/30" : ""}`}
+            >
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <p className="font-semibold">{p.name}</p>
+                  {p.id === company?.plan && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">{t("Current")}</span>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">{p.description}</p>
+                <p className="text-xl font-bold mt-3">
+                  {p.price_display}
+                  {p.period && <span className="text-xs font-normal text-muted-foreground"> / {p.period}</span>}
+                </p>
+              </div>
+              <ul className="space-y-1.5">
+                {/* Quantitative bullets derived from limits (always in sync), then
+                    qualitative perks from the free-text features. */}
+                {[...planLimitBullets(p.limits), ...qualitativeFeatures(p.features)].map((f, i) => (
+                  <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                    <CheckCircle2 className="w-3 h-3 text-primary mt-0.5 flex-shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              {p.id !== company?.plan && (
+                p.cta_external
+                  ? <a href={p.cta_href} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
+                      {p.cta_label} <ExternalLink className="w-3 h-3" />
+                    </a>
+                  : <Link to={p.cta_href} className="text-xs font-medium text-primary hover:underline flex items-center gap-1">
+                      {p.cta_label} <ChevronRight className="w-3 h-3" />
+                    </Link>
+              )}
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+// ── Tab: Usage ────────────────────────────────────────────────────────────────
+
+function UsageTab({ company }) {
+  const { t } = usePreferences();
+  const { planConfig, isFreePlan, isTrialExpired } = usePlan();
+
+  const { data: usage, isLoading: usageLoading } = useQuery({
+    queryKey: ["billing-usage", company?.id],
+    queryFn: appClient.billing.getUsage,
+    enabled: !!company?.id,
+    staleTime: 60_000,
+  });
+
+  const limits = planConfig?.limits ?? {};
+
+  // Account-wide plan caps (current totals, NOT period-scoped). AI credits are
+  // period-scoped so they get their own dedicated section below.
+  const usageItems = [
+    { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
+    { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
+    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
+  ];
+
+  // ── AI credits for the current window (the one metric that resets) ──────────
+  // The window + its end come from the server (app.ai_quota) so the label is
+  // always exactly what enforcement uses: a trial gets one allowance through the
+  // trial end; a paid plan resets on ai_period_end (the billing-day anniversary).
+  const aiIsTrial     = usage?.ai_is_trial ?? isFreePlan;
+  const aiLimitRaw    = limits.ai_tokens;
+  const aiUnlimited   = aiLimitRaw === null || aiLimitRaw === undefined;
+  const aiUsedCredits = toCredits(usage?.ai_tokens_month ?? 0);
+  const aiLimitCredits = aiUnlimited ? null : toCredits(aiLimitRaw);
+  const aiRemaining   = aiUnlimited ? null : Math.max(0, aiLimitCredits - aiUsedCredits);
+  const aiPct         = aiUnlimited || aiLimitCredits <= 0
+    ? 0
+    : Math.min(100, Math.round((aiUsedCredits / aiLimitCredits) * 100));
+  const aiPeriodEnd   = usage?.ai_period_end ? new Date(usage.ai_period_end) : null;
+  const fmtDate       = (d) => d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const aiCreditsDesc = aiIsTrial
+    ? t("A one-time credit allowance for your free trial - it does not reset.")
+    : t("Credits reset at the start of every billing month.");
+  const aiResetLine = aiIsTrial
+    ? (aiPeriodEnd ? `${isTrialExpired ? t("Trial ended") : t("Trial ends")} ${fmtDate(aiPeriodEnd)}` : null)
+    : (aiPeriodEnd ? `${t("Resets on")} ${fmtDate(aiPeriodEnd)}` : null);
+  const aiBarColor = aiPct >= 90 ? "bg-destructive" : aiPct >= 70 ? "bg-yellow-500" : "bg-foreground";
+
+  return (
+    <div className="space-y-8">
 
       {/* AI credits - the period-scoped allowance (trial or billing month) */}
       <Section title={t("AI credits")} description={aiCreditsDesc}>
@@ -1704,54 +1769,6 @@ function BillingTab({ company }) {
           </div>
         </Section>
       )}
-
-      {/* All plans */}
-      <Section title={t("All plans")} description={t("Compare plans and upgrade at any time.")}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
-          {plans.filter(p => p.is_active).map(p => (
-            <div
-              key={p.id}
-              className={`border rounded-lg p-5 space-y-4 ${
-                p.is_highlighted ? "border-primary/50 bg-primary/5" : "border-border"
-              } ${p.id === company?.plan ? "ring-2 ring-primary/30" : ""}`}
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="font-semibold">{p.name}</p>
-                  {p.id === company?.plan && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">{t("Current")}</span>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">{p.description}</p>
-                <p className="text-xl font-bold mt-3">
-                  {p.price_display}
-                  {p.period && <span className="text-xs font-normal text-muted-foreground"> / {p.period}</span>}
-                </p>
-              </div>
-              <ul className="space-y-1.5">
-                {/* Quantitative bullets derived from limits (always in sync), then
-                    qualitative perks from the free-text features. */}
-                {[...planLimitBullets(p.limits), ...qualitativeFeatures(p.features)].map((f, i) => (
-                  <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                    <CheckCircle2 className="w-3 h-3 text-primary mt-0.5 flex-shrink-0" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              {p.id !== company?.plan && (
-                p.cta_external
-                  ? <a href={p.cta_href} target="_blank" rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                      {p.cta_label} <ExternalLink className="w-3 h-3" />
-                    </a>
-                  : <Link to={p.cta_href} className="text-xs font-medium text-primary hover:underline flex items-center gap-1">
-                      {p.cta_label} <ChevronRight className="w-3 h-3" />
-                    </Link>
-              )}
-            </div>
-          ))}
-        </div>
-      </Section>
     </div>
   );
 }
@@ -1889,7 +1906,8 @@ const TABS = [
   { id: "profile",     label: "Profile",     icon: User },
   { id: "security",    label: "Security",    icon: Lock },
   { id: "preferences", label: "Preferences", icon: Bell },
-  { id: "billing",     label: "Billing",     icon: CreditCard },
+  { id: "billing",     label: "Billing",     icon: CreditCard,   adminOnly: true },
+  { id: "usage",       label: "Usage",       icon: BarChart3 },
   { id: "company",     label: "Company",     icon: Building2,     adminOnly: true },
   { id: "members",     label: "Members",     icon: Users,         adminOnly: true },
   { id: "audit-log",   label: "Audit Log",   icon: ClipboardList, adminOnly: true },
@@ -1903,6 +1921,8 @@ export default function Settings() {
   const activeTab = searchParams.get("tab") || "profile";
 
   const role = user?.companies?.find(c => c.id === currentCompany?.id)?.role;
+  // Only admins (incl. the account owner, whose role is "admin") get the
+  // admin-only tabs — Company, Members, Audit Log and Billing.
   const isAdmin = role === "admin";
 
   const visibleTabs = TABS.filter(tab => !tab.adminOnly || isAdmin);
@@ -1948,7 +1968,8 @@ export default function Settings() {
           {activeTab === "company"     && isAdmin && <CompanyTab company={currentCompany} onRefresh={refreshUser} />}
           {activeTab === "members"     && isAdmin && <MembersTab company={currentCompany} currentUserId={user?.id} />}
           {activeTab === "audit-log"   && isAdmin && <AuditLogTab company={currentCompany} />}
-          {activeTab === "billing"     && <BillingTab company={currentCompany} />}
+          {activeTab === "billing"     && isAdmin && <BillingTab company={currentCompany} />}
+          {activeTab === "usage"       && <UsageTab company={currentCompany} />}
           {activeTab === "support"     && <SupportTab />}
         </main>
       </div>

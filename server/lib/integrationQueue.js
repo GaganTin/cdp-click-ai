@@ -92,20 +92,28 @@ async function getAirflowDagRunState(dagId, runId) {
 
 // Mark a job (and its integration row) completed, mirroring the dag-complete
 // webhook so reconciliation and dev-mode share one code path.
-async function markJobCompleted(pool, job, { detail = "Sync completed" } = {}) {
+//
+// stampSyncDate: the DAG itself is now the source of truth for
+// app.data_integrations.last_synced_date (it writes it directly on success). So
+// when we're RECONCILING a real Airflow run that already succeeded, we must NOT
+// re-stamp last_synced_date from here (a cron) - the DAG set the accurate time.
+// Only dev-mode auto-complete (no DAG runs) still stamps the integration row.
+async function markJobCompleted(pool, job, { detail = "Sync completed", stampSyncDate = true } = {}) {
   await pool.query(
     `UPDATE app.integration_sync_jobs
      SET status='completed', completed_at=NOW(), updated_date=NOW()
      WHERE id=$1`,
     [job.id]
   );
-  await pool.query(
-    `UPDATE app.data_integrations
-     SET is_synced=true, last_synced_date=NOW(),
-         is_sync_error=false, sync_error=null, updated_date=NOW()
-     WHERE integration_type=$1 AND company_id=$2`,
-    [job.integration_type, job.company_id]
-  );
+  if (stampSyncDate) {
+    await pool.query(
+      `UPDATE app.data_integrations
+       SET is_synced=true, last_synced_date=NOW(),
+           is_sync_error=false, sync_error=null, updated_date=NOW()
+       WHERE integration_type=$1 AND company_id=$2`,
+      [job.integration_type, job.company_id]
+    );
+  }
   await pool.query(
     `INSERT INTO app.integration_audit_log
        (company_id, integration_type, action, actor, detail)
@@ -196,7 +204,9 @@ async function resetStaleJobs(pool) {
       } else if (state === "success") {
         // Finished, but the dag-complete webhook never landed- reconcile.
         console.log(`[Queue] Stale job ${job.id} succeeded in Airflow; reconciling → completed`);
-        await markJobCompleted(pool, job, { detail: "Reconciled from Airflow (completion webhook missed)" });
+        // The DAG already stamped last_synced_date on success- reconcile the JOB
+        // status only, don't let this cron overwrite the DAG-owned sync date.
+        await markJobCompleted(pool, job, { detail: "Reconciled from Airflow (completion webhook missed)", stampSyncDate: false });
       } else if (state === "failed") {
         console.log(`[Queue] Stale job ${job.id} failed in Airflow; reconciling → failed`);
         await markJobFailed(pool, job, "DAG run failed (reconciled from Airflow; no completion webhook received)");

@@ -34,6 +34,15 @@ export function createAttributesRouter(pool) {
 
   const fail = (res, err) => res.status(500).json({ error: String(err.message || err) });
 
+  // Parse a single UUID or comma-separated UUID list (query or body) → array | null.
+  const UUID_RE = /^[0-9a-fA-F-]{32,36}$/;
+  const parseUuidList = (v) => {
+    if (Array.isArray(v)) { const a = v.filter((x) => UUID_RE.test(x)); return a.length ? a : null; }
+    if (!v) return null;
+    const a = String(v).split(",").map((s) => s.trim()).filter((s) => UUID_RE.test(s));
+    return a.length ? a : null;
+  };
+
   // ── Static routes (declared before "/:id" so they aren't shadowed) ──
 
   // Crawl source + controls shown on the Content tab.
@@ -771,16 +780,25 @@ export function createAttributesRouter(pool) {
         return res.json({ pages: rows, summary: { new_pages: 0, new_labels: 0 } });
       }
       const onlyNew = req.query.filter === "new";
+      // Multi-select attribute / value filters (comma-separated). Falls back to the
+      // legacy single attribute_id. When either is present the feed is "tag-filtered":
+      // only pages carrying a matching tag are returned; the client shows just those
+      // tags and computes needs-review from them (so the page-level "new" HAVING is
+      // skipped here - it would mix in pages new for OTHER attributes).
+      const attrIds = parseUuidList(req.query.attribute_ids) || (attributeId ? [attributeId] : null);
+      const valueIds = parseUuidList(req.query.value_ids);
+      const tagFiltered = !!(attrIds || valueIds);
       const params = [req.companyId];
       let where = "wp.company_id = $1 AND wp.is_excluded = false";
-      // Filter to pages carrying at least one tag from a given attribute.
-      if (attributeId) {
-        params.push(attributeId);
-        where += ` AND EXISTS (SELECT 1 FROM app.page_attribute_values x WHERE x.page_id = wp.id AND x.attribute_id = $${params.length})`;
+      if (tagFiltered) {
+        where += ` AND EXISTS (SELECT 1 FROM app.page_attribute_values pm WHERE pm.page_id = wp.id`;
+        if (attrIds)  { params.push(attrIds);  where += ` AND pm.attribute_id = ANY($${params.length}::uuid[])`; }
+        if (valueIds) { params.push(valueIds); where += ` AND pm.attribute_value_id = ANY($${params.length}::uuid[])`; }
+        where += `)`;
       }
       if (search) { params.push(`%${search}%`); where += ` AND (wp.url ILIKE $${params.length} OR wp.title ILIKE $${params.length})`; }
       let having = "";
-      if (onlyNew) {
+      if (onlyNew && !tagFiltered) {
         having = `HAVING wp.last_reviewed_date IS NULL
                   OR MAX(pav.created_date) > wp.last_reviewed_date`;
       }
@@ -848,8 +866,48 @@ export function createAttributesRouter(pool) {
     const search = String(b.search || req.query.search || "").trim();
     const attributeId = /^[0-9a-fA-F-]{32,36}$/.test(b.attribute_id || req.query.attribute_id || "")
       ? (b.attribute_id || req.query.attribute_id) : null;
+    const attrIds = parseUuidList(b.attribute_ids ?? req.query.attribute_ids) || (attributeId ? [attributeId] : null);
+    const valueIds = parseUuidList(b.value_ids ?? req.query.value_ids);
     try {
-      // Verify an explicit selection.
+      // TAG-LEVEL verify (an attribute/value filter is active): verify ONLY the
+      // matching tags, not the whole page. Verifying a tag = approving its value
+      // (the app's "a tag is verified when its value is approved" model), so we
+      // approve the distinct matching values on the in-scope pages. Other attributes'
+      // tags on those pages stay pending. Scope is optionally narrowed by page_ids
+      // (Verify selected) and/or search.
+      if (attrIds || valueIds) {
+        const p = [req.companyId];
+        let pageWhere = "wp.company_id = $1 AND wp.is_excluded = false";
+        if (pageIds) { if (!pageIds.length) return res.json({ ok: true, verified: 0, mode: "tags" }); p.push(pageIds); pageWhere += ` AND wp.id = ANY($${p.length}::uuid[])`; }
+        if (search)  { p.push(`%${search}%`); pageWhere += ` AND (wp.url ILIKE $${p.length} OR wp.title ILIKE $${p.length})`; }
+        let tagWhere = "";
+        if (attrIds)  { p.push(attrIds);  tagWhere += ` AND pav.attribute_id = ANY($${p.length}::uuid[])`; }
+        if (valueIds) { p.push(valueIds); tagWhere += ` AND pav.attribute_value_id = ANY($${p.length}::uuid[])`; }
+        const { rows } = await pool.query(
+          `WITH tgt AS (
+             SELECT DISTINCT COALESCE(av.merged_into, av.id) AS vid
+             FROM app.page_attribute_values pav
+             JOIN app.web_pages wp        ON wp.id = pav.page_id
+             JOIN app.attribute_values av ON av.id = pav.attribute_value_id
+             WHERE ${pageWhere}${tagWhere}
+           )
+           UPDATE app.attribute_values v
+           SET is_approved = true, is_exception = false, updated_date = NOW()
+           WHERE v.company_id = $1 AND v.id IN (SELECT vid FROM tgt)
+             AND v.is_approved = false AND v.is_blocked = false AND v.merged_into IS NULL
+           RETURNING v.attribute_id`,
+          p
+        );
+        const affected = [...new Set(rows.map((r) => r.attribute_id))];
+        if (affected.length) {
+          try { await repropagate(pool, req.companyId, affected); }
+          catch (e) { console.error("[attr] repropagate after tag verify failed:", e.message); }
+        }
+        // Approving values may fully-verify pages whose every tag is now approved.
+        await markFullyApprovedPagesReviewed(req.companyId);
+        return res.json({ ok: true, verified: rows.length, mode: "tags" });
+      }
+      // Verify an explicit selection (page-level).
       if (pageIds) {
         if (!pageIds.length) return res.json({ ok: true, verified: 0 });
         const { rowCount } = await pool.query(

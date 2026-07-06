@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { format, parseISO, isValid, differenceInCalendarDays } from "date-fns";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 
 const TABS = [
   { key: "customer", label: "Customers", icon: UserCheck },
@@ -89,6 +90,7 @@ function RecencyBadge({ value, t }) {
 // Review queue for likely-duplicate profiles (same email/phone, different ids).
 function MergeCandidatesDialog({ open, onOpenChange }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ["merge-candidates"], queryFn: () => appClient.profiles.mergeCandidates("pending"), enabled: open });
   const dismiss = useMutation({
@@ -116,7 +118,7 @@ function MergeCandidatesDialog({ open, onOpenChange }) {
                   <div className="bg-secondary/40 rounded px-2 py-1.5"><p className="font-medium truncate">{c.name_b}</p><p className="text-muted-foreground font-mono text-[10px] truncate">{c.member_id_b} · {c.source_b}</p></div>
                 </div>
                 <div className="flex justify-end mt-2">
-                  <button onClick={() => dismiss.mutate(c.id)} disabled={dismiss.isPending} className="text-[11px] text-muted-foreground hover:text-foreground">{t("Not a duplicate")}</button>
+                  <button onClick={() => dismiss.mutate(c.id)} disabled={dismiss.isPending || !canWrite} className={`text-[11px] text-muted-foreground hover:text-foreground ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}>{t("Not a duplicate")}</button>
                 </div>
               </div>
             ))}
@@ -411,6 +413,7 @@ function InsightsBlock({ type, id }) {
 
 function CustomerCard({ profile, onDelete }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const hasGa = Number(profile.ga_sessions) > 0;
@@ -482,7 +485,8 @@ function CustomerCard({ profile, onDelete }) {
                   <span className="text-[11px] text-muted-foreground">{t("Delete?")}</span>
                   <button
                     onClick={() => { onDelete(profile.member_id); setConfirmDelete(false); }}
-                    className="text-[11px] text-destructive hover:underline font-medium"
+                    disabled={!canWrite}
+                    className={`text-[11px] text-destructive hover:underline font-medium ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
                   >{t("Yes")}</button>
                   <button
                     onClick={() => setConfirmDelete(false)}
@@ -492,8 +496,9 @@ function CustomerCard({ profile, onDelete }) {
               ) : (
                 <button
                   onClick={() => setConfirmDelete(true)}
-                  className="text-muted-foreground hover:text-destructive transition-colors"
-                  title={t("Delete imported profile")}
+                  disabled={!canWrite}
+                  className={`text-muted-foreground hover:text-destructive transition-colors ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
+                  title={!canWrite ? t("Viewers can't make changes") : t("Delete imported profile")}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -965,6 +970,7 @@ function criteriaToChips(crit) {
 
 export default function Profiles() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [activeTab, setActiveTab] = useState("customer");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -1203,11 +1209,12 @@ export default function Profiles() {
           {activeTab === "customer" && (
             <div className="flex items-center gap-2">
               {dupCount > 0 && (
-                <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setMergeOpen(true)}>
+                <Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined} onClick={() => setMergeOpen(true)}>
                   <GitMerge className="w-3.5 h-3.5" /> {t("Duplicates")} <span className="text-[10px] text-muted-foreground">{dupCount}</span>
                 </Button>
               )}
               <Button size="sm" className="h-9 gap-1.5"
+                disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                 onClick={() => setImportOpen(true)}>
                 <Upload className="w-3.5 h-3.5" /> {t("Import Profiles")}
               </Button>
@@ -1466,6 +1473,7 @@ export default function Profiles() {
             {hasActiveFilters && (
               <Button
                 variant="outline" size="sm" className="h-9 gap-1.5"
+                disabled={!canWrite} title={!canWrite ? t("Viewers can't make changes") : undefined}
                 onClick={() => {
                   const chips = [...criteriaToChips(filtersToSegmentCriteria(isCustomer ? custFilters : anonFilters, isCustomer)), ...attrChips];
                   setSegmentDesc(chips.length ? `Criteria: ${chips.join(", ")}.` : "");
@@ -1697,7 +1705,7 @@ export default function Profiles() {
             </div>
             <Button
               className="w-full"
-              disabled={!segmentName.trim() || saveSegmentMutation.isPending}
+              disabled={!segmentName.trim() || saveSegmentMutation.isPending || !canWrite}
               onClick={handleSaveSegment}
             >
               {saveSegmentMutation.isPending ? t("Saving…") : t("Create Segment")}

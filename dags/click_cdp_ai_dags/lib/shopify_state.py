@@ -48,11 +48,12 @@ def _end_token():
 def resolve_start_window(client, dataset, conn_kwargs=None, is_trial=False):
     """Return ``(str_start, str_end)`` for the Shopify ``updated_at`` filter.
 
-    First-run backfill depth depends on the account type:
-      - non-trial (contracted) -> from epoch (all history)
-      - trial                  -> the default 2-month floor (pg_state)
-    Both resume incrementally from the watermark once one exists, so this only
+    First-run backfill pulls ALL history from epoch for EVERY account (trial or
+    contracted) - the whole order history is imported on the first sync. Runs
+    then resume incrementally from the watermark once one exists, so this only
     affects the very first run. ``stock_quant`` is always a FULL snapshot.
+    (``is_trial`` is retained for call-site compatibility; it no longer caps the
+    backfill window.)
     """
     yesterday = _end_token()
     str_end = yesterday.strftime("%Y-%m-%d+16:00:00")
@@ -61,12 +62,8 @@ def resolve_start_window(client, dataset, conn_kwargs=None, is_trial=False):
         return "1970-01-01+00:00:00", str_end
 
     from dags.click_cdp_ai_dags.lib import pg_state
-    # Non-trial accounts backfill all history on the first run; trial accounts
-    # get a 2-month floor (first day of the month, 2 months back).
-    if is_trial:
-        first_run_start = pg_state._month_start_back(date.today(), 2)
-    else:
-        first_run_start = date(1970, 1, 1)
+    # Every account backfills its full history on the first run (from epoch).
+    first_run_start = date(1970, 1, 1)
     start_date = pg_state.resolve_start_date(
         client, dataset,
         conn_kwargs=conn_kwargs,

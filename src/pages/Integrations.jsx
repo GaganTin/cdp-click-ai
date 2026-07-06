@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { usePreferences } from "@/lib/PreferencesContext";
+import { useRole } from "@/lib/useRole";
 import PageGuide from "@/components/PageGuide";
 
 const GA_EDITOR_EMAILS = [
@@ -132,7 +133,7 @@ const INTEGRATIONS = [
     category: "eCommerce",
     Icon: ShoppingBag,
     syncable: true,
-    firstSyncNote: "Your first sync imports your entire order history (trial accounts are limited to the last 2 months). After that, data refreshes automatically once a day.",
+    firstSyncNote: "Your first sync imports your entire order history. After that, data refreshes automatically once a day.",
     fields: [
       { key: "storeName",    label: "Store Name",    placeholder: "storename123 (without .myshopify.com)", type: "text",     hint: "Settings → Store details → your myshopify.com subdomain." },
       { key: "accessToken",  label: "Access Token",  placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",       type: "password", hint: "Settings → Apps → Develop Apps → your app → Install App → \"Reveal & Copy Token\"" },
@@ -390,6 +391,7 @@ function InstructionStep({ step, index }) {
 // ── WordPress Plugin Install panel ────────────────────────────────────────────
 function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [copied, setCopied] = useState(false);
 
   const { data: activityData } = useQuery({
@@ -475,7 +477,7 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
       </div>
 
       {!isConnected ? (
-        <Button size="sm" className="w-full h-8 text-xs" onClick={() => onConnect({})} disabled={isLoading}>
+        <Button size="sm" className="w-full h-8 text-xs" onClick={() => onConnect({})} disabled={isLoading || !canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
           {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
           {t("Mark as Installed")}
         </Button>
@@ -491,6 +493,7 @@ function WordPressPluginInstall({ isConnected, onConnect, isLoading }) {
 // ── Connection form ────────────────────────────────────────────────────────────
 function ConnectionForm({ integration, record, onConnect, isLoading }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [form, setForm] = useState(() =>
     Object.fromEntries((integration.fields || []).map((f) => [
       f.key,
@@ -536,7 +539,7 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
             <p className="text-xs text-muted-foreground">{record.connection_error || t("Connection failed.")}</p>
           </div>
         )}
-        <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5" disabled={isLoading || !form[integration.fields[0]?.key]}>
+        <Button type="submit" size="sm" className="w-full h-8 text-xs gap-1.5" disabled={isLoading || !form[integration.fields[0]?.key] || !canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
           {isLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
           {t("Install CDP App")}
         </Button>
@@ -587,7 +590,8 @@ function ConnectionForm({ integration, record, onConnect, isLoading }) {
       ) : (
         <Button
           type="submit" size="sm" className="w-full h-8 text-xs"
-          disabled={isLoading || integration.fields.some((f) => !form[f.key]?.trim())}
+          disabled={isLoading || integration.fields.some((f) => !form[f.key]?.trim()) || !canWrite}
+          title={!canWrite ? "Viewers can't make changes" : undefined}
         >
           {isLoading && <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />}
           {record?.is_connection_error ? t("Retry Connection") : t("Connect")}
@@ -685,6 +689,7 @@ function AuditLogList({ type }) {
 // ── Integration card ───────────────────────────────────────────────────────────
 function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDisconnect, isRetesting }) {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const status = integration.comingSoon ? "disconnected" : getStatus(record);
   const isConnected = ["connected", "synced", "syncing", "sync_failed"].includes(status);
 
@@ -790,14 +795,15 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
                 variant="ghost" size="sm"
                 className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0"
                 onClick={onRetest}
-                disabled={isRetesting || status === "syncing"}
+                disabled={isRetesting || status === "syncing" || !canWrite}
+                title={!canWrite ? "Viewers can't make changes" : undefined}
               >
                 {isRetesting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ShieldCheck className="w-3 h-3" />}
                 {isRetesting ? t("Testing…") : t("Re-test")}
               </Button>
             )}
             {integration.syncable && (status === "connected" || status === "sync_failed") && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSync}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={onSync} disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
                 <RefreshCw className="w-3 h-3" /> {t("Sync Data")}
               </Button>
             )}
@@ -815,7 +821,7 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
               </span>
             )}
             {(isConnected || status === "error") && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground ml-auto flex-shrink-0" onClick={onDisconnect}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1 px-2 text-muted-foreground hover:text-foreground ml-auto flex-shrink-0" onClick={onDisconnect} disabled={!canWrite} title={!canWrite ? "Viewers can't make changes" : undefined}>
                 <Unplug className="w-3 h-3" /> {t("Disconnect")}
               </Button>
             )}
@@ -829,6 +835,7 @@ function IntegrationCard({ integration, record, onSetup, onSync, onRetest, onDis
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function Integrations() {
   const { t } = usePreferences();
+  const { canWrite } = useRole();
   const [search, setSearch]                 = useState("");
   const [activeIntegration, setActiveIntegration] = useState(null);
   const [sheetTab, setSheetTab]             = useState("instructions");
@@ -1160,7 +1167,8 @@ export default function Integrations() {
                             <Button
                               variant="outline" size="sm" className="h-7 text-xs gap-1.5"
                               onClick={() => syncMutation.mutate(activeIntegration.id)}
-                              disabled={syncMutation.isPending || getStatus(activeRecord) === "syncing"}
+                              disabled={syncMutation.isPending || getStatus(activeRecord) === "syncing" || !canWrite}
+                              title={!canWrite ? "Viewers can't make changes" : undefined}
                             >
                               {syncMutation.isPending
                                 ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -1220,7 +1228,8 @@ export default function Integrations() {
             <AlertDialogAction
               onClick={() => disconnectMutation.mutate(disconnectTarget)}
               className="bg-foreground text-background hover:bg-foreground/90"
-              disabled={disconnectMutation.isPending}
+              disabled={disconnectMutation.isPending || !canWrite}
+              title={!canWrite ? "Viewers can't make changes" : undefined}
             >
               {disconnectMutation.isPending && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
               {t("Disconnect")}

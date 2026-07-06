@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useRole } from "@/lib/useRole";
 
 const EMPTY = { name: "", base_url: "", utm_source: "", utm_medium: "", utm_campaign: "", utm_term: "", utm_content: "", status: "draft" };
 
@@ -50,6 +51,7 @@ function splitUrl(url = "") {
 }
 
 export default function UTMForm({ initialValues, onSubmit, isPending, submitLabel = "Save", sourceOptions = [], mediumOptions = [] }) {
+  const { canWrite } = useRole();
   const [form, setForm] = useState(initialValues || EMPTY);
   const initUrl = splitUrl((initialValues || EMPTY).base_url);
   const [protocol, setProtocol] = useState(initUrl.protocol);
@@ -161,7 +163,7 @@ export default function UTMForm({ initialValues, onSubmit, isPending, submitLabe
           <p className="text-xs break-all font-mono">{buildUTMUrl(form)}</p>
         </div>
       )}
-      <Button onClick={() => onSubmit(form)} disabled={!form.name || isPending} className="w-full">
+      <Button onClick={() => onSubmit(form)} disabled={!form.name || isPending || !canWrite} className="w-full">
         {submitLabel}
       </Button>
     </div>

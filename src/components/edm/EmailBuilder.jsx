@@ -9,6 +9,7 @@ import {
   GripVertical, SlidersHorizontal, Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRole } from "@/lib/useRole";
 import { DEFAULT_EMAIL_CONTAINER } from "./emailHtml";
 
 // ── Block definitions ──────────────────────────────────────────────────────────
@@ -468,6 +469,7 @@ export default function EmailBuilder({
   blocks, onChange, htmlMode, onHtmlModeChange, rawHtml, onRawHtmlChange, onOpenTemplatePicker,
   container, onContainerChange,
 }) {
+  const { canWrite } = useRole();
   const [selectedId, setSelectedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [preview, setPreview] = useState("desktop");
@@ -579,9 +581,9 @@ export default function EmailBuilder({
         <div style={{ flex: 1, overflowY: "auto", padding: 10 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {Object.entries(BLOCK_DEFS).map(([type, def]) => (
-              <button key={type} onClick={() => addBlock(type)}
-                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "8px 6px 7px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", transition: "all 0.15s" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#93c5fd"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(59,130,246,0.12)"; }}
+              <button key={type} onClick={() => addBlock(type)} disabled={!canWrite}
+                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "8px 6px 7px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", cursor: canWrite ? "pointer" : "not-allowed", opacity: canWrite ? 1 : 0.5, transition: "all 0.15s" }}
+                onMouseEnter={e => { if (!canWrite) return; e.currentTarget.style.borderColor = "#93c5fd"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(59,130,246,0.12)"; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.boxShadow = "none"; }}>
                 <BlockThumb type={type} />
                 <span style={{ fontSize: 10, fontWeight: 500, color: "#64748b" }}>{def.label}</span>
@@ -666,7 +668,7 @@ export default function EmailBuilder({
                     return (
                       <div key={block.id}
                         className="group"
-                        draggable={!isEditing}
+                        draggable={!isEditing && canWrite}
                         onDragStart={() => { setDragId(block.id); setEditingId(null); }}
                         onDragEnter={() => setOverId(block.id)}
                         onDragOver={e => e.preventDefault()}
@@ -693,20 +695,20 @@ export default function EmailBuilder({
                           <span style={{ fontSize: 9, color: "#94a3b8", padding: "3px 7px", borderRight: "1px solid #f1f5f9", fontWeight: 600, whiteSpace: "nowrap" }}>
                             {BLOCK_DEFS[block.type]?.label}
                           </span>
-                          <button title="Move up" disabled={i === 0} onClick={() => moveBlock(block.id, -1)}
-                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: i === 0 ? "not-allowed" : "pointer", opacity: i === 0 ? 0.3 : 1, display: "flex", alignItems: "center" }}>
+                          <button title="Move up" disabled={i === 0 || !canWrite} onClick={() => moveBlock(block.id, -1)}
+                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: (i === 0 || !canWrite) ? "not-allowed" : "pointer", opacity: (i === 0 || !canWrite) ? 0.3 : 1, display: "flex", alignItems: "center" }}>
                             <ChevronUp style={{ width: 12, height: 12, color: "#64748b" }} />
                           </button>
-                          <button title="Move down" disabled={i === blocks.length - 1} onClick={() => moveBlock(block.id, 1)}
-                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: i === blocks.length - 1 ? "not-allowed" : "pointer", opacity: i === blocks.length - 1 ? 0.3 : 1, display: "flex", alignItems: "center" }}>
+                          <button title="Move down" disabled={i === blocks.length - 1 || !canWrite} onClick={() => moveBlock(block.id, 1)}
+                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: (i === blocks.length - 1 || !canWrite) ? "not-allowed" : "pointer", opacity: (i === blocks.length - 1 || !canWrite) ? 0.3 : 1, display: "flex", alignItems: "center" }}>
                             <ChevronDown style={{ width: 12, height: 12, color: "#64748b" }} />
                           </button>
-                          <button title="Duplicate" onClick={() => duplicateBlock(block.id)}
-                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center" }}>
+                          <button title="Duplicate" disabled={!canWrite} onClick={() => duplicateBlock(block.id)}
+                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: canWrite ? "pointer" : "not-allowed", opacity: canWrite ? 1 : 0.3, display: "flex", alignItems: "center" }}>
                             <Copy style={{ width: 12, height: 12, color: "#64748b" }} />
                           </button>
-                          <button title="Delete" onClick={() => removeBlock(block.id)}
-                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", borderLeft: "1px solid #f1f5f9" }}>
+                          <button title="Delete" disabled={!canWrite} onClick={() => removeBlock(block.id)}
+                            style={{ padding: "4px 5px", border: "none", background: "transparent", cursor: canWrite ? "pointer" : "not-allowed", opacity: canWrite ? 1 : 0.3, display: "flex", alignItems: "center", borderLeft: "1px solid #f1f5f9" }}>
                             <Trash2 style={{ width: 12, height: 12, color: "#ef4444" }} />
                           </button>
                         </div>

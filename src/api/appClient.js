@@ -535,10 +535,11 @@ export const appClient = {
       request("/attributes/values/bulk", { method: "POST", body: JSON.stringify({ value_ids, action, ...extra }) }),
     valuePages: (valueId) => request(`/attributes/values/${valueId}/pages`),
     review: () => request("/attributes/review"),
-    taggedPages: (filter, { attribute_id, search } = {}) => {
+    taggedPages: (filter, { attribute_ids, value_ids, search } = {}) => {
       const p = new URLSearchParams();
       if (filter) p.set("filter", filter);
-      if (attribute_id) p.set("attribute_id", attribute_id);
+      if (attribute_ids?.length) p.set("attribute_ids", attribute_ids.join(","));
+      if (value_ids?.length) p.set("value_ids", value_ids.join(","));
       if (search) p.set("search", search);
       const q = p.toString();
       return request(`/attributes/tagged-pages${q ? `?${q}` : ""}`);

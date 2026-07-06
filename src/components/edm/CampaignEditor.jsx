@@ -13,6 +13,7 @@ import { appClient } from "@/api/appClient";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useRole } from "@/lib/useRole";
 import { DevicePreviewToggle, DevicePreviewFrame } from "@/components/ui/device-preview";
 import EmailBuilder, { blocksToHtml, DEFAULT_EMAIL_CONTAINER } from "./EmailBuilder";
 
@@ -210,6 +211,7 @@ function TemplatePicker({ open, onClose, onApply }) {
 
 // ── Test send modal ───────────────────────────────────────────────────────────
 function TestSendModal({ open, onClose, campaignState }) {
+  const { canWrite } = useRole();
   const [email, setEmail] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -263,7 +265,12 @@ function TestSendModal({ open, onClose, campaignState }) {
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={send} disabled={sending}>
+            <Button
+              size="sm"
+              onClick={send}
+              disabled={sending || !canWrite}
+              title={!canWrite ? "Viewers can't make changes" : undefined}
+            >
               {sending ? "Sending..." : "Send Test"}
             </Button>
           </div>
@@ -275,6 +282,7 @@ function TestSendModal({ open, onClose, campaignState }) {
 
 // ── Main editor ───────────────────────────────────────────────────────────────
 export default function CampaignEditor({ open, onClose, onSave, initial = null }) {
+  const { canWrite } = useRole();
   // Only a real saved campaign has an id - AI suggestions passed as initial are treated as new
   const isEdit = !!initial?.id;
 
@@ -550,6 +558,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                 size="sm"
                 className="h-8 gap-1.5 text-xs"
                 onClick={() => setTestOpen(true)}
+                disabled={!canWrite}
+                title={!canWrite ? "Viewers can't make changes" : undefined}
               >
                 <FlaskConical className="w-3.5 h-3.5" />
                 Send Test
@@ -557,7 +567,13 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
               <Button variant="outline" size="sm" className="h-8 text-xs" onClick={onClose}>
                 Cancel
               </Button>
-              <Button size="sm" className="h-8 text-xs" onClick={handleSave} disabled={saving}>
+              <Button
+                size="sm"
+                className="h-8 text-xs"
+                onClick={handleSave}
+                disabled={saving || !canWrite}
+                title={!canWrite ? "Viewers can't make changes" : undefined}
+              >
                 {saving ? "Saving..." : isEdit ? "Save Changes" : "Save as Draft"}
               </Button>
             </div>
@@ -839,7 +855,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                             Add one or more scheduled times. The earliest upcoming time activates the campaign.
                           </p>
                         </div>
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs flex-shrink-0" onClick={addSchedule}>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs flex-shrink-0" onClick={addSchedule} disabled={!canWrite}>
                           <Plus className="w-3.5 h-3.5" /> Add Time
                         </Button>
                       </div>
@@ -869,7 +885,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                           />
                           <button
                             onClick={() => removeSchedule(s.id)}
-                            className="p-1.5 text-muted-foreground hover:text-destructive rounded flex-shrink-0"
+                            disabled={!canWrite}
+                            className={`p-1.5 text-muted-foreground hover:text-destructive rounded flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -897,7 +914,7 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                             This email fires when any of these member events occur. Each trigger fires independently.
                           </p>
                         </div>
-                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs flex-shrink-0" onClick={addEvent}>
+                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs flex-shrink-0" onClick={addEvent} disabled={!canWrite}>
                           <Plus className="w-3.5 h-3.5" /> Add Trigger
                         </Button>
                       </div>
@@ -947,7 +964,8 @@ export default function CampaignEditor({ open, onClose, onSave, initial = null }
                             </div>
                             <button
                               onClick={() => removeEvent(ev.id)}
-                              className="p-1.5 text-muted-foreground hover:text-destructive rounded flex-shrink-0"
+                              disabled={!canWrite}
+                              className={`p-1.5 text-muted-foreground hover:text-destructive rounded flex-shrink-0 ${!canWrite ? "opacity-50 pointer-events-none" : ""}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
