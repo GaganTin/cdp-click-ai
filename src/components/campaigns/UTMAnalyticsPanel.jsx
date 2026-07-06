@@ -6,9 +6,8 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area,
 } from "recharts";
-import { Plus, Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap, TrendingUp, TrendingDown, MessageSquare } from "lucide-react";
+import { Maximize2, Minimize2, X, Filter, ArrowUp, ArrowDown, ArrowUpDown, Info, Activity, Users, UserPlus, LogOut, Zap, TrendingUp, TrendingDown, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ChartExplainer from "@/components/dashboard/ChartExplainer";
 import TableToolbar from "@/components/ui/TableToolbar";
 import { KpiTile, Delta, sumValues } from "@/components/analytics/AnalyticsKit";
@@ -178,26 +177,6 @@ function renderChart(chartType, dataKey, current, prev, showCompare, theme) {
   return null;
 }
 
-// ── Chart types / data keys ───────────────────────────────────────────────────
-const CHART_TYPES = [
-  { key: "bar",            label: "Bar Chart" },
-  { key: "horizontal-bar", label: "Horizontal Bar" },
-  { key: "pie",            label: "Pie Chart" },
-  { key: "line",           label: "Line Chart" },
-  { key: "area",           label: "Area Chart" },
-];
-
-const DATA_KEYS = [
-  { key: "source",     label: "Sessions by Source" },
-  { key: "medium",     label: "Sessions by Medium" },
-  { key: "campaign",   label: "Sessions by Campaign" },
-  { key: "daily",      label: "Sessions Trend" },
-  { key: "bounce",     label: "Bounce Rate by Source (%)" },
-  { key: "engagement", label: "Engagement Rate by Source (%)" },
-  { key: "device",     label: "Sessions by Device" },
-  { key: "country",    label: "Top Countries" },
-];
-
 const DEFAULT_CHARTS = [
   { id: "1", title: "Sessions by Source",    dataKey: "source",     chartType: "bar",            size: "normal" },
   { id: "2", title: "Sessions by Device",    dataKey: "device",     chartType: "pie",            size: "normal" },
@@ -207,51 +186,6 @@ const DEFAULT_CHARTS = [
   { id: "6", title: "Sessions by Medium",    dataKey: "medium",     chartType: "bar",            size: "normal" },
   { id: "7", title: "Top Countries",         dataKey: "country",    chartType: "horizontal-bar", size: "normal" },
 ];
-
-// ── Chart edit dialog ─────────────────────────────────────────────────────────
-function ChartEditDialog({ chart, onSave, onClose }) {
-  const [title, setTitle] = useState(chart?.title || "");
-  const [dataKey, setDataKey] = useState(chart?.dataKey || "source");
-  const [chartType, setChartType] = useState(chart?.chartType || "bar");
-  const isNew = !chart?.id;
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="font-heading">{isNew ? "Add Chart" : "Edit Chart"}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 pt-1">
-          <div>
-            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Title</label>
-            <input value={title} onChange={e => setTitle(e.target.value)}
-              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-transparent outline-none focus:ring-1 focus:ring-ring" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Data</label>
-            <select value={dataKey} onChange={e => setDataKey(e.target.value)}
-              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background outline-none focus:ring-1 focus:ring-ring">
-              {DATA_KEYS.map(d => <option key={d.key} value={d.key}>{d.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground block mb-1.5">Chart Type</label>
-            <select value={chartType} onChange={e => setChartType(e.target.value)}
-              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background outline-none focus:ring-1 focus:ring-ring">
-              {CHART_TYPES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-            </select>
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            <Button size="sm" onClick={() => onSave({ title: title || DATA_KEYS.find(d => d.key === dataKey)?.label, dataKey, chartType })}>
-              {isNew ? "Add Chart" : "Save"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function UTMAnalyticsPanel() {
@@ -274,7 +208,6 @@ export default function UTMAnalyticsPanel() {
   const paramFilterRef = useRef(null);
 
   const [charts, setCharts] = useState(DEFAULT_CHARTS);
-  const [addingNew, setAddingNew] = useState(false);
 
   const [curData,  setCurData]  = useState({});
   const [prevData, setPrevData] = useState({});
@@ -365,19 +298,6 @@ export default function UTMAnalyticsPanel() {
       setLoadingVals(false);
     });
   }, [showParamFilter]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleAddNew = (updates) => {
-    setCharts(prev => [...prev, { id: Date.now().toString(), size: "normal", ...updates }]);
-    setAddingNew(false);
-    if (!curData[updates.dataKey]) {
-      fetchChart(updates.dataKey, new Date(curStart), new Date(curEnd), paramFilters)
-        .then(rows => setCurData(prev => ({ ...prev, [updates.dataKey]: rows })));
-      if (compare) {
-        fetchChart(updates.dataKey, new Date(prevStart), new Date(prevEnd), paramFilters)
-          .then(rows => setPrevData(prev => ({ ...prev, [updates.dataKey]: rows })));
-      }
-    }
-  };
 
   const handleDelete = (id) => setCharts(prev => prev.filter(c => c.id !== id));
   const toggleSize   = (id) => setCharts(prev => prev.map(c => c.id === id ? { ...c, size: c.size === "wide" ? "normal" : "wide" } : c));
@@ -559,15 +479,7 @@ export default function UTMAnalyticsPanel() {
             }
           </div>
         ))}
-
-        <button onClick={() => setAddingNew(true)}
-          className="col-span-1 border-2 border-dashed border-border rounded-lg p-5 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-foreground hover:text-foreground transition-colors min-h-[160px]">
-          <Plus className="w-5 h-5" />
-          <span className="text-xs font-medium">Add Chart</span>
-        </button>
       </div>
-
-      {addingNew && <ChartEditDialog chart={null} onSave={handleAddNew} onClose={() => setAddingNew(false)} />}
     </div>
   );
 }

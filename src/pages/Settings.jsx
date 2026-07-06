@@ -196,6 +196,9 @@ function ImageUploadField({ value, onChange, shape = "circle" }) {
 
 function ProfileTab({ user, onRefresh }) {
   const { t } = usePreferences();
+  // Role is per-workspace, so it reflects the currently-active company.
+  const { currentCompany } = useAuth();
+  const { role, isOwner } = useRole();
   const [form, setForm] = useState({ full_name: user?.full_name || "", avatar_url: user?.avatar_url || "" });
   const [saving, setSaving] = useState(false);
 
@@ -266,6 +269,16 @@ function ProfileTab({ user, onRefresh }) {
             <p className="font-medium text-sm">{user?.full_name || t("No name set")}</p>
             <p className="text-xs text-muted-foreground">{user?.email}</p>
           </div>
+          {role && (
+            <div className="flex flex-col items-center gap-1">
+              <RoleBadge role={role} isOwner={isOwner} />
+              {currentCompany?.name && (
+                <span className="text-[11px] text-muted-foreground">
+                  {t("Your role in")} {currentCompany.name}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="space-y-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">

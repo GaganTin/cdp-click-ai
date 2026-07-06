@@ -687,7 +687,7 @@ function FilterProfilesCard({ data, onApply }) {
   );
 }
 
-export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor, onCreateAttribute, onCreatePopup, onCreatePopupTemplate, onFilterProfiles }) {
+export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor, onCreateAttribute, onCreatePopup, onCreatePopupTemplate, onFilterProfiles, hasConnectedSources }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
@@ -768,16 +768,30 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
         && sortedData.some(d => seriesKeys.some(k => { const v = Number(d?.[k]); return Number.isFinite(v) && v !== 0; }));
 
       if (!hasRealData) {
+        // Only steer the user to Integrations when we actually KNOW no source is
+        // connected. If a source is connected (or status is still loading), don't
+        // tell them to connect - explain what data must exist for this to populate.
+        const knowsDisconnected = hasConnectedSources === false;
         return (
           <div key={key} className="my-4 border border-dashed border-border rounded-lg px-4 py-6 text-center bg-background">
             <p className="text-xs font-medium text-muted-foreground">No data available for “{chartConfig.title || "this chart"}”</p>
-            <p className="text-[11px] text-muted-foreground/70 mt-1">There aren't any matching records in your database yet, so there's nothing to chart.</p>
-            <Link
-              to="/integrations"
-              className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-medium text-foreground border border-border rounded-md px-2.5 py-1 hover:bg-secondary/50 transition-colors"
-            >
-              <Plug className="w-3 h-3" /> Connect a data source
-            </Link>
+            {knowsDisconnected ? (
+              <>
+                <p className="text-[11px] text-muted-foreground/70 mt-1">There aren't any matching records in your database yet, so there's nothing to chart.</p>
+                <Link
+                  to="/integrations"
+                  className="inline-flex items-center gap-1.5 mt-3 text-[11px] font-medium text-foreground border border-border rounded-md px-2.5 py-1 hover:bg-secondary/50 transition-colors"
+                >
+                  <Plug className="w-3 h-3" /> Connect a data source
+                </Link>
+              </>
+            ) : (
+              <p className="text-[11px] text-muted-foreground/70 mt-1">
+                Your data sources are connected, but no records match this chart yet.{" "}
+                {chartConfig.empty_hint
+                  || "This usually means the metric it needs hasn't been recorded for any profiles yet (e.g. no orders, sessions, or events in the selected period), or that web activity hasn't been identity-matched to your members. Once those records exist, this chart will populate."}
+              </p>
+            )}
           </div>
         );
       }

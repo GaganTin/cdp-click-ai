@@ -799,6 +799,8 @@ OPTIONAL time-period fields (use ONLY for time-series data where xKey holds ISO 
 • "show_delta": true - also show the % change vs the immediately preceding period (a "delta"), like the analytics pages.
 When you include these, provide enough daily data rows to cover BOTH the window and the prior window (e.g. ~60 days of data for a "30d" filter) so the delta can be computed. If the data is not date-based, omit both fields. Users can also toggle the period filter and delta on any chart manually.
 
+OPTIONAL "empty_hint" field: a one-sentence, plain-English explanation of exactly WHAT DATA MUST EXIST for this chart to populate (e.g. "This fills in once members have GA sessions matched to them" or "Needs at least one order in the selected period"). If a chart you emit could legitimately be empty/all-zero, include empty_hint. The UI shows it INSTEAD of a generic "no data" message when the workspace already has a data source connected - so never tell a user with connected sources to "connect a data source"; explain what's missing instead. (Best practice is still: if a query returns no rows, don't emit the chart at all - explain in prose per NO-DATA GUIDANCE.)
+
 Then for context:
 **What this means:** [Business implication in 1-2 sentences - connect to revenue, growth, or efficiency]
 

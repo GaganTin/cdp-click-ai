@@ -94,6 +94,14 @@ export default function Analyst() {
     queryKey: ["pinnedCharts"],
     queryFn: () => appClient.entities.PinnedChart.list("-created_date", 20),
   });
+  // Whether ANY data source is connected - drives the chart empty-state so we
+  // don't tell a user to "connect a data source" when they already have one.
+  const { data: dataIntegrations = [] } = useQuery({
+    queryKey: ["data-integrations"],
+    queryFn: () => appClient.dataIntegrations.list(),
+  });
+  const hasConnectedSources = Array.isArray(dataIntegrations)
+    && dataIntegrations.some((r) => r?.is_connected && !r?.is_connection_error);
   // Existing chats - listed in the "Discuss chart" dialog so a chart can be sent
   // into any chat, not just the current one.
   const { data: analystConversations = [], refetch: refetchConversations } = useQuery({
@@ -773,6 +781,7 @@ ${JSON.stringify(chartBlock)}
                   onCreatePopup={handleCreatePopup}
                   onCreatePopupTemplate={handleCreatePopupTemplate}
                   onFilterProfiles={handleFilterProfiles}
+                  hasConnectedSources={hasConnectedSources}
                 />
               ))}
               {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
