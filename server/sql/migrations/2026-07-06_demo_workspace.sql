@@ -23,3 +23,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS companies_single_demo_idx
 -- (Studio account panel). Gates both /auth/me injection and access.
 ALTER TABLE app.accounts
   ADD COLUMN IF NOT EXISTS demo_enabled BOOLEAN NOT NULL DEFAULT true;
+
+-- Canonical display name for the demo workspace (idempotent; renames any
+-- already-provisioned demo from earlier names like "CapSuite Demo Store").
+UPDATE app.companies SET name = 'Demo Store - Mock Data'
+ WHERE is_demo = true AND name <> 'Demo Store - Mock Data';

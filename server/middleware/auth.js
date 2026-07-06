@@ -92,7 +92,7 @@ export function withCompany(pool) {
       req.companyId = companyId;
       req.isDemo = true;
       req.companyMember = { member_id: null, role: "viewer", status: "active",
-        company_name: "Demo", slug: "demo", plan: null, settings: {}, logo_url: null };
+        company_name: "Demo Store - Mock Data", slug: "demo", plan: null, settings: {}, logo_url: null };
       return next();
     }
 

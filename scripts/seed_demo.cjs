@@ -32,7 +32,7 @@ const {
 } = require("./_demo_constants.cjs");
 
 const DEMO_ACCOUNT_NAME = "Mock Data";
-const DEMO_COMPANY_NAME = "Demo Store";
+const DEMO_COMPANY_NAME = "Demo Store - Mock Data";
 const DEMO_WEBSITE      = "https://demo.capsuite.co";
 const SYSTEM_USER_EMAIL = "demo-system@capsuite.co"; // owns created_by rows; not a usable login
 

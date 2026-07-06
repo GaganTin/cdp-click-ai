@@ -114,7 +114,7 @@ export function createAdminRouter(pool) {
     try {
       const { rows } = await pool.query(`
         SELECT a.id, a.name, a.slug, a.plan, a.plan_expires_at, a.plan_upgraded_at,
-               a.is_active, a.created_date,
+               a.is_active, a.demo_enabled, a.created_date,
                ow.email AS owner_email, ow.full_name AS owner_name,
                (SELECT COUNT(*) FROM app.users u     WHERE u.account_id = a.id) AS user_count,
                (SELECT COUNT(*) FROM app.companies c WHERE c.account_id = a.id) AS workspace_count,
