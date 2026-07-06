@@ -262,7 +262,9 @@ async function appendDemoCompany(pool, companies, accountId) {
     const d = rows[0];
     if (list.some((c) => c.id === d.id)) return list;
     list.push({
-      id: d.id, name: d.name, slug: d.slug, plan: d.plan,
+      // Force the canonical demo name so the switcher is correct even if an older
+      // demo row in the DB still carries a previous name.
+      id: d.id, name: "Demo Store - Mock Data", slug: d.slug, plan: d.plan,
       plan_expires_at: null, plan_upgraded_at: null,
       is_account_owner: false, logo_url: d.logo_url,
       role: "viewer", is_demo: true, created_date: d.created_date,

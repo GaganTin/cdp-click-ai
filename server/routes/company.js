@@ -84,7 +84,7 @@ export function createCompanyRouter(pool) {
 
       // The new workspace belongs to the caller's account.
       const { rows: [u] } = await client.query(
-        "SELECT account_id FROM app.users WHERE id = $1",
+        "SELECT account_id, is_platform_admin FROM app.users WHERE id = $1",
         [req.user.id]
       );
       if (!u) {
@@ -93,13 +93,14 @@ export function createCompanyRouter(pool) {
       }
       const accountId = u.account_id;
 
-      // Enforce the plan's workspace limit (null = unlimited).
+      // Enforce the plan's workspace limit (null = unlimited). Platform admins are
+      // exempt - they may create any number of workspaces.
       const { rows: [acct] } = await client.query(
         `SELECT a.plan, p.limits FROM app.accounts a JOIN app.plans p ON p.id = a.plan WHERE a.id = $1`,
         [accountId]
       );
       const wsLimit = acct?.limits?.workspaces ?? null;
-      if (wsLimit != null) {
+      if (wsLimit != null && !u.is_platform_admin) {
         const { rows: [{ n }] } = await client.query(
           "SELECT COUNT(*)::int AS n FROM app.companies WHERE account_id = $1 AND is_active = true",
           [accountId]
