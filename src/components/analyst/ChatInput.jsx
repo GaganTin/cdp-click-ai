@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Send, Plus, Upload, Check, FileText } from "lucide-react";
+import { Send, Plus, Upload, Check, FileText, X, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { appClient } from "@/api/appClient";
@@ -21,14 +21,32 @@ export default function ChatInput({
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  // Files stay attached to the composer until the user sends, so they can add a
+  // message alongside them. Each: { name, url }.
+  const [attachments, setAttachments] = useState([]);
   const fileRef = useRef(null);
   const textareaRef = useRef(null);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!message.trim() || disabled) return;
-    onSend(message.trim());
+    if (disabled) return;
+    const text = message.trim();
+    if (!text && attachments.length === 0) return;
+    // The visible message shows each attachment as a plain "[Attached file: name]"
+    // label (no URL); the actual file_urls travel separately for the backend reader.
+    const attachLines = attachments.map((a) => `[Attached file: ${a.name}]`).join("\n");
+    const content = [text, attachLines].filter(Boolean).join("\n\n");
+    const fileUrls = attachments.map((a) => a.url);
+    const opts = {};
+    // Title a file-first new chat after the file rather than an empty string.
+    if (!text && attachments.length) opts.chatName = attachments[0].name;
+    onSend(content, fileUrls.length ? fileUrls : undefined, opts);
     setMessage("");
+    setAttachments([]);
+  };
+
+  const removeAttachment = (idx) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleFileUpload = async (e) => {
@@ -51,8 +69,9 @@ export default function ChatInput({
     setPopoverOpen(false);
     try {
       const { file_url } = await appClient.integrations.Core.UploadFile({ file });
-      // Pass a clean chat name so a file-first new chat isn't titled with raw markdown.
-      onSend(`[Attached file: ${file.name}](${file_url})`, [file_url], { chatName: file.name });
+      // Attach to the composer instead of sending - the user can add a message
+      // and then submit. The file goes out with the next send.
+      setAttachments((prev) => [...prev, { name: file.name, url: file_url }]);
     } catch (err) {
       // Surface the failure and, crucially, re-enable the + button (previously a
       // failed upload left `uploading` true forever, locking the control).
@@ -73,6 +92,32 @@ export default function ChatInput({
 
   return (
     <form onSubmit={handleSubmit} className="border-t border-border px-4 py-3 flex-shrink-0">
+      {(attachments.length > 0 || uploading) && (
+        <div className="max-w-3xl mx-auto mb-2 flex flex-wrap items-center gap-1.5">
+          {attachments.map((a, i) => (
+            <span
+              key={`${a.url}-${i}`}
+              className="inline-flex items-center gap-1.5 max-w-[240px] rounded-md border border-border bg-secondary/60 pl-2 pr-1 py-1 text-xs"
+            >
+              <FileText className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+              <span className="truncate">{a.name}</span>
+              <button
+                type="button"
+                onClick={() => removeAttachment(i)}
+                className="flex-shrink-0 rounded p-0.5 hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={`Remove ${a.name}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+          {uploading && (
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-xs text-muted-foreground">
+              <Loader2 className="w-3 h-3 animate-spin" /> Uploading…
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex items-center gap-2 max-w-3xl mx-auto">
         <input ref={fileRef} type="file" accept={ACCEPTED_EXT.join(",")} className="hidden" onChange={handleFileUpload} />
 
@@ -188,7 +233,7 @@ export default function ChatInput({
           type="submit"
           size="icon"
           className="h-9 w-9 rounded-xl flex-shrink-0"
-          disabled={!message.trim() || disabled}
+          disabled={(!message.trim() && attachments.length === 0) || disabled}
         >
           <Send className="w-4 h-4" />
         </Button>

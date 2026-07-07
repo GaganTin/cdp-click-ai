@@ -331,7 +331,10 @@ export default function Analyst() {
     const isNewConv = opts.forceNew || !targetId;
 
     if (isNewConv) {
-      const chatName = opts.chatName || (text.length > 50 ? text.slice(0, 50) + "…" : text);
+      // Store the full first message as the chat name (no baked-in "…"); the
+      // sidebar truncates visually with CSS. Collapse whitespace so the title
+      // is a single clean line.
+      const chatName = opts.chatName || text.replace(/\s+/g, " ").trim();
       conv = await startNewConversation(chatName);
     } else {
       conv = await appClient.agents.getConversation(targetId);
@@ -383,7 +386,7 @@ export default function Analyst() {
     setShowDashboard(true);
   };
 
-  const handleDownloadCSV = (csvData) => {
+  const handleDownloadCSV = (csvData, filename) => {
     // Neutralise CSV/formula injection: a cell that begins with = + - @ (or a
     // tab/CR) is executed as a formula by Excel/Sheets, so prefix it with a
     // single quote. Split on real row boundaries, guarding quoted newlines.
@@ -404,7 +407,14 @@ export default function Analyst() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `click-export-${Date.now()}.csv`;
+    // Name the file after the chart/table title (falls back to a timestamp). Strip
+    // filesystem-illegal characters and cap the length so the download always works.
+    const safeName = (filename || "")
+      .replace(/[\\/:*?"<>|\x00-\x1F]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80);
+    a.download = `${safeName || `click-export-${Date.now()}`}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success("CSV downloaded");

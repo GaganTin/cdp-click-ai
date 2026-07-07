@@ -687,6 +687,12 @@ function FilterProfilesCard({ data, onApply }) {
   );
 }
 
+// Older messages stored an attachment as a markdown link "[Attached file: name](url)".
+// Show just "[Attached file: name]" - strip the URL for both old and new messages.
+function stripAttachmentUrl(text) {
+  return (text || "").replace(/(\[Attached file:[^\]]*\])\((?:https?:\/\/|\/)[^)\s]*\)/g, "$1");
+}
+
 // Serialise rows → CSV text for the "Download CSV" buttons on chart/table cards.
 // columns: [{ key, label }]; rows: array of objects. Quotes any field containing
 // a comma, quote or newline (RFC-4180) so labels like "google / organic" survive.
@@ -714,7 +720,22 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
   const renderMarkdownTable = (tableStr, key) => {
     const lines = tableStr.trim().split("\n").filter(l => l.trim());
     if (lines.length < 2) return null;
-    const parseRow = (line) => line.split("|").map(c => c.trim()).filter((c, i, arr) => i !== 0 || c !== "").filter((c, i, arr) => i !== arr.length - 1 || c !== "");
+    const parseRow = (line) => {
+      // Scan char-by-char so an escaped pipe ("\|") inside a cell is treated as
+      // literal text, not a column separator. A backslash escapes the next char
+      // (dropping the backslash), an unescaped "|" ends the cell.
+      const s = line.trim().replace(/^\|/, "").replace(/\|$/, "");
+      const cells = [];
+      let cur = "";
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === "\\" && i + 1 < s.length) { cur += s[i + 1]; i++; continue; }
+        if (ch === "|") { cells.push(cur.trim()); cur = ""; continue; }
+        cur += ch;
+      }
+      cells.push(cur.trim());
+      return cells;
+    };
     const headers = parseRow(lines[0]);
     const rows = lines.slice(2).map(parseRow);
     return (
@@ -829,7 +850,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
               )}
             </div>
             <div className="flex items-center gap-1 flex-shrink-0">
-              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => onDownloadCSV?.(rowsToCsv(csvColumns, sortedData))}>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => onDownloadCSV?.(rowsToCsv(csvColumns, sortedData), chartConfig.title)}>
                 <Download className="w-3 h-3" /> CSV
               </Button>
               <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => onPinChart?.(displayConfig)}>
@@ -876,7 +897,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
               <p className="text-xs font-semibold text-foreground">{cfg.title || "Table"}</p>
               {cfg.description && <p className="text-[11px] text-muted-foreground mt-0.5">{cfg.description}</p>}
             </div>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onDownloadCSV?.(rowsToCsv(columns, rows))}>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onDownloadCSV?.(rowsToCsv(columns, rows), cfg.title)}>
               <Download className="w-3 h-3" /> CSV
             </Button>
           </div>
@@ -1160,7 +1181,7 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
                 <div key={seg.key} className="w-full">{renderTableCard(seg.json, seg.key)}</div>
               ) : (
                 <div key={seg.key} className="rounded-2xl px-4 py-3 bg-foreground text-background max-w-full">
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{seg.value}</p>
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{stripAttachmentUrl(seg.value)}</p>
                 </div>
               )
             )

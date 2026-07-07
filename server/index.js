@@ -53,7 +53,7 @@ app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 3001);
 const pgConn = process.env.POSTGRESQL_CONN || process.env.DATABASE_URL || "";
 
-// General-purpose upload (email images, etc.) — permissive.
+// General-purpose upload (email images, etc.) - permissive.
 const upload = multer({ dest: uploadsDir, limits: { fileSize: 25 * 1024 * 1024 } });
 const pool = pgConn ? new Pool({ connectionString: pgConn }) : null;
 // Let authenticate() invalidate tokens issued before a password change.
@@ -965,6 +965,12 @@ output one of these when it genuinely helps the user's request; never spam them.
   as extracted text. If a file shows as "not a supported format" or "no extractable text"
   (e.g. a scanned/image-only PDF), tell the user which formats you can read. You may
   propose a manual attribute or a segment derived from an uploaded list.
+  BE CONCISE about files: give a 1-2 sentence summary (what it is, row/record count, the
+  key takeaway) - NOT a field-by-field or row-by-row dump. Do NOT restate every column,
+  every value, or a long validation/mapping checklist unless the user explicitly asks for
+  that detail. If the data is quantitative, show it as a chart/table (which the user can
+  download) instead of listing numbers in prose. Lead with the answer or the single most
+  useful insight; offer deeper detail only as a short follow-up ("Want the full breakdown?").
 
 ═══ COMBINED AUDIENCE RESPONSE PATTERN ═══
 When a user asks to "build an audience for [criteria]", "suggest a segment for [audience]", "who should I target", or names a target group, follow this EXACT flow - no shortcuts. (Email campaigns are coming soon and out of scope - never draft one here; the deliverable is an analysed, saveable segment plus optional UTM tracking.)
