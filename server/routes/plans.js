@@ -4,7 +4,7 @@ import { authenticate, requirePlatformAdmin } from "../middleware/auth.js";
 // Fallback used when DB is not available - mirrors the DB seed exactly.
 // Three tiers: 'lite' ($100/mo, 3-month trial), 'standard' ($199/mo), 'enterprise'
 // (contact sales). team_members:null => unlimited. ai_tokens are stored as raw
-// tokens (gpt-5-mini @ $0.28/$2.20 per 1M) but shown in the UI as "credits"
+// tokens (gpt-5-mini @ $0.25/$2.00 per 1M) but shown in the UI as "credits"
 // at 100,000 tokens = 1 credit (10M => 100, 30M => 300).
 export const FALLBACK_PLANS = [
   {

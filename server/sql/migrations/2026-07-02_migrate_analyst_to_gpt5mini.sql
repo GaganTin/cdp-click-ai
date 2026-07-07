@@ -2,7 +2,7 @@
 --  2026-07-02_migrate_analyst_to_gpt5mini.sql
 --  The AI Analyst deployment is 'gpt-5-mini' (Azure OpenAI Data Zone). It was
 --  previously mislabeled 'gpt-5.4-mini' and seeded at the wrong rate ($0.15/$0.60).
---  Correct Data-Zone rates: input $0.28 / cached input $0.03 / output $2.20 per 1M.
+--  Correct Data-Zone rates: input $0.25 / cached input $0.03 / output $2.00 per 1M.
 --
 --  This migration:
 --    1. Adds the cached-token columns (idempotent; may run before/after add_*).
@@ -32,7 +32,7 @@ UPDATE app.ai_usage SET model = 'gpt-5-mini' WHERE model = 'gpt-5.4-mini';
 -- 3. Drop the obsolete pricing row; ensure the correct one exists (non-clobbering).
 DELETE FROM app.ai_model_pricing WHERE model = 'gpt-5.4-mini';
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
-VALUES ('gpt-5-mini', 0.28, 0.030, 2.20, 'USD')
+VALUES ('gpt-5-mini', 0.25, 0.030, 2.00, 'USD')
 ON CONFLICT (model) DO NOTHING;
 
 -- 4. Recompute frozen cost on gpt-5-mini rows (cached prefix billed at the cached rate,
@@ -45,7 +45,7 @@ UPDATE app.ai_usage u
               , 6)
   FROM app.ai_model_pricing p
  WHERE p.model = 'gpt-5-mini' AND u.model = 'gpt-5-mini'
-   AND p.input_per_1m = 0.28 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.20
+   AND p.input_per_1m = 0.25 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.00
    AND u.cost IS DISTINCT FROM ROUND(
                 ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
                 (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +

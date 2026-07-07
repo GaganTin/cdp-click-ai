@@ -542,7 +542,7 @@ CREATE TABLE app.ai_model_pricing (
   updated_date        TIMESTAMPTZ   NOT NULL DEFAULT NOW()
 );
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency) VALUES
-  ('gpt-5-mini',   0.28, 0.030, 2.20, 'USD'),
+  ('gpt-5-mini',   0.25, 0.030, 2.00, 'USD'),
   ('gpt-5-nano',   0.05, 0.010, 0.40, 'USD');
 
 CREATE TABLE app.ai_usage (
@@ -3904,8 +3904,8 @@ BEGIN;
 
 -- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
 --    team_members=null => unlimited; ai_tokens are a generous monthly token
---    budget (gpt-5-mini @ $0.28/$2.20 per 1M; at a ~80/20 input/output mix that
---    is roughly Lite 10M ~$7, Standard 30M ~$20 - actual cost tracks real usage).
+--    budget (gpt-5-mini @ $0.25/$2.00 per 1M; at a ~80/20 input/output mix that
+--    is roughly Lite 10M ~$6, Standard 30M ~$18 - actual cost tracks real usage).
 INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
@@ -3980,7 +3980,7 @@ COMMIT;
 --  2026-07-02_add_gpt5mini_pricing.sql
 --  Register pricing for gpt-5-mini, the model the AI Analyst now runs on
 --  (AZURE_OPENAI_DEPLOYMENT), replacing gpt-5.4-mini. Azure OpenAI Data Zone rates:
---    input $0.28 / cached input $0.03 / output $2.20 per 1M tokens.
+--    input $0.25 / cached input $0.03 / output $2.00 per 1M tokens.
 --
 --  Cost tracking is keyed per model, so once this row exists every gpt-5-mini
 --  call is costed correctly with no further code changes. Without it, analyst
@@ -3999,7 +3999,7 @@ ALTER TABLE app.ai_model_pricing
   ADD COLUMN IF NOT EXISTS cached_input_per_1m NUMERIC(12,4) NOT NULL DEFAULT 0;
 
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
-VALUES ('gpt-5-mini', 0.28, 0.030, 2.20, 'USD')
+VALUES ('gpt-5-mini', 0.25, 0.030, 2.00, 'USD')
 ON CONFLICT (model) DO NOTHING;
 
 COMMIT;
@@ -4210,7 +4210,7 @@ COMMIT;
 --  2026-07-02_migrate_analyst_to_gpt5mini.sql
 --  The AI Analyst deployment is 'gpt-5-mini' (Azure OpenAI Data Zone). It was
 --  previously mislabeled 'gpt-5.4-mini' and seeded at the wrong rate ($0.15/$0.60).
---  Correct Data-Zone rates: input $0.28 / cached input $0.03 / output $2.20 per 1M.
+--  Correct Data-Zone rates: input $0.25 / cached input $0.03 / output $2.00 per 1M.
 --
 --  This migration:
 --    1. Adds the cached-token columns (idempotent; may run before/after add_*).
@@ -4240,7 +4240,7 @@ UPDATE app.ai_usage SET model = 'gpt-5-mini' WHERE model = 'gpt-5.4-mini';
 -- 3. Drop the obsolete pricing row; ensure the correct one exists (non-clobbering).
 DELETE FROM app.ai_model_pricing WHERE model = 'gpt-5.4-mini';
 INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
-VALUES ('gpt-5-mini', 0.28, 0.030, 2.20, 'USD')
+VALUES ('gpt-5-mini', 0.25, 0.030, 2.00, 'USD')
 ON CONFLICT (model) DO NOTHING;
 
 -- 4. Recompute frozen cost on gpt-5-mini rows (cached prefix billed at the cached rate,
@@ -4253,7 +4253,7 @@ UPDATE app.ai_usage u
               , 6)
   FROM app.ai_model_pricing p
  WHERE p.model = 'gpt-5-mini' AND u.model = 'gpt-5-mini'
-   AND p.input_per_1m = 0.28 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.20
+   AND p.input_per_1m = 0.25 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.00
    AND u.cost IS DISTINCT FROM ROUND(
                 ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
                 (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
@@ -4269,7 +4269,7 @@ COMMIT;
 --  2026-07-02_resize_plan_allowances.sql
 --  Resize the monthly AI token allowances alongside the analyst model change
 --  (see 2026-07-02_migrate_analyst_to_gpt5mini.sql). Allowances chosen to keep AI
---  cost a comfortable share of plan revenue at the gpt-5-mini blended ~$0.66/1M:
+--  cost a comfortable share of plan revenue at the gpt-5-mini blended ~$0.60/1M:
 --
 --    Lite:     20M tokens (200 credits) -> 10M tokens (100 credits)
 --    Standard: 100M tokens (1,000 cr)   -> 30M tokens (300 credits)
@@ -4858,3 +4858,62 @@ ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS replenishment_due_cou
 ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS next_replenishment_date DATE;
 ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS days_to_replenishment   INTEGER;
 ALTER TABLE app.customer_profiles ADD COLUMN IF NOT EXISTS replenishment_status    TEXT;
+
+
+-- ===================== migrations/2026-07-07_fix_gpt5mini_rates.sql =====================
+
+-- ============================================================================
+--  2026-07-07_fix_gpt5mini_rates.sql
+--  Correct the gpt-5-mini (AI Analyst) pricing to the confirmed Azure rates:
+--    input $0.25 / cached input $0.03 / output $2.00 per 1M tokens
+--  (previously seeded at $0.28 / $0.03 / $2.20).
+--
+--  Why a separate migration: the earlier add_gpt5mini / migrate_analyst files
+--  seed the row with ON CONFLICT DO NOTHING, so on any DB that already has a
+--  gpt-5-mini row they are no-ops - they can never lower an existing rate. This
+--  file explicitly UPDATEs the live row and recomputes frozen historical cost.
+--
+--  Idempotent AND non-clobbering:
+--    - The rate UPDATE is GUARDED to the exact old rate (0.28 / 2.20), so once
+--      corrected - or once an admin edits the rate in Studio - the guard is false
+--      and this is a no-op. Studio rate edits are preserved.
+--    - The recompute is guarded to the EXACT new rate and to rows whose frozen
+--      cost actually differs, so already-correct history is never rewritten.
+--  gpt-5-nano rates are unchanged (0.05 / 0.01 / 0.40) and untouched here.
+--  Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- 1. Correct the live pricing row (only if still at the old mislabeled rate).
+UPDATE app.ai_model_pricing
+   SET input_per_1m        = 0.25,
+       output_per_1m       = 2.00,
+       cached_input_per_1m = 0.030,
+       updated_date        = NOW()
+ WHERE model = 'gpt-5-mini'
+   AND input_per_1m = 0.28 AND output_per_1m = 2.20;
+
+-- Ensure the row exists at all on a fresh DB that somehow skipped the seed.
+INSERT INTO app.ai_model_pricing (model, input_per_1m, cached_input_per_1m, output_per_1m, currency)
+VALUES ('gpt-5-mini', 0.25, 0.030, 2.00, 'USD')
+ON CONFLICT (model) DO NOTHING;
+
+-- 2. Recompute frozen cost on gpt-5-mini usage rows at the corrected rate
+--    (cached prefix billed at the cached rate, the rest of input at the full rate).
+UPDATE app.ai_usage u
+   SET cost = ROUND(
+                ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
+                (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
+                (u.output_tokens                                                  / 1000000.0) * p.output_per_1m
+              , 6)
+  FROM app.ai_model_pricing p
+ WHERE p.model = 'gpt-5-mini' AND u.model = 'gpt-5-mini'
+   AND p.input_per_1m = 0.25 AND p.cached_input_per_1m = 0.030 AND p.output_per_1m = 2.00
+   AND u.cost IS DISTINCT FROM ROUND(
+                ((u.input_tokens - LEAST(u.cached_input_tokens, u.input_tokens)) / 1000000.0) * p.input_per_1m +
+                (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
+                (u.output_tokens                                                  / 1000000.0) * p.output_per_1m
+              , 6);
+
+COMMIT;

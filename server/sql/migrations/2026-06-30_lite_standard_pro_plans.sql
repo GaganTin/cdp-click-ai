@@ -22,8 +22,8 @@ BEGIN;
 
 -- 1. Upsert the three new plans (copy/limits refreshed on re-run). Limits:
 --    team_members=null => unlimited; ai_tokens are a generous monthly token
---    budget (gpt-5-mini @ $0.28/$2.20 per 1M; at a ~80/20 input/output mix that
---    is roughly Lite 10M ~$7, Standard 30M ~$20 - actual cost tracks real usage).
+--    budget (gpt-5-mini @ $0.25/$2.00 per 1M; at a ~80/20 input/output mix that
+--    is roughly Lite 10M ~$6, Standard 30M ~$18 - actual cost tracks real usage).
 INSERT INTO app.plans
   (id, name, price_display, period, badge, description, cta_label, cta_href, cta_external,
    is_highlighted, sort_order, trial_days, warning_days, features, limits, is_active)
