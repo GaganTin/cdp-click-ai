@@ -5,6 +5,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { appClient } from "@/api/appClient";
 import { toast } from "sonner";
 
+// Formats the analyst backend can actually read (see server/lib/fileExtract.js).
+const ACCEPTED_EXT = [".csv", ".tsv", ".txt", ".json", ".md", ".log", ".xlsx", ".xls", ".docx", ".pdf"];
+const ACCEPTED_LABEL = "CSV, TSV, TXT, JSON, MD, Excel, Word (.docx), PDF";
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
 export default function ChatInput({
   onSend,
   disabled,
@@ -29,6 +34,19 @@ export default function ChatInput({
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    // Analyst can only read data/document formats. Reject others up front so the
+    // user isn't left wondering why the AI ignored their file.
+    const ext = "." + (file.name.split(".").pop() || "").toLowerCase();
+    if (!ACCEPTED_EXT.includes(ext)) {
+      toast.error(`Unsupported file type. Allowed: ${ACCEPTED_LABEL}`);
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      toast.error("File is too large (max 25 MB).");
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     setPopoverOpen(false);
     try {
@@ -56,7 +74,7 @@ export default function ChatInput({
   return (
     <form onSubmit={handleSubmit} className="border-t border-border px-4 py-3 flex-shrink-0">
       <div className="flex items-center gap-2 max-w-3xl mx-auto">
-        <input ref={fileRef} type="file" className="hidden" onChange={handleFileUpload} />
+        <input ref={fileRef} type="file" accept={ACCEPTED_EXT.join(",")} className="hidden" onChange={handleFileUpload} />
 
         <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
           <PopoverTrigger asChild>

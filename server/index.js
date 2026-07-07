@@ -34,6 +34,7 @@ import { authenticate, withCompany, resolveCompanyId, setAuthPool, planLimit } f
 import { resolveSegmentEntities, countSegmentEntities, customerWhere, anonWhere } from "./lib/attributeManual.js";
 import { triggerProductPredictions } from "./lib/productPredictionsTrigger.js";
 import { recordAiUsage, enforceAiQuota } from "./lib/aiUsage.js";
+import { extractFileText, READABLE_EXT, READABLE_LABEL } from "./lib/fileExtract.js";
 
 dotenv.config();
 
@@ -52,7 +53,8 @@ app.set("trust proxy", 1);
 const port = Number(process.env.PORT || 3001);
 const pgConn = process.env.POSTGRESQL_CONN || process.env.DATABASE_URL || "";
 
-const upload = multer({ dest: uploadsDir });
+// General-purpose upload (email images, etc.) — permissive.
+const upload = multer({ dest: uploadsDir, limits: { fileSize: 25 * 1024 * 1024 } });
 const pool = pgConn ? new Pool({ connectionString: pgConn }) : null;
 // Let authenticate() invalidate tokens issued before a password change.
 if (pool) setAuthPool(pool);
@@ -874,7 +876,12 @@ BEFORE suggesting a UTM link (only when user has confirmed):
 \`\`\`
 NOTE: You are only recommending. The user clicks "Add" in the UI - you do NOT save automatically.
 
-When presenting raw data the user may want to export:
+EXPORTING NUMBERS: every \`\`\`chart and \`\`\`table card you emit ALREADY renders its own
+"Download CSV" button automatically - the user can download the underlying values of any
+chart or table with one click. So you do NOT need to repeat a chart's/table's data as a
+separate csv block. Only emit a \`\`\`csv block for tabular numbers you are presenting that
+are NOT already shown in a chart or table card (e.g. a detailed breakdown you mention in
+prose but don't chart). It renders as a standalone "Download CSV" button:
 \`\`\`csv
 col1,col2,col3
 val1,val2,val3
@@ -953,8 +960,10 @@ output one of these when it genuinely helps the user's request; never spam them.
 
 ▸ FILE UPLOADS - the user can attach a file in chat. When they do, its contents are inlined
   right after their message as "[Attached file: name]" with a preview. Analyse that data
-  directly (summarise, chart it, spot issues). Only CSV/TSV/TXT/JSON/MD are readable; if a
-  file shows as "binary/not readable", tell the user which formats you can read. You may
+  directly (summarise, chart it, spot issues). Readable formats: CSV, TSV, TXT, JSON, MD,
+  Excel (.xlsx/.xls), Word (.docx) and PDF. Spreadsheets are inlined as CSV per sheet; Word/PDF
+  as extracted text. If a file shows as "not a supported format" or "no extractable text"
+  (e.g. a scanned/image-only PDF), tell the user which formats you can read. You may
   propose a manual attribute or a segment derived from an uploaded list.
 
 ═══ COMBINED AUDIENCE RESPONSE PATTERN ═══
@@ -1269,10 +1278,14 @@ IMPORTANT EDM RULES:
 // /uploads/<name> URLs to the message. This turns readable text/CSV/JSON files
 // into a compact preview that gets inlined into the model prompt so the analyst
 // can actually reason over uploaded data (previously file_urls were dropped).
-const READABLE_EXT = new Set([".csv", ".tsv", ".txt", ".json", ".md"]);
+// Per-attachment and total character budgets for text inlined into the prompt.
+// Character-based (not byte-based) since parsers return decoded text; ~1 token
+// per 4 chars, so 48k chars ≈ 12k tokens across all attachments.
+const ATTACH_TOTAL_CHARS = 48 * 1024;
+const ATTACH_PER_FILE_CHARS = 32 * 1024;
 async function buildAttachmentPreview(fileUrls, companyId) {
   if (!Array.isArray(fileUrls) || fileUrls.length === 0 || !companyId) return "";
-  let budget = 48 * 1024; // total bytes inlined across all attachments
+  let budget = ATTACH_TOTAL_CHARS; // total chars inlined across all attachments
   const parts = [];
   for (const url of fileUrls.slice(0, 5)) {
     let rel;
@@ -1290,31 +1303,26 @@ async function buildAttachmentPreview(fileUrls, companyId) {
     const ext = path.extname(base).toLowerCase();
     if (!base) continue;
     if (!READABLE_EXT.has(ext)) {
-      parts.push(`[Attached file: ${label} - ${ext || "binary"} file, contents not readable by the analyst]`);
+      parts.push(`[Attached file: ${label} - ${ext || "binary"} file, not a supported format. Readable formats: ${READABLE_LABEL}.]`);
       continue;
     }
-    try {
-      const filePath = path.join(uploadsDir, String(companyId), base);
-      const stat = fs.statSync(filePath);
-      const readBytes = Math.min(stat.size, 32 * 1024, budget);
-      if (readBytes <= 0) { parts.push(`[Attached file: ${label} - skipped, attachment size budget reached]`); continue; }
-      const fd = fs.openSync(filePath, "r");
-      const buf = Buffer.alloc(readBytes);
-      fs.readSync(fd, buf, 0, readBytes, 0);
-      fs.closeSync(fd);
-      const text = buf.toString("utf8");
-      // Control bytes (excluding tab/newline/CR) → treat as binary, don't inline.
-      if (/[\x00-\x08\x0E-\x1F]/.test(text)) { parts.push(`[Attached file: ${label} - binary, not readable]`); continue; }
-      budget -= readBytes;
-      const lines = text.split(/\r?\n/);
-      const shown = lines.slice(0, 40);
-      const fence = ext === ".json" ? "json" : (ext === ".csv" || ext === ".tsv") ? "csv" : "";
-      const trunc = (stat.size > readBytes || lines.length > shown.length)
-        ? `\n… (showing the first ${shown.length} lines; the file is larger)` : "";
-      parts.push(`[Attached file: ${label}]\n\`\`\`${fence}\n${shown.join("\n")}\n\`\`\`${trunc}`);
-    } catch {
+    const filePath = path.join(uploadsDir, String(companyId), base);
+    if (!fs.existsSync(filePath)) {
       parts.push(`[Attached file: ${label} - could not be read from storage]`);
+      continue;
     }
+    const cap = Math.min(ATTACH_PER_FILE_CHARS, budget);
+    const { text, error } = await extractFileText(filePath, ext, cap);
+    if (error || !text) {
+      parts.push(`[Attached file: ${label} - ${error || "no readable content"}]`);
+      continue;
+    }
+    budget -= text.length;
+    const truncated = text.length >= cap;
+    const fence = ext === ".json" ? "json"
+      : (ext === ".csv" || ext === ".tsv" || ext === ".xlsx" || ext === ".xls") ? "csv" : "";
+    const trunc = truncated ? `\n… (content truncated; the file is larger than the inline limit)` : "";
+    parts.push(`[Attached file: ${label}]\n\`\`\`${fence}\n${text}\n\`\`\`${trunc}`);
   }
   return parts.length ? "\n\n" + parts.join("\n\n") : "";
 }

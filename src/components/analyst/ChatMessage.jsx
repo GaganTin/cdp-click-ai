@@ -687,6 +687,19 @@ function FilterProfilesCard({ data, onApply }) {
   );
 }
 
+// Serialise rows → CSV text for the "Download CSV" buttons on chart/table cards.
+// columns: [{ key, label }]; rows: array of objects. Quotes any field containing
+// a comma, quote or newline (RFC-4180) so labels like "google / organic" survive.
+function rowsToCsv(columns, rows) {
+  const esc = (v) => {
+    const s = v == null ? "" : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = columns.map((c) => esc(c.label ?? c.key)).join(",");
+  const body = (rows || []).map((r) => columns.map((c) => esc(r[c.key])).join(",")).join("\n");
+  return header + "\n" + body;
+}
+
 export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddUTMLink, onAddSegment, onAddEDM, onOpenEDMInEditor, onCreateAttribute, onCreatePopup, onCreatePopupTemplate, onFilterProfiles, hasConnectedSources }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
@@ -760,6 +773,16 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
 
       const displayConfig = { ...chartConfig, data: sortedData };
 
+      // Columns for the "Download CSV" button: the x-axis plus every series,
+      // labelled with the series' display name so the export reads like the chart.
+      const csvColumns = [
+        { key: xKey, label: xKey },
+        ...seriesKeys.map((k) => {
+          const s = (chartConfig.series || []).find((se) => se.dataKey === k);
+          return { key: k, label: s?.name || k };
+        }),
+      ];
+
       // Guard against empty / all-zero chart data - never render a chart on
       // non-data. Checks EVERY series so a chart whose first series is all zeros
       // but has real values elsewhere still renders.
@@ -805,9 +828,14 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
                 <p className="text-[11px] text-muted-foreground mt-0.5">{chartConfig.description}</p>
               )}
             </div>
-            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onPinChart?.(displayConfig)}>
-              <Pin className="w-3 h-3" /> Pin
-            </Button>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => onDownloadCSV?.(rowsToCsv(csvColumns, sortedData))}>
+                <Download className="w-3 h-3" /> CSV
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5" onClick={() => onPinChart?.(displayConfig)}>
+                <Pin className="w-3 h-3" /> Pin
+              </Button>
+            </div>
           </div>
           <div className="h-64 px-2 pb-3">
             <MiniChart type={chartType} config={displayConfig} />
@@ -843,9 +871,14 @@ export default function ChatMessage({ message, onPinChart, onDownloadCSV, onAddU
       const fmt = (v) => typeof v === "number" ? v.toLocaleString() : (v ?? "");
       return (
         <div key={key} className="my-4 border border-border rounded-lg overflow-hidden bg-background">
-          <div className="px-4 pt-4 pb-2">
-            <p className="text-xs font-semibold text-foreground">{cfg.title || "Table"}</p>
-            {cfg.description && <p className="text-[11px] text-muted-foreground mt-0.5">{cfg.description}</p>}
+          <div className="flex items-start justify-between px-4 pt-4 pb-2 gap-2">
+            <div>
+              <p className="text-xs font-semibold text-foreground">{cfg.title || "Table"}</p>
+              {cfg.description && <p className="text-[11px] text-muted-foreground mt-0.5">{cfg.description}</p>}
+            </div>
+            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 flex-shrink-0" onClick={() => onDownloadCSV?.(rowsToCsv(columns, rows))}>
+              <Download className="w-3 h-3" /> CSV
+            </Button>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs border-collapse">
