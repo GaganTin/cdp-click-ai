@@ -80,7 +80,7 @@ function makeFakeDb() {
     // INSERT account (returns id + plan + trial state)
     if (/^INSERT INTO app\.accounts/.test(s)) {
       const [name, slug] = params;
-      const plan_expires_at = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+      const plan_expires_at = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString();
       const a = { id: id("account"), name, slug, plan: "lite", plan_expires_at, plan_upgraded_at: null, owner_user_id: null };
       accounts.push(a);
       return { rows: [{ id: a.id, plan: a.plan, plan_expires_at: a.plan_expires_at, plan_upgraded_at: a.plan_upgraded_at }], rowCount: 1 };

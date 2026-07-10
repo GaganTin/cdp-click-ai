@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authenticate, withCompany } from "../middleware/auth.js";
 import { getAiQuota } from "../lib/aiUsage.js";
+import { getAddonBalance, getEmailQuota } from "../lib/addons.js";
 
 export function createBillingRouter(pool) {
   const router = Router();
@@ -61,6 +62,13 @@ export function createBillingRouter(pool) {
       // bar uses it rather than calendar-month totals.
       const quota = await getAiQuota(pool, { accountId });
 
+      // Add-ons: prepaid AI balance and the monthly emails-sent quota (base +
+      // prepaid email_credits). These make the usage bars account for purchases.
+      const [aiAddonBalance, emailQuota] = await Promise.all([
+        getAddonBalance(pool, accountId, "ai_tokens"),
+        getEmailQuota(pool, accountId),
+      ]);
+
       // Account-wide team members = DISTINCT users across all workspaces (a user
       // who belongs to several workspaces counts once against the team limit).
       const { rows: tm } = await pool.query(
@@ -99,6 +107,13 @@ export function createBillingRouter(pool) {
         // end); paid = resets on ai_period_end (the billing-day anniversary).
         ai_period_end: quota.periodEnd,
         ai_is_trial: quota.isTrial,
+        // Prepaid AI add-on balance (already folded into quota.limit above).
+        ai_tokens_addon: aiAddonBalance,
+        // Emails-sent this calendar month + the effective limit (base + prepaid).
+        emails_sent_month: emailQuota.used,
+        email_base: emailQuota.base,
+        email_limit: emailQuota.limit,
+        email_credits_addon: emailQuota.balance,
         profiles: workspaces.reduce((s, w) => s + w.profiles, 0),
         workspaces_count: workspaces.length,
       };
@@ -111,6 +126,11 @@ export function createBillingRouter(pool) {
         ai_tokens_month: overall.ai_tokens_month,
         ai_cost: overall.ai_cost,
         ai_currency: overall.ai_currency,
+        ai_tokens_addon: overall.ai_tokens_addon,
+        emails_sent_month: overall.emails_sent_month,
+        email_base: overall.email_base,
+        email_limit: overall.email_limit,
+        email_credits_addon: overall.email_credits_addon,
         ai_period_end: overall.ai_period_end,
         ai_is_trial: overall.ai_is_trial,
         profiles: overall.profiles,

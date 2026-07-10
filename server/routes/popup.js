@@ -490,6 +490,54 @@ export function createPopupRouter(pool) {
     }
   });
 
+  // GET /api/popups/:id/outbound-links?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Breakdown of where clicks in a pop-up actually went — one row per destination
+  // link_url (e.g. a WhatsApp wa.me deep-link, full query string kept so distinct
+  // prefilled ?text= messages stay separate), with click totals, unique clickers,
+  // unique visitors, new-tab count, and last-clicked. Reads the durable
+  // app.popup_link_clicks projection (populated by interaction.project_link_click),
+  // so it's indexed and needs no live JSON parsing. Range-accurate when from/to
+  // are supplied (filters clicked_at); lifetime otherwise.
+  router.get("/:id/outbound-links", async (req, res) => {
+    const cid = await companyId(req, res);
+    if (!cid) return;
+    const { from, to } = req.query;
+    const params = [cid, req.params.id];
+    let dateFilter = "";
+    if (from) {
+      params.push(from);
+      dateFilter += ` AND clicked_at >= $${params.length}::date`;
+    }
+    if (to) {
+      params.push(to);
+      dateFilter += ` AND clicked_at < ($${params.length}::date + 1)`;
+    }
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          link_url,
+          MAX(link_text)                     AS link_text,
+          MAX(link_target)                   AS link_target,
+          COUNT(*)::int                      AS clicks,
+          COUNT(DISTINCT session_id)::int    AS unique_clicks,
+          COUNT(DISTINCT visitor_id)::int    AS unique_visitors,
+          COUNT(*) FILTER (
+            WHERE open_method IN ('new_tab','ctrl_click','middle_click')
+          )::int                             AS new_tab_clicks,
+          MAX(clicked_at)                    AS last_clicked
+        FROM app.popup_link_clicks
+        WHERE company_id = $1
+          AND popup_id = $2${dateFilter}
+        GROUP BY link_url
+        ORDER BY clicks DESC, last_clicked DESC
+        LIMIT 100
+      `, params);
+      res.json(rows);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Popup Templates ──────────────────────────────────────────────────────────
 
   // GET /api/popups/templates

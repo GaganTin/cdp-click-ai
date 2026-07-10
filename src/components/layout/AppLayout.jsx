@@ -6,6 +6,7 @@ import ImpersonationBanner from "./ImpersonationBanner";
 import AnnouncementBanner from "./AnnouncementBanner";
 import AiCreditBanner from "./AiCreditBanner";
 import DemoBanner from "./DemoBanner";
+import AccountClosedBanner from "./AccountClosedBanner";
 
 export default function AppLayout() {
   return (
@@ -13,6 +14,7 @@ export default function AppLayout() {
       <ImpersonationBanner />
       <AnnouncementBanner />
       <EmailVerifyBanner />
+      <AccountClosedBanner />
       <TrialBanner />
       <AiCreditBanner />
       <DemoBanner />

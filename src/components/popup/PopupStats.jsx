@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { appClient } from "@/api/appClient";
 import {
   BarChart2, Eye, MousePointerClick, Mail, XCircle,
-  Clock, Users, Calendar,
+  Clock, Users, Calendar, ExternalLink, MessageCircle, Link2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -55,13 +55,93 @@ function formatSecs(secs) {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
+// Pull the host out of a URL for a compact secondary label; tolerate junk hrefs.
+function linkHost(url) {
+  try { return new URL(url).host.replace(/^www\./, ""); }
+  catch { return url; }
+}
+
+// WhatsApp deep-links (wa.me, api.whatsapp.com, whatsapp://) get their own icon so
+// the most common pop-up CTA is recognisable at a glance.
+function isWhatsApp(url) {
+  return /(?:wa\.me|whatsapp\.com|whatsapp:)/i.test(url || "");
+}
+
+// Pull the phone number and prefilled message out of a WhatsApp deep-link. The
+// number lives in the path (wa.me/<num>) or a `phone` param; the message in the
+// `text` param. We keep distinct ?text= variants as separate rows upstream, and
+// show the decoded message here so each CTA is legible.
+function whatsappMeta(url) {
+  try {
+    const u = new URL(url);
+    const num = (u.pathname.replace(/\D/g, "") || u.searchParams.get("phone") || "").trim();
+    const text = (u.searchParams.get("text") || "").trim();
+    return { num, text };
+  } catch {
+    return { num: "", text: "" };
+  }
+}
+
+function LinkRow({ row, maxClicks }) {
+  const url = row.link_url || "";
+  const whatsapp = isWhatsApp(url);
+  const Icon = whatsapp ? MessageCircle : ExternalLink;
+  const wa = whatsapp ? whatsappMeta(url) : null;
+  const pct = maxClicks > 0 ? (Number(row.clicks) / maxClicks) * 100 : 0;
+  // Primary label: link text, or the WhatsApp number, or the host.
+  const label = row.link_text || (wa?.num ? `WhatsApp +${wa.num}` : linkHost(url));
+  // Secondary label: the prefilled WhatsApp message when present, else the host.
+  const sub = wa?.text ? `"${wa.text}"` : linkHost(url);
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 min-w-0">
+        <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${whatsapp ? "text-green-600 dark:text-green-500" : "text-muted-foreground"}`} />
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-xs font-medium truncate hover:underline"
+          title={url}
+        >
+          {label}
+        </a>
+        <span className="text-xs font-medium tabular-nums ml-auto flex-shrink-0">
+          {Number(row.clicks).toLocaleString()}
+          <span className="text-muted-foreground font-normal ml-1">
+            {Number(row.unique_visitors).toLocaleString()} unique
+          </span>
+        </span>
+      </div>
+      <div className="flex items-center gap-2 pl-[22px]">
+        <MiniBar pct={pct} color={whatsapp ? "bg-green-600/60 dark:bg-green-500/60" : "bg-foreground/40"} />
+        <span
+          className={`text-[11px] truncate max-w-[55%] ${wa?.text ? "text-muted-foreground italic" : "text-muted-foreground"}`}
+          title={wa?.text || url}
+        >
+          {sub}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Stats modal for a single pop-up. Pulls from the same /popups/analytics endpoint
 // the Analytics tab uses (shared query key, so it's cached) and picks out this
 // pop-up's row, mirroring the email CampaignStats modal.
-export default function PopupStats({ popupId, popupName, open, onClose }) {
+export default function PopupStats({ popupId, popupName, open, onClose, from, to }) {
+  // Honour the Analytics tab's selected period so the modal's counts and the link
+  // breakdown match the page (both are range-accurate server-side). The query keys
+  // carry from/to so they refetch — and share cache with the page — when it changes.
   const { data: analytics = [], isLoading } = useQuery({
-    queryKey: ["popup-analytics"],
-    queryFn: () => appClient.popup.getAnalytics(),
+    queryKey: ["popup-analytics", from, to],
+    queryFn: () => appClient.popup.getAnalytics({ from, to }),
+    enabled: open && !!popupId,
+    refetchInterval: 30000,
+  });
+
+  const { data: outboundLinks = [], isLoading: linksLoading } = useQuery({
+    queryKey: ["popup-outbound-links", popupId, from, to],
+    queryFn: () => appClient.popup.getOutboundLinks(popupId, { from, to }),
     enabled: open && !!popupId,
     refetchInterval: 30000,
   });
@@ -193,6 +273,43 @@ export default function PopupStats({ popupId, popupName, open, onClose }) {
                     </p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Top outbound links — where clicks actually went */}
+            {clicks > 0 && (
+              <div className="border border-border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <Link2 className="w-3.5 h-3.5" />
+                    Top Outbound Links
+                  </p>
+                  {outboundLinks.length > 0 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {outboundLinks.length} destination{outboundLinks.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+
+                {linksLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
+                  </div>
+                ) : outboundLinks.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Clicks were recorded, but no link destinations were captured for them.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {outboundLinks.map((r, i) => (
+                      <LinkRow
+                        key={r.link_url || i}
+                        row={r}
+                        maxClicks={Number(outboundLinks[0]?.clicks || 0)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

@@ -79,12 +79,12 @@ async function provisionUserWithCompany(client, {
   ip_address = null,
 }) {
   // 1. Account - the org / billing root. Starts on the Lite entry plan with its
-  //    trial window taken from the plan catalog (falls back to 90 days).
+  //    trial window taken from the plan catalog (falls back to 60 days).
   const accountSlug = await uniqueSlug(client, company_name, { table: "app.accounts", fallback: "account" });
   const { rows: [account] } = await client.query(
     `INSERT INTO app.accounts (name, slug, plan, plan_expires_at)
      VALUES ($1, $2, 'lite',
-       NOW() + (COALESCE((SELECT trial_days FROM app.plans WHERE id = 'lite'), 90)::text || ' days')::interval)
+       NOW() + (COALESCE((SELECT trial_days FROM app.plans WHERE id = 'lite'), 60)::text || ' days')::interval)
      RETURNING id, plan, plan_expires_at, plan_upgraded_at`,
     [company_name, accountSlug]
   );
@@ -771,6 +771,11 @@ export function createAuthRouter(pool) {
                 a.plan AS account_plan, a.plan_expires_at AS account_plan_expires_at,
                 a.plan_upgraded_at AS account_plan_upgraded_at,
                 (a.owner_user_id = u.id) AS is_account_owner,
+                -- Account lifecycle: is_active flips to false when the retention
+                -- purge runs (data deleted; see billingLifecycle). The UI uses this
+                -- to show the "account closed / reactivate" banner.
+                a.is_active AS account_is_active,
+                (a.metadata ? 'purged_at') AS account_purged,
            COALESCE(
              json_agg(
                json_build_object('id', c.id, 'name', c.name, 'slug', c.slug,

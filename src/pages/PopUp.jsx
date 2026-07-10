@@ -152,7 +152,7 @@ const BUILTIN_TEMPLATES = [
     category: "Feedback",
     container: { background: "#ffffff", paddingY: "28", paddingX: "24", borderRadius: "12", maxWidth: "480", shadow: true },
     blocks: [
-      { type: "heading", id: "sv-h", content: "Quick question for you 🤔", level: "2", color: "#111111", align: "left", fontSize: "18", fontWeight: "700" },
+      { type: "heading", id: "sv-h", content: "Quick question for you", level: "2", color: "#111111", align: "left", fontSize: "18", fontWeight: "700" },
       { type: "text", id: "sv-t", content: "What brought you to our site today?", color: "#666666", align: "left", fontSize: "13", lineHeight: "1.6" },
       { type: "html", id: "sv-form", html: `<form>
   <label style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #eee;border-radius:8px;cursor:pointer;margin-bottom:8px">
@@ -2399,6 +2399,8 @@ export default function PopUp() {
         <PopupStats
           popupId={statsTarget.id}
           popupName={statsTarget.name}
+          from={dateFrom}
+          to={dateTo}
           open
           onClose={() => setStatsTarget(null)}
         />

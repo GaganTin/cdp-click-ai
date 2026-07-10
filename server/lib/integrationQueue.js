@@ -276,8 +276,8 @@ async function processNextJob(pool) {
         company_id:       job.company_id,
         integration_type: job.integration_type,
         job_id:           job.id,
-        // The first sync backfills the full plan window (3y free / 5y paid) and
-        // every later run is incremental - both handled by ga_sync_control in
+        // The first sync backfills the plan window (capped at 24 months / 2 years)
+        // and every later run is incremental - both handled by ga_sync_control in
         // pg_state, so we never force a debug window here.
         is_debugging:     false,
       },

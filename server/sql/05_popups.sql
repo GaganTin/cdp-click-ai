@@ -90,3 +90,30 @@ CREATE INDEX popup_email_collected_company_idx   ON app.popup_email_collected(co
 CREATE INDEX popup_email_collected_popup_idx     ON app.popup_email_collected(popup_id);
 CREATE INDEX popup_email_collected_email_idx     ON app.popup_email_collected(LOWER(email));
 CREATE INDEX popup_email_collected_collected_idx ON app.popup_email_collected(collected_at DESC);
+
+-- ── Outbound link clicks (where pop-up clicks went; cache of microservice data) ─
+--  Durable projection of every `click_interaction` activity: one row per click,
+--  with the destination link_url (e.g. a WhatsApp wa.me deep-link, INCLUDING its
+--  prefilled ?text= so distinct messages stay distinct). Populated by the
+--  interaction.project_link_click() trigger (see 11_interaction.sql), mirroring
+--  the popup_email_collected projection. NOT deduped — every click is counted.
+CREATE TABLE app.popup_link_clicks (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  clicked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  company_id    UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  popup_id      UUID        REFERENCES app.popups(id) ON DELETE SET NULL,
+  popup_name    TEXT,
+  popup_ref     TEXT,
+  link_url      TEXT        NOT NULL,            -- full destination href incl. query string
+  link_text     TEXT,                            -- visible link text (first 100 chars)
+  link_target   TEXT,                            -- _self | _blank
+  open_method   TEXT,                            -- left_click | new_tab | ctrl_click | middle_click | right_click
+  source_url    TEXT,                            -- the page the click happened on (post_url)
+  visitor_id    TEXT,                            -- capsuite_apid (persistent browser id)
+  session_id    TEXT,                            -- capsuite_sid (session id)
+  metadata      JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE INDEX popup_link_clicks_company_idx ON app.popup_link_clicks(company_id);
+CREATE INDEX popup_link_clicks_popup_idx   ON app.popup_link_clicks(popup_id);
+CREATE INDEX popup_link_clicks_clicked_idx ON app.popup_link_clicks(clicked_at DESC);
+CREATE INDEX popup_link_clicks_url_idx      ON app.popup_link_clicks(popup_id, link_url);

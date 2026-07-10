@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { authenticate, resolveCompanyId, planLimit } from "../middleware/auth.js";
+import { authenticate, resolveCompanyId } from "../middleware/auth.js";
+import { getEmailQuota, recordEmailsSent } from "../lib/addons.js";
 import { sendEmail, sendBatch } from "../services/email.js";
 import { notifyCompany } from "../lib/notifications.js";
 import { injectTracking, applyPersonalization, applyUtmToLinks, injectUnsubscribeFooter, getTrackingBase } from "../services/tracking.js";
@@ -158,14 +159,8 @@ export function createEdmRouter(pool) {
     } = req.body;
     if (!name || !subject || !from_email) return err(res, "name, subject, and from_email are required");
     try {
-      // Enforce the account plan's email-campaign limit (null = unlimited).
-      const cap = await planLimit(pool, companyId, "campaigns");
-      if (cap != null) {
-        const { rows: [c] } = await pool.query(
-          "SELECT COUNT(*)::int AS n FROM app.edm_campaigns WHERE company_id=$1", [companyId]
-        );
-        if (c.n >= cap) return err(res, `Your plan allows up to ${cap} email campaigns. Upgrade for more.`, 403);
-      }
+      // Drafts are free to create; the emails-sent quota is enforced at SEND time
+      // (POST /campaigns/:id/send) against the monthly counter + prepaid add-ons.
       const { rows } = await pool.query(
         `INSERT INTO app.edm_campaigns
            (company_id, name, subject, preview_text, from_name, from_email, reply_to,
@@ -390,6 +385,24 @@ export function createEdmRouter(pool) {
         return err(res, "No eligible recipients after opt-in and suppression filtering");
       }
 
+      // Emails-sent quota: monthly base (plan.limits.campaigns) + prepaid
+      // email_credits add-ons. Add-ons are frozen when the plan lapses.
+      const { rows: [acc] } = await client.query(
+        "SELECT account_id FROM app.companies WHERE id=$1", [companyId]
+      );
+      const accountId = acc?.account_id;
+      if (accountId) {
+        const q = await getEmailQuota(pool, accountId);
+        if (!q.planActive) {
+          await client.query("ROLLBACK");
+          return err(res, "Your plan has ended - resubscribe to send emails and use add-ons.", 403);
+        }
+        if (q.limit != null && q.used + recipients.length > q.limit) {
+          await client.query("ROLLBACK");
+          return err(res, `Sending ${recipients.length.toLocaleString()} emails would exceed your monthly limit of ${q.limit.toLocaleString()} (used ${q.used.toLocaleString()}). Buy an email add-on or upgrade.`, 403);
+        }
+      }
+
       await client.query(
         `UPDATE app.edm_campaigns SET status='sending', total_recipients=$2 WHERE id=$1`,
         [campaign.id, recipients.length]
@@ -405,6 +418,15 @@ export function createEdmRouter(pool) {
       }));
 
       await client.query("COMMIT");
+
+      // Meter the send against the monthly emails-sent counter + draw the overflow
+      // from prepaid email_credits add-ons (best-effort; never blocks delivery).
+      if (accountId) {
+        await recordEmailsSent(pool, {
+          accountId, companyId, userId: req.user?.id || null,
+          count: recipients.length, metadata: { campaign_id: campaign.id },
+        });
+      }
 
       const TRACKING_BASE = getTrackingBase();
       const sendPayloads = recipients.map((r, i) => {

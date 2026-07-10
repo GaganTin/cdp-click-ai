@@ -45,15 +45,27 @@ def _end_token():
     return (datetime.today().astimezone(_HK) - timedelta(days=1))
 
 
+SHOPIFY_BACKFILL_YEARS = 2  # first-run historical window (default 2 years)
+
+
+def _years_back(d, years):
+    """The same calendar day ``years`` years before ``d`` (Feb-29 safe)."""
+    try:
+        return d.replace(year=d.year - int(years))
+    except ValueError:
+        # d is Feb 29 and the target year is not a leap year -> use Feb 28.
+        return d.replace(year=d.year - int(years), day=28)
+
+
 def resolve_start_window(client, dataset, conn_kwargs=None, is_trial=False):
     """Return ``(str_start, str_end)`` for the Shopify ``updated_at`` filter.
 
-    First-run backfill pulls ALL history from epoch for EVERY account (trial or
-    contracted) - the whole order history is imported on the first sync. Runs
-    then resume incrementally from the watermark once one exists, so this only
-    affects the very first run. ``stock_quant`` is always a FULL snapshot.
-    (``is_trial`` is retained for call-site compatibility; it no longer caps the
-    backfill window.)
+    First-run backfill pulls the last 2 years of history (SHOPIFY_BACKFILL_YEARS)
+    for EVERY account (trial or contracted). Runs then resume incrementally from
+    the watermark once one exists, so this only affects the very first run.
+    ``stock_quant`` is always a FULL snapshot (a current inventory picture, not a
+    historical window, so it stays from epoch). (``is_trial`` is retained for
+    call-site compatibility; it no longer caps the backfill window.)
     """
     yesterday = _end_token()
     str_end = yesterday.strftime("%Y-%m-%d+16:00:00")
@@ -62,8 +74,8 @@ def resolve_start_window(client, dataset, conn_kwargs=None, is_trial=False):
         return "1970-01-01+00:00:00", str_end
 
     from dags.click_cdp_ai_dags.lib import pg_state
-    # Every account backfills its full history on the first run (from epoch).
-    first_run_start = date(1970, 1, 1)
+    # Every account backfills the last 2 years of history on the first run.
+    first_run_start = _years_back(date.today(), SHOPIFY_BACKFILL_YEARS)
     start_date = pg_state.resolve_start_date(
         client, dataset,
         conn_kwargs=conn_kwargs,

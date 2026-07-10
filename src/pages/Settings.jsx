@@ -1509,16 +1509,98 @@ const PLAN_LIMIT_BULLETS = [
   ["workspaces",   (n) => n == null ? "5+ workspaces"               : `${num(n)} workspace${n === 1 ? "" : "s"}`],
   ["team_members", (n) => n == null ? "Unlimited team members"      : `${num(n)} team member${n === 1 ? "" : "s"}`],
   ["profiles",     (n) => n == null ? "Unlimited customer profiles" : `${num(n)} customer profiles`],
-  ["campaigns",    (n) => n == null ? "Unlimited email campaigns"   : `${num(n)} email campaigns`],
+  ["campaigns",    (n) => n == null ? "Unlimited Emails Sent"       : `${num(n)} Emails Sent`],
   ["ai_tokens",    (n) => n == null ? "Custom credits"              : `${num(toCredits(n))} credits`],
 ];
-const LIMIT_WORDS = ["workspace", "profile", "campaign", "token", "member", "credit"];
+const LIMIT_WORDS = ["workspace", "profile", "campaign", "email", "token", "member", "credit"];
 function planLimitBullets(limits) {
   const l = limits || {};
   return PLAN_LIMIT_BULLETS.filter(([k]) => k in l).map(([k, fmt]) => fmt(l[k] ?? null));
 }
 function qualitativeFeatures(features) {
   return (features || []).filter(f => f && !LIMIT_WORDS.some(w => String(f).toLowerCase().includes(w)));
+}
+
+// Prepaid add-ons: top up AI credits / email sends. Buckets are one-time (never
+// reset), usable only while the plan is active, and bought via Stripe Checkout.
+function AddonsSection({ isOwner }) {
+  const { t } = usePreferences();
+  const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const { data, isLoading } = useQuery({ queryKey: ["addons"], queryFn: appClient.addons.list });
+  const [blocks, setBlocks] = useState({ ai_tokens: 1, email_credits: 1 });
+  const [buying, setBuying] = useState(null);
+
+  // Handle the redirect back from Stripe Checkout (?addon=success|cancel).
+  useEffect(() => {
+    const s = params.get("addon");
+    if (!s) return;
+    if (s === "success") {
+      toast.success(t("Add-on purchased - your balance has been topped up."));
+      qc.invalidateQueries({ queryKey: ["addons"] });
+      qc.invalidateQueries({ queryKey: ["billing-usage"] });
+    } else if (s === "cancel") {
+      toast.info(t("Add-on purchase cancelled."));
+    }
+    params.delete("addon"); params.delete("session_id");
+    setParams(params, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const buy = async (kind) => {
+    setBuying(kind);
+    try {
+      const { url } = await appClient.addons.checkout(kind, blocks[kind]);
+      if (url) window.location.href = url;
+      else { toast.error(t("Could not start checkout.")); setBuying(null); }
+    } catch (e) { toast.error(e.message || "Checkout failed"); setBuying(null); }
+  };
+
+  if (isLoading || !data) return null;
+  const products = data.products || [];
+  const canBuy = isOwner && data.can_purchase;
+  const balanceOf = (kind) => kind === "ai_tokens"
+    ? `${toCredits(data.ai_tokens_balance || 0).toLocaleString()} ${t("credits")}`
+    : `${(data.email_credits_balance || 0).toLocaleString()} ${t("emails")}`;
+
+  return (
+    <Section title={t("Add-ons")} description={t("Top up AI credits or email sends. Prepaid and one-time - they never reset while your plan is active.")}>
+      {!data.can_purchase && (
+        <p className="text-xs text-muted-foreground mb-3">
+          {t("Add-ons are available to paying subscribers. Upgrade to purchase; add-ons pause if your plan ends and are removed after 6 months.")}
+        </p>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
+        {products.map((p) => {
+          const n = blocks[p.kind] ?? p.min_blocks;
+          const totalUnits = n * p.display_per_block;
+          const totalPrice = (n * p.unit_amount_cents) / 100;
+          const setN = (v) => setBlocks((b) => ({ ...b, [p.kind]: Math.max(p.min_blocks, v) }));
+          return (
+            <div key={p.kind} className="border border-border rounded-lg p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-sm">{t(p.label)}</p>
+                <span className="text-xs text-muted-foreground">{t("Balance")}: {balanceOf(p.kind)}</span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {p.display_per_block.toLocaleString()} {p.unit_label} {t("per block")} · {p.currency.toUpperCase()} {p.price_per_block.toFixed(2)}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={!canBuy || n <= p.min_blocks} onClick={() => setN(n - 1)}>-</Button>
+                <div className="flex-1 text-center">
+                  <div className="text-sm font-semibold tabular-nums">{totalUnits.toLocaleString()} {p.unit_label}</div>
+                  <div className="text-[11px] text-muted-foreground">{n} {n === 1 ? t("block") : t("blocks")} · {p.currency.toUpperCase()} {totalPrice.toFixed(2)}</div>
+                </div>
+                <Button variant="outline" size="sm" disabled={!canBuy} onClick={() => setN(n + 1)}>+</Button>
+              </div>
+              <Button className="w-full" size="sm" disabled={!canBuy || !p.purchasable || buying === p.kind} onClick={() => buy(p.kind)}>
+                {buying === p.kind ? t("Redirecting…") : !p.purchasable ? t("Coming soon") : t("Buy")}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    </Section>
+  );
 }
 
 function BillingTab({ company }) {
@@ -1586,6 +1668,9 @@ function BillingTab({ company }) {
         </div>
       </Section>
 
+      {/* Add-ons (prepaid AI credits / email sends) */}
+      <AddonsSection isOwner={isOwner} />
+
       {/* All plans */}
       <Section title={t("All plans")} description={t("Compare plans and upgrade at any time.")}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl">
@@ -1652,12 +1737,13 @@ function UsageTab({ company }) {
 
   const limits = planConfig?.limits ?? {};
 
-  // Account-wide plan caps (current totals, NOT period-scoped). AI credits are
-  // period-scoped so they get their own dedicated section below.
+  // Account-wide plan caps. team_members/profiles are current totals; Emails Sent
+  // is period-scoped (this calendar month) and its limit already includes any
+  // prepaid email add-on balance (server: email_limit = base + add-ons).
   const usageItems = [
-    { key: "team_members", label: t("Team members"),      limitKey: "team_members" },
-    { key: "profiles",     label: t("Customer profiles"), limitKey: "profiles"     },
-    { key: "campaigns",    label: t("Email campaigns"),   limitKey: "campaigns"    },
+    { key: "team_members", label: t("Team members"),      used: usage?.team_members, limit: limits.team_members },
+    { key: "profiles",     label: t("Customer profiles"), used: usage?.profiles,     limit: limits.profiles     },
+    { key: "emails",       label: t("Emails Sent"),       used: usage?.emails_sent_month, limit: usage?.email_limit },
   ];
 
   // ── AI credits for the current window (the one metric that resets) ──────────
@@ -1665,8 +1751,11 @@ function UsageTab({ company }) {
   // always exactly what enforcement uses: a trial gets one allowance through the
   // trial end; a paid plan resets on ai_period_end (the billing-day anniversary).
   const aiIsTrial     = usage?.ai_is_trial ?? isFreePlan;
-  const aiLimitRaw    = limits.ai_tokens;
-  const aiUnlimited   = aiLimitRaw === null || aiLimitRaw === undefined;
+  const aiBaseRaw     = limits.ai_tokens;
+  const aiUnlimited   = aiBaseRaw === null || aiBaseRaw === undefined;
+  // Effective limit = plan base + prepaid AI add-on balance (both raw tokens).
+  const aiAddonRaw    = usage?.ai_tokens_addon ?? 0;
+  const aiLimitRaw    = aiUnlimited ? null : aiBaseRaw + aiAddonRaw;
   const aiUsedCredits = toCredits(usage?.ai_tokens_month ?? 0);
   const aiLimitCredits = aiUnlimited ? null : toCredits(aiLimitRaw);
   const aiRemaining   = aiUnlimited ? null : Math.max(0, aiLimitCredits - aiUsedCredits);
@@ -1730,15 +1819,14 @@ function UsageTab({ company }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {usageItems.map(({ key, label, limitKey }) => {
-              const rawLimit = limits[limitKey];
-              const unlimited = rawLimit === null || rawLimit === undefined;
+            {usageItems.map(({ key, label, used, limit }) => {
+              const unlimited = limit === null || limit === undefined;
               return (
                 <div key={key} className="border border-border rounded-lg px-5 py-4">
                   <UsageBar
                     label={label}
-                    used={usage?.[key] ?? 0}
-                    limit={rawLimit}
+                    used={used ?? 0}
+                    limit={limit}
                     unlimited={unlimited}
                   />
                 </div>

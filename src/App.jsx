@@ -22,6 +22,7 @@ import Attributes from './pages/Attributes';
 import Settings from './pages/Settings';
 import Studio from './pages/Studio';
 import CompanySelect from './pages/CompanySelect';
+import AccountClosedBanner from './components/layout/AccountClosedBanner';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import VerifyEmail from './pages/auth/VerifyEmail';
@@ -80,6 +81,7 @@ const AuthenticatedApp = () => {
     return (
       <>
         <PendingInviteRedirect />
+        <AccountClosedBanner />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/join/:token" element={<JoinInvite />} />

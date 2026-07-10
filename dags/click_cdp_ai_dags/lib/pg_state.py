@@ -11,12 +11,14 @@ Resume logic (per report, read before the task fetches from GA):
   - is_debugging = TRUE  -> start from the 1st of (today - debug_months)   (default 2 months)
   - is_debugging = FALSE and last_sync_date set -> last_sync_date - overlap_days (default 7)
   - first run (no last_sync_date) -> full historical BACKFILL sized by the owning
-                            account's plan: 3 years for every tier by default
-                            (see PLAN_BACKFILL_YEARS). A default control row is
-                            inserted so you can flip is_debugging in the DB later.
+                            account's plan, capped at 24 months (2 years) for every
+                            tier by default (see PLAN_BACKFILL_YEARS). A default
+                            control row is inserted so you can flip is_debugging in
+                            the DB later.
 
-The plan-based backfill is what makes the FIRST "Sync Data" click pull the full
-3-year history; every subsequent (daily) run is the cheap incremental overlap.
+The plan-based backfill is what makes the FIRST "Sync Data" click pull up to the
+last 24 months of history; every subsequent (daily) run is the cheap incremental
+overlap.
 
 The watermark is advanced in the SAME transaction as the data load (see
 pg_loader.load_dataframe), so it never moves past data that failed to load - the
@@ -47,10 +49,11 @@ DEFAULT_DEBUG_MONTHS = 2
 DEFAULT_OVERLAP_DAYS = 7
 
 # First-run historical backfill window, in years, by account plan
-# (app.accounts.plan: 'lite' | 'standard' | 'enterprise'). Every tier gets 3 years
-# by default; bump a specific tier here if a plan should pull deeper history.
-PLAN_BACKFILL_YEARS = {"lite": 3, "standard": 3, "enterprise": 3}
-DEFAULT_BACKFILL_YEARS = 3
+# (app.accounts.plan: 'lite' | 'standard' | 'enterprise'). Capped at 24 months
+# (2 years) for every tier by default; bump a specific tier here if a plan should
+# pull deeper history.
+PLAN_BACKFILL_YEARS = {"lite": 2, "standard": 2, "enterprise": 2}
+DEFAULT_BACKFILL_YEARS = 2
 
 
 # --------------------------------------------------------------------------- #
@@ -217,9 +220,8 @@ def resolve_start_date(client, report, conn_kwargs=None, schema=None,
     ``control_table`` lets the commerce-platform pipelines keep their watermark
     in their own table (defaults to the GA ``ga_sync_control``).
     ``first_run_start`` (a date) overrides the plan-based first-run backfill
-    window - e.g. the Shopify landing flow backfills all history (epoch) for
-    contracted clients and a 2-month floor for trials. Ignored once a watermark
-    exists or when is_debugging is set.
+    window - e.g. the Shopify landing flow backfills the last 2 years for every
+    account. Ignored once a watermark exists or when is_debugging is set.
     """
     ck = _conn_kwargs(conn_kwargs)
     schema = schema or ga_config.PG_SCHEMA

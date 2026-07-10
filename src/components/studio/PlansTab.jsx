@@ -12,7 +12,7 @@ import { toCredits, toTokens } from "@/lib/credits";
 // stored as raw tokens but edited in "credits" (100,000 tokens = 1 credit).
 const LIMIT_FIELDS = [
   ["profiles",     "Customer profiles"],
-  ["campaigns",    "Email campaigns"],
+  ["campaigns",    "Emails Sent"],
   ["ai_tokens",    "AI credits"],
   ["team_members", "Team members"],
   ["workspaces",   "Workspaces"],

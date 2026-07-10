@@ -158,8 +158,9 @@ def build_shopify_configs(str_client_name=None, conn_kwargs=None):
       MINUS any workspace with an in-flight manual sync job (daily/manual dedup).
 
     Returns ``[{client, company_id, store_name, is_trial}, ...]`` - ``is_trial``
-    is the client's ACTUAL trial status (so a contracted client's first sync
-    still backfills all history, a trial client's the 2-month/3-year window).
+    is the client's ACTUAL trial status (retained for call-site compatibility; it
+    no longer caps the backfill window - every first sync now pulls the last 2
+    years, see shopify_state.resolve_start_window).
     The access token is deliberately NOT included so it never travels through
     XCom; fetch it inside the task with ``get_shopify_access_token(company_id)``.
     """

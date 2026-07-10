@@ -147,7 +147,7 @@ $$;
 -- ============================================================================
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
---  Three tiers: 'lite' ($100/mo, the entry tier carrying a 3-month trial that
+--  Three tiers: 'lite' ($100/mo, the entry tier carrying a 2-month trial that
 --  goes read-only on expiry), 'standard' ($199/mo) and 'enterprise' (contact sales).
 --  There is no in-app payment flow - the paid upgrade is applied out-of-band by
 --  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
@@ -177,18 +177,18 @@ INSERT INTO app.plans
 VALUES
   ('lite', 'Lite', '$100', '/month', null,
    'Everything you need to get started with AI-powered customer data.',
-   'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   'Start 2-month free trial', '/register', false, false, 1, 60, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","5 Emails Sent","100 credits / month"]'::jsonb,
    '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
-   'For growing teams that need more scale and unlimited campaigns.',
+   'For growing teams that need more scale and higher send volume.',
    'Get started', '/register', false, true, 2, null, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","50,000 Emails Sent","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":50000,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
   ('enterprise', 'Enterprise', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
    'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Enterprise', true, false, 3, null, 7,
-   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
+   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited Emails Sent","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
 -- ── Accounts (the org / billing root) ───────────────────────────────────────
@@ -513,6 +513,31 @@ CREATE INDEX support_tickets_user_idx    ON app.support_tickets(user_id, created
 CREATE INDEX support_tickets_company_idx ON app.support_tickets(company_id, created_date DESC);
 CREATE TRIGGER support_tickets_updated_date BEFORE UPDATE ON app.support_tickets
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- ── Account lifecycle events (trial/plan reminder + purge ledger) ───────────
+-- Idempotency ledger for the daily trial/plan lifecycle job
+-- (server/lib/billingLifecycle.js). An account is driven off app.accounts
+-- .plan_expires_at (non-NULL = "in trial / expiring", not sales-converted) through:
+--   trial_ending  -> T-warning_days : "your trial ends soon, upgrade"
+--   trial_ended   -> T-0            : "ended; data deleted in 6 months"
+--   purge_warning -> T+6mo-1day     : "data deleted tomorrow unless you subscribe"
+--   purged        -> T+6mo          : delete ALL data, keep the account+owner shell
+--                                     (so the email stays registered -> no re-trial)
+-- One row per (account, stage, expires_at): the job claims a stage with
+-- INSERT ... ON CONFLICT DO NOTHING, so it never emails/purges twice, and a
+-- sales-granted NEW expiry date resets the cycle (different expires_at = new key).
+CREATE TABLE app.account_lifecycle_events (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id  UUID        NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,
+  stage       TEXT        NOT NULL,   -- trial_ending | trial_ended | purge_warning | purged
+  expires_at  TIMESTAMPTZ NOT NULL,  -- the plan_expires_at this event was keyed to
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata    JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX account_lifecycle_events_uniq
+  ON app.account_lifecycle_events(account_id, stage, expires_at);
+CREATE INDEX account_lifecycle_events_account_idx
+  ON app.account_lifecycle_events(account_id, occurred_at DESC);
 
 -- ── Usage events (quota consumption: ai_token, profile_import, ...) ─────────
 CREATE TABLE app.usage_events (
@@ -1220,6 +1245,33 @@ CREATE INDEX popup_email_collected_company_idx   ON app.popup_email_collected(co
 CREATE INDEX popup_email_collected_popup_idx     ON app.popup_email_collected(popup_id);
 CREATE INDEX popup_email_collected_email_idx     ON app.popup_email_collected(LOWER(email));
 CREATE INDEX popup_email_collected_collected_idx ON app.popup_email_collected(collected_at DESC);
+
+-- ── Outbound link clicks (where pop-up clicks went; cache of microservice data) ─
+--  Durable projection of every `click_interaction` activity: one row per click,
+--  with the destination link_url (e.g. a WhatsApp wa.me deep-link, INCLUDING its
+--  prefilled ?text= so distinct messages stay distinct). Populated by the
+--  interaction.project_link_click() trigger (see 11_interaction.sql), mirroring
+--  the popup_email_collected projection. NOT deduped — every click is counted.
+CREATE TABLE app.popup_link_clicks (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  clicked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  company_id    UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  popup_id      UUID        REFERENCES app.popups(id) ON DELETE SET NULL,
+  popup_name    TEXT,
+  popup_ref     TEXT,
+  link_url      TEXT        NOT NULL,            -- full destination href incl. query string
+  link_text     TEXT,                            -- visible link text (first 100 chars)
+  link_target   TEXT,                            -- _self | _blank
+  open_method   TEXT,                            -- left_click | new_tab | ctrl_click | middle_click | right_click
+  source_url    TEXT,                            -- the page the click happened on (post_url)
+  visitor_id    TEXT,                            -- capsuite_apid (persistent browser id)
+  session_id    TEXT,                            -- capsuite_sid (session id)
+  metadata      JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE INDEX popup_link_clicks_company_idx ON app.popup_link_clicks(company_id);
+CREATE INDEX popup_link_clicks_popup_idx   ON app.popup_link_clicks(popup_id);
+CREATE INDEX popup_link_clicks_clicked_idx ON app.popup_link_clicks(clicked_at DESC);
+CREATE INDEX popup_link_clicks_url_idx      ON app.popup_link_clicks(popup_id, link_url);
 
 
 -- ========================= 06_attributes.sql =========================
@@ -2327,7 +2379,8 @@ CREATE INDEX gal_cohort_monthly_c_idx ON ga_landing.cohort_monthly(company_id);
 --  Resume logic (see dags/click_cdp_ai/lib/pg_state.py):
 --    is_debugging = TRUE  -> 1st of (today - debug_months)
 --    last_sync_date set   -> last_sync_date - overlap_days   (daily incremental)
---    first run            -> plan-based backfill: 3 years for every tier by default
+--    first run            -> plan-based backfill, capped at 24 months (2 years)
+--                            for every tier by default
 --  Keyed by capsuite_ref (1:1 with a workspace) so the external ETL stays
 --  decoupled from app UUIDs. Created here so the schema is authoritative; the
 --  DAG also ensures it at runtime (CREATE IF NOT EXISTS) for safety.
@@ -2726,6 +2779,73 @@ CREATE TRIGGER activities_project_email
   FOR EACH ROW
   WHEN (NEW.action = 'email_collection')
   EXECUTE FUNCTION interaction.project_email_collection();
+
+-- ── Project outbound link clicks into app.popup_link_clicks ─────────────────
+--  When the microservice records a `click_interaction` activity, surface it as a
+--  row on app.popup_link_clicks (what the pop-up "Top Outbound Links" breakdown
+--  reads). The destination and click context come from json_parameters:
+--    { link_url, link_text, link_target, open_method, post_url }
+--  link_url keeps its full query string, so a WhatsApp wa.me link and its
+--  prefilled ?text= are preserved verbatim. NOT deduped — one row per click.
+CREATE OR REPLACE FUNCTION interaction.project_link_click() RETURNS trigger AS $$
+DECLARE
+  v_json        jsonb;
+  v_link        text;
+  v_ref         text;
+  v_cdp_company uuid;
+  v_popup       app.popups%ROWTYPE;
+BEGIN
+  -- json_parameters is TEXT holding a JSON object; tolerate malformed payloads.
+  BEGIN
+    v_json := NEW.json_parameters::jsonb;
+  EXCEPTION WHEN others THEN
+    v_json := '{}'::jsonb;
+  END;
+
+  v_link := NULLIF(btrim(v_json->>'link_url'), '');
+  IF v_link IS NULL THEN
+    RETURN NEW;  -- click with no destination captured (e.g. javascript: link)
+  END IF;
+
+  -- Resolve the owning popup: activity → interaction → service company → workspace.
+  SELECT i.cdp_reference_id, c.cdp_company_id
+    INTO v_ref, v_cdp_company
+    FROM interaction.interactions i
+    JOIN interaction.companies c ON c.id = i.company_id
+   WHERE i.id = NEW.correlated_interaction_id;
+
+  IF v_cdp_company IS NULL THEN
+    RETURN NEW;  -- orphan activity, cannot attribute to a workspace
+  END IF;
+
+  SELECT * INTO v_popup
+    FROM app.popups
+   WHERE company_id = v_cdp_company AND cdp_reference_id = v_ref
+   LIMIT 1;
+
+  INSERT INTO app.popup_link_clicks (
+    clicked_at, company_id, popup_id, popup_name, popup_ref,
+    link_url, link_text, link_target, open_method,
+    source_url, visitor_id, session_id, metadata
+  ) VALUES (
+    NEW.created_at, v_cdp_company, v_popup.id, v_popup.name, v_ref,
+    v_link,
+    NULLIF(v_json->>'link_text',''), NULLIF(v_json->>'link_target',''), NULLIF(v_json->>'open_method',''),
+    COALESCE(NULLIF(v_json->>'post_url',''), NULLIF(v_json->>'source_url','')),
+    NEW.capsuite_apid, NEW.capsuite_sid,
+    jsonb_build_object('source','interaction_activity','activity_id', NEW.id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_project_link_click ON interaction.activities;
+CREATE TRIGGER activities_project_link_click
+  AFTER INSERT ON interaction.activities
+  FOR EACH ROW
+  WHEN (NEW.action = 'click_interaction')
+  EXECUTE FUNCTION interaction.project_link_click();
 
 -- ── Sync bookkeeping (vestigial: kept for compatibility; no ETL in unified mode) ─
 CREATE TABLE interaction.sync_state (
@@ -3884,14 +4004,14 @@ CREATE TRIGGER activities_project_email
 -- 2026-06-30_lite_standard_pro_plans.sql
 -- Replace the { free, paid } plan model with { lite, standard, pro }.
 --
---   Lite     ($100/mo, 3-month trial) - entry tier  (was 'free')
+--   Lite     ($100/mo, 2-month trial) - entry tier  (was 'free')
 --   Standard ($199/mo)               - growth tier   (was 'paid')
 --   Pro      (contact sales)         - custom tier   (new)
 --
 -- Account remap: free -> lite (trial preserved), paid -> standard.
 --
 -- The trial / read-only state is now driven purely by plan_expires_at (a non-NULL
--- value means "in trial"), so it is tier-agnostic: Lite carries a 3-month trial,
+-- value means "in trial"), so it is tier-agnostic: Lite carries a 2-month trial,
 -- Standard/Pro never do. There is still no in-app payment flow - the paid upgrade
 -- is applied out-of-band by sales (set plan + clear plan_expires_at).
 --
@@ -3912,20 +4032,20 @@ INSERT INTO app.plans
 VALUES
   ('lite', 'Lite', '$100', '/month', NULL,
    'Everything you need to get started with AI-powered customer data.',
-   'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   'Start 2-month free trial', '/register', false, false, 1, 60, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","5 Emails Sent","100 credits / month"]'::jsonb,
    '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb,
    true),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
-   'For growing teams that need more scale and unlimited campaigns.',
+   'For growing teams that need more scale and higher send volume.',
    'Get started', '/register', false, true, 2, NULL, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb,
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","50,000 Emails Sent","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":50000,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb,
    true),
   ('pro', 'Pro', 'Contact sales', '', NULL,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
    'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Pro', true, false, 3, NULL, 7,
-   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
+   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited Emails Sent","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb,
    true)
 ON CONFLICT (id) DO UPDATE SET
@@ -4915,5 +5035,375 @@ UPDATE app.ai_usage u
                 (LEAST(u.cached_input_tokens, u.input_tokens)                     / 1000000.0) * p.cached_input_per_1m +
                 (u.output_tokens                                                  / 1000000.0) * p.output_per_1m
               , 6);
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-09_billing_lifecycle.sql =====================
+
+-- ============================================================================
+-- 2026-07-09_billing_lifecycle.sql
+-- Trial / plan lifecycle: reminder emails + end-of-life data purge.
+--
+-- A daily job (server/lib/billingLifecycle.js) drives every account that still
+-- has a plan_expires_at (i.e. "in trial / expiring", not sales-converted) through:
+--   trial_ending  -> T-warning_days : "your trial ends soon, upgrade"
+--   trial_ended   -> T-0            : "ended; data deleted in 6 months"
+--   purge_warning -> T+6mo-1day     : "data deleted tomorrow unless you subscribe"
+--   purged        -> T+6mo          : delete ALL data, keep the account+owner shell
+--
+-- This table is the idempotency ledger: one row per (account, stage, expires_at),
+-- so the daily job is safe to re-run and a sales-granted NEW expiry date resets the
+-- cycle automatically (a different expires_at is a different dedupe key).
+--
+-- Idempotent: safe to re-run.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS app.account_lifecycle_events (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id  UUID        NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,
+  stage       TEXT        NOT NULL,   -- trial_ending | trial_ended | purge_warning | purged
+  expires_at  TIMESTAMPTZ NOT NULL,  -- the plan_expires_at this event was keyed to
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata    JSONB       NOT NULL DEFAULT '{}'
+);
+
+-- One event per stage per expiry cycle -> the daily job claims a stage with an
+-- INSERT ... ON CONFLICT DO NOTHING, so it never emails/purges twice.
+CREATE UNIQUE INDEX IF NOT EXISTS account_lifecycle_events_uniq
+  ON app.account_lifecycle_events(account_id, stage, expires_at);
+CREATE INDEX IF NOT EXISTS account_lifecycle_events_account_idx
+  ON app.account_lifecycle_events(account_id, occurred_at DESC);
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-09_emails_sent_plan_limit.sql =====================
+
+-- ============================================================================
+-- 2026-07-09_emails_sent_plan_limit.sql
+-- Rework the plan email allowance from a campaign count into an "Emails Sent"
+-- quota, and cap Standard instead of leaving it unlimited:
+--
+--   Lite      -> "5 Emails Sent"        (campaigns limit stays 5)
+--   Standard  -> "50,000 Emails Sent"   (campaigns limit null -> 50,000)
+--   Pro/Ent   -> "Unlimited Emails Sent" (unchanged: null)
+--
+-- The stored limit key is still `campaigns` (enforced in server/routes/edm.js);
+-- only its meaning/label changes to emails sent. Idempotent: safe to re-run.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- Standard: cap the emails-sent allowance at 50,000 (was unlimited).
+UPDATE app.plans
+   SET limits      = jsonb_set(limits, '{campaigns}', '50000'::jsonb),
+       description = 'For growing teams that need more scale and higher send volume.',
+       features    = '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","50,000 Emails Sent","300 credits / month"]'::jsonb
+ WHERE id = 'standard';
+
+-- Lite: surface the existing 5-campaign cap as "5 Emails Sent".
+UPDATE app.plans
+   SET features = '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","5 Emails Sent","100 credits / month"]'::jsonb
+ WHERE id = 'lite';
+
+-- Top tier (Pro or Enterprise depending on catalog): keep unlimited, relabel.
+UPDATE app.plans
+   SET features = '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited Emails Sent","Custom credits","Priority support"]'::jsonb
+ WHERE id IN ('pro', 'enterprise');
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-09_popup_link_clicks.sql =====================
+
+-- 2026-07-09  Durable projection of pop-up outbound link clicks.
+-- ----------------------------------------------------------------------------
+-- Adds app.popup_link_clicks + the interaction.project_link_click() trigger,
+-- mirroring the email_collection projection. Every `click_interaction` activity
+-- becomes one row carrying the destination link_url (full query string kept, so
+-- a WhatsApp wa.me deep-link and its prefilled ?text= stay distinct/preserved).
+-- Backfills clicks that predate the trigger. Idempotent (safe to re-run).
+-- The final state here is already folded into server/sql/05_popups.sql and
+-- server/sql/11_interaction.sql; this file upgrades pre-existing databases.
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS app.popup_link_clicks (
+  id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  clicked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  company_id    UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,
+  popup_id      UUID        REFERENCES app.popups(id) ON DELETE SET NULL,
+  popup_name    TEXT,
+  popup_ref     TEXT,
+  link_url      TEXT        NOT NULL,
+  link_text     TEXT,
+  link_target   TEXT,
+  open_method   TEXT,
+  source_url    TEXT,
+  visitor_id    TEXT,
+  session_id    TEXT,
+  metadata      JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS popup_link_clicks_company_idx ON app.popup_link_clicks(company_id);
+CREATE INDEX IF NOT EXISTS popup_link_clicks_popup_idx   ON app.popup_link_clicks(popup_id);
+CREATE INDEX IF NOT EXISTS popup_link_clicks_clicked_idx ON app.popup_link_clicks(clicked_at DESC);
+CREATE INDEX IF NOT EXISTS popup_link_clicks_url_idx     ON app.popup_link_clicks(popup_id, link_url);
+
+CREATE OR REPLACE FUNCTION interaction.project_link_click() RETURNS trigger AS $$
+DECLARE
+  v_json        jsonb;
+  v_link        text;
+  v_ref         text;
+  v_cdp_company uuid;
+  v_popup       app.popups%ROWTYPE;
+BEGIN
+  BEGIN
+    v_json := NEW.json_parameters::jsonb;
+  EXCEPTION WHEN others THEN
+    v_json := '{}'::jsonb;
+  END;
+
+  v_link := NULLIF(btrim(v_json->>'link_url'), '');
+  IF v_link IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT i.cdp_reference_id, c.cdp_company_id
+    INTO v_ref, v_cdp_company
+    FROM interaction.interactions i
+    JOIN interaction.companies c ON c.id = i.company_id
+   WHERE i.id = NEW.correlated_interaction_id;
+
+  IF v_cdp_company IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT * INTO v_popup
+    FROM app.popups
+   WHERE company_id = v_cdp_company AND cdp_reference_id = v_ref
+   LIMIT 1;
+
+  INSERT INTO app.popup_link_clicks (
+    clicked_at, company_id, popup_id, popup_name, popup_ref,
+    link_url, link_text, link_target, open_method,
+    source_url, visitor_id, session_id, metadata
+  ) VALUES (
+    NEW.created_at, v_cdp_company, v_popup.id, v_popup.name, v_ref,
+    v_link,
+    NULLIF(v_json->>'link_text',''), NULLIF(v_json->>'link_target',''), NULLIF(v_json->>'open_method',''),
+    COALESCE(NULLIF(v_json->>'post_url',''), NULLIF(v_json->>'source_url','')),
+    NEW.capsuite_apid, NEW.capsuite_sid,
+    jsonb_build_object('source','interaction_activity','activity_id', NEW.id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_project_link_click ON interaction.activities;
+CREATE TRIGGER activities_project_link_click
+  AFTER INSERT ON interaction.activities
+  FOR EACH ROW
+  WHEN (NEW.action = 'click_interaction')
+  EXECUTE FUNCTION interaction.project_link_click();
+
+-- Backfill historical clicks recorded before the trigger existed. Deduped on the
+-- source activity id so re-running the migration never double-inserts.
+INSERT INTO app.popup_link_clicks (
+  clicked_at, company_id, popup_id, popup_name, popup_ref,
+  link_url, link_text, link_target, open_method,
+  source_url, visitor_id, session_id, metadata
+)
+SELECT
+  a.created_at, c.cdp_company_id, p.id, p.name, i.cdp_reference_id,
+  NULLIF(btrim((a.json_parameters)::jsonb->>'link_url'), ''),
+  NULLIF((a.json_parameters)::jsonb->>'link_text', ''),
+  NULLIF((a.json_parameters)::jsonb->>'link_target', ''),
+  NULLIF((a.json_parameters)::jsonb->>'open_method', ''),
+  COALESCE(NULLIF((a.json_parameters)::jsonb->>'post_url',''), NULLIF((a.json_parameters)::jsonb->>'source_url','')),
+  a.capsuite_apid, a.capsuite_sid,
+  jsonb_build_object('source','backfill','activity_id', a.id)
+FROM interaction.activities a
+JOIN interaction.interactions i ON i.id = a.correlated_interaction_id
+JOIN interaction.companies   c ON c.id = i.company_id
+LEFT JOIN app.popups p ON p.company_id = c.cdp_company_id AND p.cdp_reference_id = i.cdp_reference_id
+WHERE a.action = 'click_interaction'
+  AND a.json_parameters LIKE '{%'
+  AND NULLIF(btrim((a.json_parameters)::jsonb->>'link_url'), '') IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM app.popup_link_clicks lc
+    WHERE lc.metadata->>'activity_id' = a.id::text
+  );
+
+
+-- ===================== migrations/2026-07-09_trial_60_days.sql =====================
+
+-- ============================================================================
+-- 2026-07-09_trial_60_days.sql
+-- Shorten the Lite trial from 90 days to 60 days.
+--
+-- trial_days on the Lite plan row is the single source of truth: new signups
+-- read it (server/routes/auth.js) and the TrialBanner renders "{trial_days}-day
+-- free trial". This changes both the length granted to FUTURE signups AND pulls
+-- existing active trials that still sit on the default 90-day window down to 60.
+--
+-- Idempotent: safe to re-run.
+-- Run with: psql "$DATABASE_URL" -f <file>
+-- ============================================================================
+
+BEGIN;
+
+-- 1. New signups + advertised copy: 60-day trial.
+UPDATE app.plans
+   SET trial_days = 60,
+       cta_label  = 'Start 2-month free trial'
+ WHERE id = 'lite';
+
+-- 2. Pull active trials off the default 90-day window and onto 60 days from
+--    signup. We match ONLY the untouched default (plan_expires_at exactly =
+--    created_date + 90 days, as set by signup and the 2026-07-02 extend
+--    migration) so we never clobber a trial that sales manually lengthened/
+--    shortened, and never touch sales-converted accounts (plan_expires_at NULL).
+--    This only moves the date EARLIER (60 < 90). Re-running is a no-op because
+--    the row then sits at created_date + 60, no longer matching the guard.
+UPDATE app.accounts
+   SET plan_expires_at = created_date + INTERVAL '60 days'
+ WHERE plan = 'lite'
+   AND plan_expires_at IS NOT NULL
+   AND plan_expires_at = created_date + INTERVAL '90 days';
+
+COMMIT;
+
+
+-- ===================== migrations/2026-07-09_addons.sql =====================
+
+-- ============================================================================
+-- Prepaid ADD-ONS for AI tokens and email credits. See the standalone migration
+-- server/sql/migrations/2026-07-09_addons.sql for the full rationale. Inlined
+-- here so a fresh bootstrap ships the tables + ai_quota v4 in one pass.
+-- ============================================================================
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS app.account_addons (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id   UUID        NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,
+  kind         TEXT        NOT NULL CHECK (kind IN ('ai_tokens','email_credits')),
+  quantity     BIGINT      NOT NULL CHECK (quantity > 0),
+  remaining    BIGINT      NOT NULL CHECK (remaining >= 0),
+  blocks       INTEGER,
+  status       TEXT        NOT NULL DEFAULT 'active',
+  source       TEXT        NOT NULL DEFAULT 'stripe',
+  stripe_checkout_session TEXT,
+  stripe_payment_intent   TEXT,
+  created_by   UUID        REFERENCES app.users(id) ON DELETE SET NULL,
+  created_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_date TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS account_addons_acct_kind_idx
+  ON app.account_addons(account_id, kind, status, created_date);
+CREATE UNIQUE INDEX IF NOT EXISTS account_addons_checkout_uniq
+  ON app.account_addons(stripe_checkout_session)
+  WHERE stripe_checkout_session IS NOT NULL;
+DROP TRIGGER IF EXISTS account_addons_updated_date ON app.account_addons;
+CREATE TRIGGER account_addons_updated_date BEFORE UPDATE ON app.account_addons
+  FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+CREATE TABLE IF NOT EXISTS app.addon_ledger (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id  UUID        NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,
+  kind        TEXT        NOT NULL,
+  amount      BIGINT      NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata    JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS addon_ledger_acct_kind_idx
+  ON app.addon_ledger(account_id, kind, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS app.addon_products (
+  kind              TEXT        PRIMARY KEY,
+  label             TEXT        NOT NULL,
+  unit_label        TEXT        NOT NULL,
+  block_size        BIGINT      NOT NULL,
+  display_per_block BIGINT      NOT NULL,
+  min_blocks        INTEGER     NOT NULL DEFAULT 1,
+  unit_amount_cents INTEGER     NOT NULL DEFAULT 0,
+  currency          TEXT        NOT NULL DEFAULT 'usd',
+  stripe_price_id   TEXT,
+  is_active         BOOLEAN     NOT NULL DEFAULT true,
+  updated_date      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO app.addon_products
+  (kind, label, unit_label, block_size, display_per_block, min_blocks, unit_amount_cents, currency, stripe_price_id, is_active)
+VALUES
+  ('ai_tokens',     'AI credits',    'credits', 5000000, 50,    1, 2500, 'usd', NULL, true),
+  ('email_credits', 'Email credits', 'emails',  10000,   10000, 1, 1000, 'usd', NULL, true)
+ON CONFLICT (kind) DO UPDATE SET
+  label=EXCLUDED.label, unit_label=EXCLUDED.unit_label, block_size=EXCLUDED.block_size,
+  display_per_block=EXCLUDED.display_per_block, min_blocks=EXCLUDED.min_blocks;
+
+CREATE OR REPLACE FUNCTION app.addon_balance(p_account_id UUID, p_kind TEXT)
+RETURNS BIGINT LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(SUM(ad.remaining), 0)::BIGINT
+    FROM app.account_addons ad
+    JOIN app.accounts a ON a.id = ad.account_id
+   WHERE ad.account_id = p_account_id
+     AND ad.kind       = p_kind
+     AND ad.status     = 'active'
+     AND ad.remaining  > 0
+     AND a.is_active = true
+     AND (a.plan_expires_at IS NULL OR a.plan_expires_at > now());
+$$;
+
+DROP FUNCTION IF EXISTS app.ai_quota(UUID);
+CREATE OR REPLACE FUNCTION app.ai_quota(p_account_id UUID)
+RETURNS TABLE(used BIGINT, token_limit BIGINT, is_over BOOLEAN,
+              period_start TIMESTAMPTZ, period_end TIMESTAMPTZ, is_trial BOOLEAN)
+LANGUAGE sql STABLE AS $$
+  WITH acct AS (
+    SELECT a.created_date, a.plan_expires_at, a.plan_upgraded_at,
+           COALESCE(
+             NULLIF(a.settings->'limit_overrides'->>'ai_tokens', '')::BIGINT,
+             NULLIF(p.limits->>'ai_tokens', '')::BIGINT
+           ) AS base_limit,
+           app.addon_balance(a.id, 'ai_tokens') AS addon_balance
+      FROM app.accounts a
+      JOIN app.plans    p ON p.id = a.plan
+     WHERE a.id = p_account_id
+  ),
+  win AS (
+    SELECT (acct.plan_expires_at IS NOT NULL) AS is_trial, acct.plan_expires_at,
+      CASE
+        WHEN acct.plan_expires_at IS NOT NULL THEN acct.created_date
+        ELSE COALESCE(acct.plan_upgraded_at, acct.created_date)
+          + make_interval(months =>
+              (EXTRACT(YEAR  FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT * 12
+             + EXTRACT(MONTH FROM age(now(), COALESCE(acct.plan_upgraded_at, acct.created_date)))::INT))
+      END AS period_start
+      FROM acct
+  ),
+  win2 AS (
+    SELECT is_trial, period_start,
+           CASE WHEN is_trial THEN plan_expires_at
+                ELSE period_start + INTERVAL '1 month' END AS period_end
+      FROM win
+  ),
+  u AS (
+    SELECT COALESCE(SUM(total_tokens), 0)::BIGINT AS used
+      FROM app.ai_usage, win2
+     WHERE account_id = p_account_id AND occurred_at >= win2.period_start
+  )
+  SELECT u.used,
+         CASE WHEN acct.base_limit IS NULL THEN NULL
+              ELSE acct.base_limit + acct.addon_balance END AS token_limit,
+         (acct.base_limit IS NOT NULL
+            AND u.used >= acct.base_limit + acct.addon_balance) AS is_over,
+         win2.period_start, win2.period_end, win2.is_trial
+    FROM u CROSS JOIN acct CROSS JOIN win2;
+$$;
 
 COMMIT;

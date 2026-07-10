@@ -9,6 +9,8 @@
 // Cost is frozen at insert time from app.ai_model_pricing (rates cached in-process;
 // call clearPricingCache() after an admin edits a rate).
 
+import { drawDownAiAddons } from "./addons.js";
+
 const _priceCache = new Map(); // model -> { input_per_1m, cached_input_per_1m, output_per_1m, currency }
 
 export function clearPricingCache() {
@@ -145,6 +147,10 @@ export async function recordAiUsage(pool, ctx = {}) {
         [companyId, userId, total, JSON.stringify({ feature, model })]
       );
     }
+
+    // Once the recurring period base is exhausted, charge the overflow of this
+    // call to the account's prepaid ai_tokens add-ons (no-op when none/within base).
+    if (accountId) await drawDownAiAddons(pool, accountId);
   } catch (err) {
     console.error("recordAiUsage failed:", err.message);
   }

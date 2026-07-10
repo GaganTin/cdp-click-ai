@@ -96,6 +96,18 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
     onError: (e) => toast.error(e.message || "Impersonation failed"),
   });
 
+  const [grantKind, setGrantKind] = useState("ai_tokens");
+  const [grantBlocks, setGrantBlocks] = useState(1);
+  const grant = useMutation({
+    mutationFn: () => appClient.addons.grant(accountId, grantKind, Number(grantBlocks) || 1),
+    onSuccess: () => {
+      toast.success("Add-on granted");
+      setGrantBlocks(1);
+      qc.invalidateQueries({ queryKey: ["admin", "account", accountId] });
+    },
+    onError: (e) => toast.error(e.message || "Grant failed"),
+  });
+
   const del = useMutation({
     mutationFn: () => appClient.admin.deleteAccount(accountId),
     onSuccess: () => {
@@ -242,6 +254,32 @@ export default function AccountDetailDrawer({ accountId, onClose }) {
             <Button onClick={onSave} disabled={!dirty || save.isPending} className="w-full">
               {save.isPending ? "Saving…" : "Save changes"}
             </Button>
+
+            {/* Manual add-on grant (support / comps). Prepaid buckets: 1 AI block =
+                5M tokens (50 credits); 1 email block = 10,000 emails. */}
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4" /> Grant add-on
+              </h3>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <label className="block text-xs text-muted-foreground mb-1">Type</label>
+                  <select className="w-full h-9 rounded-md border border-border bg-background px-2 text-sm"
+                    value={grantKind} onChange={(e) => setGrantKind(e.target.value)}>
+                    <option value="ai_tokens">AI credits (5M tokens / block)</option>
+                    <option value="email_credits">Email credits (10,000 / block)</option>
+                  </select>
+                </div>
+                <div className="w-24">
+                  <label className="block text-xs text-muted-foreground mb-1">Blocks</label>
+                  <Input type="number" min="1" value={grantBlocks}
+                    onChange={(e) => setGrantBlocks(e.target.value)} />
+                </div>
+                <Button variant="outline" disabled={grant.isPending} onClick={() => grant.mutate()}>
+                  {grant.isPending ? "Granting…" : "Grant"}
+                </Button>
+              </div>
+            </section>
 
             {/* Workspaces */}
             <section className="space-y-3">

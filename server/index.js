@@ -16,6 +16,7 @@ import { createIntegrationsRouter } from "./routes/integrations.js";
 import { createAttributesRouter } from "./routes/attributes.js";
 import { startIntegrationQueueWorker } from "./lib/integrationQueue.js";
 import { startNotificationScanWorker } from "./lib/notificationsScan.js";
+import { runBillingLifecycle } from "./lib/billingLifecycle.js";
 import { startAttributeQueueWorker, processNextAttributeJob } from "./lib/attributeQueue.js";
 import { runDailyRuleRefresh } from "./lib/attributeRules.js";
 import { runDailyTestLinkRefresh } from "./lib/attributeTestLinks.js";
@@ -24,6 +25,7 @@ import { createCompanyRouter } from "./routes/company.js";
 import { createAccountRouter } from "./routes/account.js";
 import { createPlansRouter, FALLBACK_PLANS } from "./routes/plans.js";
 import { createBillingRouter } from "./routes/billing.js";
+import { createAddonsRouter, stripeWebhookHandler } from "./routes/addons.js";
 import { createAdminRouter } from "./routes/admin.js";
 import { createSupportRouter } from "./routes/support.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
@@ -1479,7 +1481,9 @@ async function runSimpleLLM(prompt, jsonMode = false, usageCtx = null) {
 
 // ── Express setup ─────────────────────────────────────────────────────────────
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "5mb" }));
+// Stash the raw body so the Stripe webhook can verify its signature (Stripe signs
+// the exact received bytes; the re-serialised JSON would not match).
+app.use(express.json({ limit: "5mb", verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(cookieParser());
 app.use("/uploads", express.static(uploadsDir));
 
@@ -4104,6 +4108,9 @@ if (pool) {
   app.use("/api/companies", createCompanyRouter(pool));
   app.use("/api/account", createAccountRouter(pool));
   app.use("/api/billing", createBillingRouter(pool));
+  app.use("/api/addons", createAddonsRouter(pool));
+  // Stripe fulfilment webhook (public; verified by signature, not auth cookie).
+  app.post("/api/webhooks/stripe", stripeWebhookHandler(pool));
   app.use("/api/admin", createAdminRouter(pool));
   app.use("/api/support", createSupportRouter(pool));
   app.use("/api/notifications", createNotificationsRouter(pool));
@@ -4383,6 +4390,24 @@ async function start() {
   // are static, so
   // a nightly rebuild would only re-do identical work. A manual "Sync Data" run does
   // a full 90d rebuild on demand if a from-scratch refresh is ever wanted.
+
+  // ── Daily trial/plan lifecycle (4:30 AM) ─────────────────────────────────
+  // Reminder emails (trial ending / ended / final deletion notice) and, 6 months
+  // after an unconverted trial ends, the end-of-life data purge. Fully idempotent
+  // (app.account_lifecycle_events ledger) so a re-run or a missed day is safe.
+  if (pool) {
+    cron.schedule("30 4 * * *", async () => {
+      try {
+        const r = await runBillingLifecycle(pool);
+        if (r.ending || r.ended || r.warned || r.purged) {
+          console.log(`[Billing lifecycle] ending=${r.ending} ended=${r.ended} warned=${r.warned} purged=${r.purged}`);
+        }
+      } catch (e) {
+        console.error("[Billing lifecycle] Fatal error:", e.message);
+      }
+    });
+    console.log("  Billing: Daily trial/plan lifecycle cron scheduled (4:30 AM daily)");
+  }
 
   // ── Integration sync queue worker ─────────────────────────────────────────
   if (pool) {

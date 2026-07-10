@@ -671,7 +671,8 @@ CREATE INDEX gal_cohort_monthly_c_idx ON ga_landing.cohort_monthly(company_id);
 --  Resume logic (see dags/click_cdp_ai/lib/pg_state.py):
 --    is_debugging = TRUE  -> 1st of (today - debug_months)
 --    last_sync_date set   -> last_sync_date - overlap_days   (daily incremental)
---    first run            -> plan-based backfill: 3 years for every tier by default
+--    first run            -> plan-based backfill, capped at 24 months (2 years)
+--                            for every tier by default
 --  Keyed by capsuite_ref (1:1 with a workspace) so the external ETL stays
 --  decoupled from app UUIDs. Created here so the schema is authoritative; the
 --  DAG also ensures it at runtime (CREATE IF NOT EXISTS) for safety.

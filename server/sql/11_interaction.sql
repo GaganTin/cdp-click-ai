@@ -180,6 +180,73 @@ CREATE TRIGGER activities_project_email
   WHEN (NEW.action = 'email_collection')
   EXECUTE FUNCTION interaction.project_email_collection();
 
+-- ── Project outbound link clicks into app.popup_link_clicks ─────────────────
+--  When the microservice records a `click_interaction` activity, surface it as a
+--  row on app.popup_link_clicks (what the pop-up "Top Outbound Links" breakdown
+--  reads). The destination and click context come from json_parameters:
+--    { link_url, link_text, link_target, open_method, post_url }
+--  link_url keeps its full query string, so a WhatsApp wa.me link and its
+--  prefilled ?text= are preserved verbatim. NOT deduped — one row per click.
+CREATE OR REPLACE FUNCTION interaction.project_link_click() RETURNS trigger AS $$
+DECLARE
+  v_json        jsonb;
+  v_link        text;
+  v_ref         text;
+  v_cdp_company uuid;
+  v_popup       app.popups%ROWTYPE;
+BEGIN
+  -- json_parameters is TEXT holding a JSON object; tolerate malformed payloads.
+  BEGIN
+    v_json := NEW.json_parameters::jsonb;
+  EXCEPTION WHEN others THEN
+    v_json := '{}'::jsonb;
+  END;
+
+  v_link := NULLIF(btrim(v_json->>'link_url'), '');
+  IF v_link IS NULL THEN
+    RETURN NEW;  -- click with no destination captured (e.g. javascript: link)
+  END IF;
+
+  -- Resolve the owning popup: activity → interaction → service company → workspace.
+  SELECT i.cdp_reference_id, c.cdp_company_id
+    INTO v_ref, v_cdp_company
+    FROM interaction.interactions i
+    JOIN interaction.companies c ON c.id = i.company_id
+   WHERE i.id = NEW.correlated_interaction_id;
+
+  IF v_cdp_company IS NULL THEN
+    RETURN NEW;  -- orphan activity, cannot attribute to a workspace
+  END IF;
+
+  SELECT * INTO v_popup
+    FROM app.popups
+   WHERE company_id = v_cdp_company AND cdp_reference_id = v_ref
+   LIMIT 1;
+
+  INSERT INTO app.popup_link_clicks (
+    clicked_at, company_id, popup_id, popup_name, popup_ref,
+    link_url, link_text, link_target, open_method,
+    source_url, visitor_id, session_id, metadata
+  ) VALUES (
+    NEW.created_at, v_cdp_company, v_popup.id, v_popup.name, v_ref,
+    v_link,
+    NULLIF(v_json->>'link_text',''), NULLIF(v_json->>'link_target',''), NULLIF(v_json->>'open_method',''),
+    COALESCE(NULLIF(v_json->>'post_url',''), NULLIF(v_json->>'source_url','')),
+    NEW.capsuite_apid, NEW.capsuite_sid,
+    jsonb_build_object('source','interaction_activity','activity_id', NEW.id)
+  );
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS activities_project_link_click ON interaction.activities;
+CREATE TRIGGER activities_project_link_click
+  AFTER INSERT ON interaction.activities
+  FOR EACH ROW
+  WHEN (NEW.action = 'click_interaction')
+  EXECUTE FUNCTION interaction.project_link_click();
+
 -- ── Sync bookkeeping (vestigial: kept for compatibility; no ETL in unified mode) ─
 CREATE TABLE interaction.sync_state (
   company_id     UUID        NOT NULL REFERENCES app.companies(id) ON DELETE CASCADE,

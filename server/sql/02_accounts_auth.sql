@@ -34,7 +34,7 @@
 -- ============================================================================
 
 -- ── Plans (catalog; account.plan references this by id) ─────────────────────
---  Three tiers: 'lite' ($100/mo, the entry tier carrying a 3-month trial that
+--  Three tiers: 'lite' ($100/mo, the entry tier carrying a 2-month trial that
 --  goes read-only on expiry), 'standard' ($199/mo) and 'enterprise' (contact sales).
 --  There is no in-app payment flow - the paid upgrade is applied out-of-band by
 --  sales (set app.accounts.plan + clear plan_expires_at). Trial state is driven
@@ -64,18 +64,18 @@ INSERT INTO app.plans
 VALUES
   ('lite', 'Lite', '$100', '/month', null,
    'Everything you need to get started with AI-powered customer data.',
-   'Start 3-month free trial', '/register', false, false, 1, 90, 7,
-   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","100 credits / month"]'::jsonb,
+   'Start 2-month free trial', '/register', false, false, 1, 60, 7,
+   '["Unlimited team members","2 workspaces","Up to 10,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","5 Emails Sent","100 credits / month"]'::jsonb,
    '{"profiles":10000,"campaigns":5,"ai_tokens":10000000,"team_members":null,"workspaces":2}'::jsonb),
   ('standard', 'Standard', '$199', '/month', 'Most popular',
-   'For growing teams that need more scale and unlimited campaigns.',
+   'For growing teams that need more scale and higher send volume.',
    'Get started', '/register', false, true, 2, null, 7,
-   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","300 credits / month"]'::jsonb,
-   '{"profiles":50000,"campaigns":null,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
+   '["Unlimited team members","5 workspaces","Up to 50,000 customer profiles","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","50,000 Emails Sent","300 credits / month"]'::jsonb,
+   '{"profiles":50000,"campaigns":50000,"ai_tokens":30000000,"team_members":null,"workspaces":5}'::jsonb),
   ('enterprise', 'Enterprise', 'Contact sales', '', null,
    'For high-volume teams. Custom profile and AI limits, tailored to you.',
    'Contact sales', 'mailto:support@clickcdp.com?subject=Upgrade to Enterprise', true, false, 3, null, 7,
-   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited email campaigns","Custom credits","Priority support"]'::jsonb,
+   '["Unlimited team members","5+ workspaces","Custom customer profile volume","AI Analyst","Intelligent Segmentation","UTM tracking","AI Content & Traffic Analysis","Dynamic Pop-up","Unlimited Emails Sent","Custom credits","Priority support"]'::jsonb,
    '{"profiles":null,"campaigns":null,"ai_tokens":null,"team_members":null,"workspaces":null}'::jsonb);
 
 -- ── Accounts (the org / billing root) ───────────────────────────────────────
@@ -400,6 +400,31 @@ CREATE INDEX support_tickets_user_idx    ON app.support_tickets(user_id, created
 CREATE INDEX support_tickets_company_idx ON app.support_tickets(company_id, created_date DESC);
 CREATE TRIGGER support_tickets_updated_date BEFORE UPDATE ON app.support_tickets
   FOR EACH ROW EXECUTE FUNCTION app.set_updated_date();
+
+-- ── Account lifecycle events (trial/plan reminder + purge ledger) ───────────
+-- Idempotency ledger for the daily trial/plan lifecycle job
+-- (server/lib/billingLifecycle.js). An account is driven off app.accounts
+-- .plan_expires_at (non-NULL = "in trial / expiring", not sales-converted) through:
+--   trial_ending  -> T-warning_days : "your trial ends soon, upgrade"
+--   trial_ended   -> T-0            : "ended; data deleted in 6 months"
+--   purge_warning -> T+6mo-1day     : "data deleted tomorrow unless you subscribe"
+--   purged        -> T+6mo          : delete ALL data, keep the account+owner shell
+--                                     (so the email stays registered -> no re-trial)
+-- One row per (account, stage, expires_at): the job claims a stage with
+-- INSERT ... ON CONFLICT DO NOTHING, so it never emails/purges twice, and a
+-- sales-granted NEW expiry date resets the cycle (different expires_at = new key).
+CREATE TABLE app.account_lifecycle_events (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  account_id  UUID        NOT NULL REFERENCES app.accounts(id) ON DELETE CASCADE,
+  stage       TEXT        NOT NULL,   -- trial_ending | trial_ended | purge_warning | purged
+  expires_at  TIMESTAMPTZ NOT NULL,  -- the plan_expires_at this event was keyed to
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metadata    JSONB       NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX account_lifecycle_events_uniq
+  ON app.account_lifecycle_events(account_id, stage, expires_at);
+CREATE INDEX account_lifecycle_events_account_idx
+  ON app.account_lifecycle_events(account_id, occurred_at DESC);
 
 -- ── Usage events (quota consumption: ai_token, profile_import, ...) ─────────
 CREATE TABLE app.usage_events (

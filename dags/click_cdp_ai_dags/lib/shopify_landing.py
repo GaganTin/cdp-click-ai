@@ -34,9 +34,9 @@ def run_dataset(dict_config, dataset, is_trial=False):
     """Fetch + transform + load one ``dataset`` for the client in ``dict_config``.
 
     ``dict_config`` carries ``client``, ``company_id`` and ``store_name`` (no
-    token). The first run backfills ALL history for every account (trial or
-    contracted); ``is_trial`` is accepted for compatibility but no longer caps
-    the window. Returns the row count loaded.
+    token). The first run backfills the last 2 years of history for every account
+    (trial or contracted); ``is_trial`` is accepted for compatibility but no longer
+    caps the window. Returns the row count loaded.
     """
     client = dict_config["client"]
     company_id = dict_config["company_id"]
@@ -64,7 +64,7 @@ def run_refunds(dict_config, is_trial=False):
 
     A single bulk op over orders' inline refunds feeds two tables (order-level
     summary + line-item detail), so they always share one fetch/window.
-    The first run backfills all history for every account (see ``run_dataset``).
+    The first run backfills the last 2 years of history (see ``run_dataset``).
     """
     client = dict_config["client"]
     company_id = dict_config["company_id"]

@@ -175,6 +175,87 @@ export async function sendLoginCodeEmail(to, code, { purpose = "login" } = {}) {
   });
 }
 
+// ── Trial / plan lifecycle emails ───────────────────────────────────────────
+// Sent by the daily lifecycle job (server/lib/billingLifecycle.js) as an account
+// moves through its trial/plan expiry and (if never converted) end-of-life data
+// purge. All are transactional, so they use the verified auth sender.
+
+// Human date like "September 3, 2026" (UTC-agnostic display).
+function fmtDate(d) {
+  try {
+    return new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  } catch { return String(d); }
+}
+
+const greet = (name) => `<p>Hi${name ? ` ${name}` : ""},</p>`;
+
+// Shared upgrade blurb - there is no in-app payment flow, upgrades are applied by
+// sales, so every CTA routes to support / the app.
+const upgradeBlurb = () =>
+  `<p>To keep your account active, upgrade to a <strong>Lite</strong> ($100/mo) or
+   <strong>Standard</strong> ($199/mo) plan. Reply to this email or contact
+   <a href="mailto:support@clickcdp.com">support@clickcdp.com</a> and we'll get you set up.
+   You can review the plans anytime at <a href="${appUrl()}">${appUrl()}</a>.</p>`;
+
+// T-warning_days: the trial/plan is about to end.
+export async function sendTrialEndingEmail(to, { ownerName, daysLeft, expiresAt } = {}) {
+  const days = Number(daysLeft);
+  const when = days <= 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`;
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: `Your Meritma trial ends ${when}`,
+    html: `${greet(ownerName)}
+           <p>Your Meritma free trial ends <strong>${when}</strong> (${fmtDate(expiresAt)}).</p>
+           ${upgradeBlurb()}
+           <p>When the trial ends your workspace becomes read-only, and if you don't
+              upgrade your data is scheduled for permanent deletion.</p>`,
+  });
+}
+
+// T-0: the trial/plan has ended; data will be deleted after the retention window.
+export async function sendTrialEndedEmail(to, { ownerName, deletionDate } = {}) {
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: "Your Meritma trial has ended",
+    html: `${greet(ownerName)}
+           <p>Your Meritma free trial has ended and your workspace is now read-only.</p>
+           <p>If you don't upgrade, <strong>all of your data will be permanently deleted on
+              ${fmtDate(deletionDate)}</strong> (6 months from today).</p>
+           ${upgradeBlurb()}`,
+  });
+}
+
+// T+6mo-1day: final notice before the purge runs.
+export async function sendDataDeletionWarningEmail(to, { ownerName, deletionDate } = {}) {
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: "Action required: your Meritma data is deleted tomorrow",
+    html: `${greet(ownerName)}
+           <p>This is a final reminder. Your Meritma trial ended more than 6 months ago,
+              and <strong>all of your data will be permanently deleted on
+              ${fmtDate(deletionDate)}</strong>.</p>
+           <p>Subscribe now to keep everything - once deleted, your data cannot be recovered.</p>
+           ${upgradeBlurb()}`,
+  });
+}
+
+// T+6mo: the purge has run.
+export async function sendDataDeletedEmail(to, { ownerName } = {}) {
+  return sendEmail({
+    to,
+    ...authSender(),
+    subject: "Your Meritma data has been deleted",
+    html: `${greet(ownerName)}
+           <p>Because your Meritma trial ended more than 6 months ago without a subscription,
+              all of your workspace data has now been permanently deleted.</p>
+           <p>Your account email remains registered. If you'd like to start again, contact
+              <a href="mailto:support@clickcdp.com">support@clickcdp.com</a> to set up a plan.</p>`,
+  });
+}
+
 function stripHtml(html) {
   return (html || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }

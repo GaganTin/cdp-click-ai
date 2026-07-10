@@ -35,7 +35,7 @@ export function usePlan() {
   // authoritative. Only fall back to (created_date + trial_days) when the server
   // field is entirely ABSENT (legacy /me responses) - never when it is explicitly
   // null, or a paid account on a trial-capable tier (e.g. a paying Lite customer,
-  // whose tier still has trial_days=90) would be mis-read as an expired trial.
+  // whose tier still has trial_days=60) would be mis-read as an expired trial.
   const rawExpiry = companyHasPlan ? currentCompany.plan_expires_at : user?.account_plan_expires_at;
   const planExpiresAt = rawExpiry ? new Date(rawExpiry) : null;
   const createdDate = currentCompany?.created_date ? new Date(currentCompany.created_date) : null;

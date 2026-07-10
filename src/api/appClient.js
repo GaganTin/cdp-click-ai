@@ -5,6 +5,30 @@ let _currentCompanyId = null;
 export function setCurrentCompanyId(id) { _currentCompanyId = id; }
 export function getCurrentCompanyId() { return _currentCompanyId; }
 
+// Global handler for 402 Payment Required - the backend's trial gate returns it
+// for EVERY write once an account's trial/plan has expired (connect, sync, add
+// data, any mutation). Surface a single, debounced "subscribe to continue" toast
+// so a blocked action is never silent, on any page. Dynamic-imported so this
+// module has no load-time dependency on the UI toast lib (keeps it usable in
+// non-browser contexts / tests).
+let _lastTrialToastAt = 0;
+function notifyTrialExpired(payload) {
+  const now = Date.now();
+  if (now - _lastTrialToastAt < 4000) return; // debounce bursts of blocked calls
+  _lastTrialToastAt = now;
+  import("sonner")
+    .then(({ toast }) => {
+      toast.error(payload?.error || "Your free trial has ended.", {
+        description: "Subscribe to a plan to keep making changes.",
+        action: {
+          label: "Subscribe",
+          onClick: () => { window.location.href = "/settings?tab=billing"; },
+        },
+      });
+    })
+    .catch(() => {});
+}
+
 async function request(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
@@ -30,6 +54,7 @@ async function request(path, options = {}) {
     const err = new Error(payload.error || `Request failed: ${res.status}`);
     err.status = res.status;
     err.payload = payload; // structured fields (e.g. conflicts) survive for callers
+    if (res.status === 402) notifyTrialExpired(payload); // trial/plan expired write gate
     throw err;
   }
 
@@ -147,6 +172,14 @@ export const appClient = {
   billing: {
     getUsage:   () => request("/billing/usage"),
     getAiQuota: () => request("/billing/ai-quota"),
+  },
+  addons: {
+    list:     () => request("/addons"),
+    products: () => request("/addons/products"),
+    // Returns { url } - redirect the browser to Stripe Checkout.
+    checkout: (kind, blocks) => request("/addons/checkout", { method: "POST", body: JSON.stringify({ kind, blocks }) }),
+    // Platform-admin manual grant (Studio).
+    grant:    (account_id, kind, blocks) => request("/addons/grant", { method: "POST", body: JSON.stringify({ account_id, kind, blocks }) }),
   },
   // Platform-owner ("Studio") API - platform-scoped, no x-company-id needed.
   admin: {
@@ -547,6 +580,10 @@ export const appClient = {
       return request(`/popups/analytics${q ? `?${q}` : ""}`);
     },
     getDailyTrend: () => request("/popups/analytics/daily"),
+    getOutboundLinks: (id, params = {}) => {
+      const q = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ""))).toString();
+      return request(`/popups/${id}/outbound-links${q ? `?${q}` : ""}`);
+    },
     getEmailCollected: (params = {}) => {
       const q = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ""))).toString();
       return request(`/popups/email-collected${q ? `?${q}` : ""}`);
